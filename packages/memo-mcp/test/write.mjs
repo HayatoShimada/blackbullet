@@ -67,9 +67,57 @@ test("範囲外の行番号は拒否される", async () => {
   assert.match(r.text, /範囲外/);
 });
 
-test("正しい行・最新の modified なら完了にできる", async () => {
+/** スペース配下の .*.tmp（原子的書き込みの一時ファイル）を再帰で集める */
+async function tmpFiles(dir) {
+  const out = [];
+  for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await tmpFiles(full)));
+    else if (/^\..*\.tmp$/.test(e.name)) out.push(full);
+  }
+  return out;
+}
+
+test("正しい行・最新の modified なら完了にできる（原子的に書かれ、一時ファイルは残らない）", async () => {
+  const before = await fs.readFile(`${TMP}/${PAGE}.md`, "utf8");
   const note = JSON.parse((await call("read_note", { space: "notes", page: PAGE })).text);
-  const r = await call("complete_task", { space: "notes", page: PAGE, line: 10, expected_modified: note.modified });
+  const r = await call("complete_task", { space: "notes", page: PAGE, line: 10, expected_modified: note.modified, date: "2026-09-21" });
   assert.equal(r.isError, false, r.text);
-  assert.match(await fs.readFile(`${TMP}/${PAGE}.md`, "utf8"), /\* \[x\] Open task/);
+  const after = await fs.readFile(`${TMP}/${PAGE}.md`, "utf8");
+  assert.equal(
+    after,
+    before.replace("* [ ] Open task #next [due: 2026-09-20]", "* [x] Open task #next [due: 2026-09-20] [completed: 2026-09-21]")
+  );
+  assert.deepEqual(await tmpFiles(TMP), []);
+});
+
+test("writeAtomic: 新規作成・権限維持・失敗時は元のまま一時ファイルも残さない・リンクは指す先を書く", async () => {
+  const { writeAtomic } = await import("../src/space.mjs");
+  const dir = await fs.mkdtemp(path.join(TMP, "atomic-"));
+  const f = path.join(dir, "new.md");
+  await writeAtomic(f, "hello");
+  assert.equal(await fs.readFile(f, "utf8"), "hello");
+
+  await fs.chmod(f, 0o640);
+  await writeAtomic(f, "second");
+  assert.equal((await fs.stat(f)).mode & 0o777, 0o640);
+  assert.equal(await fs.readFile(f, "utf8"), "second");
+
+  // リンク先を書き、リンクは残る
+  const link = path.join(dir, "link.md");
+  await fs.symlink(f, link);
+  await writeAtomic(link, "via link");
+  assert.ok((await fs.lstat(link)).isSymbolicLink());
+  assert.equal(await fs.readFile(f, "utf8"), "via link");
+
+  // rename できない（対象がディレクトリ）なら失敗し、一時ファイルを消す
+  const blocked = path.join(dir, "blocked.md");
+  await fs.mkdir(blocked);
+  await assert.rejects(writeAtomic(blocked, "x"));
+  assert.deepEqual(await tmpFiles(dir), []);
+
+  // 長い日本語名でも書ける
+  const long = path.join(dir, `${"あ".repeat(80)}.md`);
+  await writeAtomic(long, "long");
+  assert.equal(await fs.readFile(long, "utf8"), "long");
 });

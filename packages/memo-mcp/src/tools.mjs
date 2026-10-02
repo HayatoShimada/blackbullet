@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   enabledSpaces,
   listFiles,
+  listDocs,
   readPage,
   appendToPage,
   insertUnderHeading,
@@ -15,6 +16,7 @@ import {
 import { Indexes } from "./index.mjs";
 import { searchSpace, neighbors } from "./search.mjs";
 import { EMBED_ENABLED, MODEL as EMBED_MODEL } from "./embed.mjs";
+import { kindOf, docIndexable } from "./extract.mjs";
 
 const spaces = enabledSpaces();
 const SPACE_NAMES = Object.keys(spaces);
@@ -45,7 +47,9 @@ export function registerTools(server) {
     "list_spaces",
     {
       title: "スペース一覧",
-      description: "公開されているメモスペースと、その規模を返す。最初に呼ぶと全体像がつかめる。",
+      description:
+        "公開されているメモスペースと、その規模を返す。最初に呼ぶと全体像がつかめる。" +
+        "docs は索引対象の PDF / Office 文書（拡張子つきのページ名で検索に出る）のファイル数。index.docs は実際にテキストを取り出せた数。",
       inputSchema: {},
     },
     async () => {
@@ -53,13 +57,22 @@ export function registerTools(server) {
         const out = [];
         for (const name of SPACE_NAMES) {
           const files = await listFiles(spaces, name);
+          const docs = (await listDocs(spaces, name)).filter((d) => docIndexable(d.page, d.kind));
           const folders = {};
           for (const f of files) {
             const top = f.page.includes("/") ? f.page.split("/")[0] : "(root)";
             folders[top] = (folders[top] ?? 0) + 1;
           }
           const idx = await indexes.get(name);
-          out.push({ space: name, description: spaces[name].description, pages: files.length, folders, index: idx.stats(), confidential: Boolean(spaces[name].confidential) });
+          out.push({
+            space: name,
+            description: spaces[name].description,
+            pages: files.length,
+            docs: docs.length,
+            folders,
+            index: idx.stats(),
+            confidential: Boolean(spaces[name].confidential),
+          });
         }
         return json({ spaces: out, embedding: EMBED_ENABLED ? EMBED_MODEL : "off" });
       } catch (e) {
@@ -117,7 +130,8 @@ export function registerTools(server) {
       title: "節を読む",
       description:
         "search_notes が返した page と line_start（または見出しパス）で、その節だけを行番号つきで返す。" +
-        "返る modified は書き込み系ツールの expected_modified にそのまま使える。",
+        "返る modified は書き込み系ツールの expected_modified にそのまま使える。" +
+        "PDF / Office 文書（kind が md 以外）は行番号を持たないので、索引に入れた抽出テキストをそのまま返す。",
       inputSchema: {
         space: spaceEnum,
         page: z.string(),
@@ -129,8 +143,8 @@ export function registerTools(server) {
       try {
         const idx = await indexes.get(space);
         const rows = idx.rows(
-          `select s.heading_path, s.line_start, s.line_end, p.modified, p.path
-           from sections s join pages p on p.page = s.page where s.page = ?`,
+          `select s.heading_path, s.line_start, s.line_end, s.text, p.modified, p.path, p.kind
+           from sections s join pages p on p.page = s.page where s.page = ? order by s.n`,
           [page]
         );
         if (!rows.length) throw new Error(`ページが見つかりません: ${space}/${page}`);
@@ -140,12 +154,18 @@ export function registerTools(server) {
           (heading_path && rows.find((r) => r.heading_path.endsWith(heading_path))) ||
           null;
         if (!sec) {
-          return json({ space, page, found: false, sections: rows.map((r) => ({ heading_path: r.heading_path, line_start: r.line_start, line_end: r.line_end })) });
+          return json({ space, page, kind: rows[0].kind, found: false, sections: rows.map((r) => ({ heading_path: r.heading_path, line_start: r.line_start, line_end: r.line_end })) });
         }
-        const { readFile } = await import("node:fs/promises");
-        const lines = (await readFile(sec.path, "utf-8")).split(/\r?\n/);
-        const body = lines.slice(sec.line_start - 1, sec.line_end).map((l, i) => `${sec.line_start + i}: ${l}`).join("\n");
-        return json({ space, page, heading_path: sec.heading_path, line_start: sec.line_start, line_end: sec.line_end, modified: sec.modified, confidential: Boolean(spaces[space].confidential), text: body });
+        let body;
+        if (sec.kind !== "md") {
+          // PDF / Office は行番号を持たない。索引に入れた抽出済みテキストをそのまま返す。原本はバイナリなので読み直さない。
+          body = sec.text;
+        } else {
+          const { readFile } = await import("node:fs/promises");
+          const lines = (await readFile(sec.path, "utf-8")).split(/\r?\n/);
+          body = lines.slice(sec.line_start - 1, sec.line_end).map((l, i) => `${sec.line_start + i}: ${l}`).join("\n");
+        }
+        return json({ space, page, kind: sec.kind, heading_path: sec.heading_path, line_start: sec.line_start, line_end: sec.line_end, modified: sec.modified, confidential: Boolean(spaces[space].confidential), text: body });
       } catch (e) {
         return fail(e);
       }
@@ -213,10 +233,11 @@ export function registerTools(server) {
     {
       title: "メモを読む",
       description:
-        "1ページの全文を返す。書き込み系ツールに渡す modified（競合検出用）もここで得られる。",
+        "1ページの全文を返す。書き込み系ツールに渡す modified（競合検出用）もここで得られる。" +
+        "拡張子つきの文書ページ（Images/report.pdf など）は、索引に入れた抽出テキストを節ごとに連結して返す。",
       inputSchema: {
         space: spaceEnum,
-        page: z.string().describe('ページ名。例 "Journal/2026-09-17" や "Projects/デモ準備_10月末"'),
+        page: z.string().describe('ページ名。例 "Journal/2026-09-17" や "Projects/デモ準備_10月末"、文書なら "Images/report.pdf"'),
         raw: z
           .boolean()
           .default(false)
@@ -225,6 +246,10 @@ export function registerTools(server) {
     },
     async ({ space, page, raw = false }) => {
       try {
+        // 文書ページは原本がバイナリなので、.md を付けて読みに行かず索引の抽出テキストを返す。
+        // 索引に無ければ foo.txt.md のような通常ページかもしれないので readPage に回す。
+        const doc = kindOf(page) ? (await indexes.get(space)).document(page) : null;
+        if (doc) return json({ ...doc, confidential: Boolean(spaces[space].confidential) });
         return json(await readPage(spaces, space, page, { stripQuery: !raw }));
       } catch (e) {
         return fail(e);

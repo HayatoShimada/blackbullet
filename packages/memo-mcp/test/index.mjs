@@ -3,7 +3,7 @@
 // 索引のパース: 節の行番号がファイル基準で正しいこと、クエリ除去が行数を変えないこと、語の分割
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitSections, parsePage } from "../src/index.mjs";
+import { splitSections, parsePage, parseDocument } from "../src/index.mjs";
 import { stripQueries } from "../src/space.mjs";
 import { splitTerms } from "../src/search.mjs";
 
@@ -70,4 +70,17 @@ test("日本語の助詞で語を切り、3字未満は短語に回す", () => {
   const t = splitTerms("在庫管理のキャンペーン 日報");
   assert.ok(t.long.includes("在庫管理") && t.long.includes("キャンペーン"));
   assert.ok(t.short.includes("日報"));
+});
+
+test("parseDocument は単位ラベルを見出しパスにし、kind を持ち、行番号は 0", () => {
+  const d = parseDocument({
+    space: "notes",
+    page: "Images/deck.pptx",
+    kind: "pptx",
+    units: [{ label: "slide.1", text: "first" }, { label: "slide.2", text: "second" }],
+    mtime: 1,
+  });
+  assert.equal(d.row.kind, "pptx");
+  assert.deepEqual(d.sections.map((x) => x.heading_path), ["deck.pptx slide.1", "deck.pptx slide.2"]);
+  assert.equal(d.sections[0].line_start, 0);
 });

@@ -47,6 +47,12 @@ test("tools list and basic calls work", async () => {
     assert.ok(out.isError);
     const missing = await call("read_note", { space: "notes", page: "NoSuchPage" });
     assert.ok(missing.isError);
+    // CONFIG（トークンや API キーの置き場）はどの表記でも読めない
+    for (const page of ["CONFIG", "CONFIG.md", "config", "./CONFIG"]) {
+      const cfg = await call("read_note", { space: "notes", page });
+      assert.ok(cfg.isError, `read_note ${page} must fail`);
+      assert.ok(!cfg.text.includes("SECRET-TOKEN"), `read_note ${page} must not leak the token`);
+    }
   } finally {
     await client.close();
     await fx.cleanup();

@@ -11,6 +11,10 @@
  * 検索の最小単位は「節」（## 見出しごと）。各節には
  *   [space / page > 見出しパス] tags: … area: … status: …
  * を先頭に前置した context_text を持たせ、FTS もこの文字列に張る（contextual retrieval）。
+ *
+ * PDF / Office 文書（extract.mjs が対応する拡張子）も同じ pages / sections に載せる。
+ * ページ名は拡張子つき（Images/report.pdf）、kind 列で .md と区別し、節は単位ラベル
+ * （p.3 / slide.2）を見出しパスにして行番号は 0 にする。
  */
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
@@ -19,16 +23,23 @@ import path from "node:path";
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import {
   listFiles,
+  listDocs,
   splitFrontmatter,
   tagList,
   normalizeStatus,
   stripQueries,
   parseTaskLine,
 } from "./space.mjs";
+import { extractDoc, docIndexable } from "./extract.mjs";
 
 export const INDEX_DIR = process.env.MEMO_INDEX_DIR ?? path.join(os.homedir(), ".cache", "memo-mcp");
 // CONFIG.md には memoSidecar のトークンを置くため、検索・埋め込みの対象にしない
 const EXCLUDE = /^((Templates|Library|Images)(\/|$)|CONFIG$)/;
+// 文書は Images/ に置かれていてもナレッジなので拾う。除外規則は extract.mjs の docIndexable。
+// 1 回の refresh で抽出に使ってよい時間。超えたら残りは次回の呼び出しに回す（初回に大量の文書があっても止まらない）。
+const EXTRACT_BUDGET_MS = Number(process.env.MEMO_EXTRACT_BUDGET ?? 60_000);
+// 一時的な失敗（時間切れなど）をやり直すまでの待ち時間。
+const EXTRACT_RETRY_MS = 5 * 60_000;
 const MAX_SECTION_CHARS = 2000;
 
 let sqlite3Promise;
@@ -39,7 +50,7 @@ function sqlite() {
 
 const SCHEMA = `
 create table pages (
-  page text primary key, path text, mtime real, modified text, title text,
+  page text primary key, path text, kind text not null default 'md', mtime real, modified text, title text,
   tags text, area text, status text, due text, goal text, summary text,
   chars integer, is_journal integer, date text
 );
@@ -191,6 +202,82 @@ export function parsePage({ space, page, raw, mtime }) {
   };
 }
 
+/**
+ * 抽出済みテキストを節に割る。見出しが無いので段落で詰めるだけ。
+ * 単位ラベル（p.3 / slide.2 など）があれば「<title> p.3」を見出しパスにし、無ければファイル名。
+ * 長い単位は .md と同じく MAX_SECTION_CHARS で割り、(2) 以降を付ける。
+ */
+export function chunkUnits(units, { title }) {
+  const out = [];
+  for (const u of units) {
+    const base = u.label ? `${title} ${u.label}` : title;
+    const paras = u.text.split(/\n{2,}/);
+    let buf = [];
+    let chars = 0;
+    let part = 1;
+    const emit = () => {
+      if (!buf.length) return;
+      const text = buf.join("\n\n").trim();
+      buf = [];
+      chars = 0;
+      if (!text) return;
+      out.push({ heading_path: part === 1 ? base : `${base} (${part})`, text });
+      part++;
+    };
+    for (const para of paras) {
+      if (chars + para.length > MAX_SECTION_CHARS && buf.length) emit();
+      buf.push(para);
+      chars += para.length;
+    }
+    emit();
+  }
+  return out;
+}
+
+/**
+ * PDF / Office 文書を .md ページと同じ形に整える。
+ * 検索・埋め込み側は kind を意識せず、これまで通り sections だけを見ればよい。
+ * 行番号は文書には無いので 0 を入れる（tools 側はそれを見て原本の読み直しを省く）。
+ */
+export function parseDocument({ space, page, kind, units, mtime }) {
+  const title = page.split("/").pop();
+  const ctxHead = `[${space} / ${page} kind: ${kind}`;
+  const sections = chunkUnits(units, { title }).map((s, n) => {
+    const context_text = `${ctxHead} > ${s.heading_path}]\n${s.text}`;
+    return {
+      ...s,
+      id: `${page}#${n}`,
+      n,
+      level: 0,
+      line_start: 0,
+      line_end: 0,
+      context_text,
+      hash: sha1(context_text),
+    };
+  });
+  return {
+    row: {
+      page,
+      kind,
+      mtime,
+      modified: new Date(mtime).toISOString(),
+      title,
+      tags: "",
+      area: null,
+      status: null,
+      due: null,
+      goal: null,
+      summary: null,
+      chars: units.reduce((a, u) => a + u.text.length, 0),
+      is_journal: 0,
+      date: null,
+    },
+    sections,
+    links: [],
+    tasks: [],
+  };
+}
+
 export class SpaceIndex {
   constructor(spaces, space) {
     this.spaces = spaces;
@@ -233,6 +320,41 @@ export class SpaceIndex {
       this.known.set(page, mtime);
       changed++;
     }
+    // ---- PDF / Office 文書 ----
+    // 抽出は .md の読み込みより高いので、mtime が変わったものだけ通す（.md と同じ方針）。
+    const started = Date.now();
+    this.retryAfter ??= new Map();
+    for (const { full, page, kind } of await listDocs(this.spaces, this.space)) {
+      if (!docIndexable(page, kind)) continue;
+      if (seen.has(page)) continue; // 同名の .md ページ（foo.txt.md など）が先客。主キーが衝突するので文書は諦める
+      seen.add(page);
+      let st;
+      try {
+        st = await fs.stat(full);
+      } catch {
+        continue;
+      }
+      const mtime = st.mtimeMs;
+      if (this.known.get(page) === mtime) continue;
+      if (Date.now() - started > EXTRACT_BUDGET_MS) continue; // 時間切れ。未処理は次回
+      if ((this.retryAfter.get(page) ?? 0) > Date.now()) continue;
+      const units = await extractDoc(full, kind);
+      if (units === null) {
+        // 時間切れ・コマンド無しなど一時的な失敗。mtime は覚えず、しばらくしてからやり直す。
+        this.retryAfter.set(page, Date.now() + EXTRACT_RETRY_MS);
+        continue;
+      }
+      this.retryAfter.delete(page);
+      if (!units.length) {
+        // 画像だけの PDF や抽出失敗。毎回やり直さないよう mtime は覚え、古い索引があれば消す。
+        this.remove(page);
+        this.known.set(page, mtime);
+        continue;
+      }
+      this.upsert(parseDocument({ space: this.space, page, kind, units, mtime }), full);
+      this.known.set(page, mtime);
+      changed++;
+    }
     let removed = 0;
     for (const page of [...this.known.keys()]) {
       if (!seen.has(page)) {
@@ -259,9 +381,9 @@ export class SpaceIndex {
       this.remove(parsed.row.page);
       const r = parsed.row;
       db.exec({
-        sql: `insert into pages (page, path, mtime, modified, title, tags, area, status, due, goal, summary, chars, is_journal, date)
-              values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        bind: [r.page, fullPath, r.mtime, r.modified, r.title, r.tags, r.area, r.status, r.due, r.goal, r.summary, r.chars, r.is_journal, r.date],
+        sql: `insert into pages (page, path, kind, mtime, modified, title, tags, area, status, due, goal, summary, chars, is_journal, date)
+              values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        bind: [r.page, fullPath, r.kind ?? "md", r.mtime, r.modified, r.title, r.tags, r.area, r.status, r.due, r.goal, r.summary, r.chars, r.is_journal, r.date],
       });
       for (const s of parsed.sections) {
         db.exec({
@@ -287,10 +409,30 @@ export class SpaceIndex {
     return this.db.exec({ sql, bind, rowMode: "object", returnValue: "resultRows" });
   }
 
+  /**
+   * 文書ページ（kind が md 以外）を、索引に入れた抽出済みテキストごと返す。
+   * 原本はバイナリなので読み直さない。.md のページや未知のページなら null。
+   */
+  document(page) {
+    const row = this.rows("select page, kind, modified, chars, path from pages where page = ? and kind <> 'md'", [page])[0];
+    if (!row) return null;
+    const sections = this.rows("select heading_path, text from sections where page = ? order by n", [page]);
+    return {
+      space: this.space,
+      page: row.page,
+      kind: row.kind,
+      modified: row.modified,
+      chars: row.chars,
+      sections,
+      body: sections.map((s) => `## ${s.heading_path}\n\n${s.text}`).join("\n\n"),
+    };
+  }
+
   stats() {
     const one = (sql) => this.rows(sql)[0].n;
     return {
-      pages: one("select count(*) n from pages"),
+      pages: one("select count(*) n from pages where kind = 'md'"),
+      docs: one("select count(*) n from pages where kind <> 'md'"),
       sections: one("select count(*) n from sections"),
       links: one("select count(*) n from links"),
       tasks: one("select count(*) n from tasks"),

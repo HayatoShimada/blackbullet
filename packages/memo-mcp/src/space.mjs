@@ -5,8 +5,10 @@
  *
  * MCP のトランスポートには依存しない。stdio 版と HTTP 版が同じロジックを共有する。
  */
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { kindOf } from "./extract.mjs";
 
 /**
  * Spaces are configured via MEMO_SPACES: comma-separated `name=/abs/path` entries,
@@ -64,12 +66,15 @@ export function resolvePage(spaces, space, page) {
   if (full !== rootResolved && !full.startsWith(rootResolved + path.sep)) {
     throw new Error(`スペースの外は参照できません: ${page}`);
   }
+  // CONFIG には API キーやサイドカーのトークンが入る。索引だけでなく、読み書きのどのツールからも触らせない
+  if (path.relative(rootResolved, full).toLowerCase() === "config.md") {
+    throw new Error("CONFIG は参照できません（トークンや API キーを含むため）");
+  }
   return full;
 }
 
-/** スペース内の .md を再帰列挙（.git などは除外）。 */
-export async function listFiles(spaces, space) {
-  const root = spaceRoot(spaces, space);
+/** スペース内をたどり、述語に合う実ファイルを集める（.git などのドット始まりは除外）。 */
+async function walkSpace(root, accept) {
   const out = [];
   async function walk(dir) {
     let entries;
@@ -79,17 +84,39 @@ export async function listFiles(spaces, space) {
       return;
     }
     for (const e of entries) {
-      if (e.name.startsWith(".")) continue; // .git, .silverbullet.auth.json など
+      if (e.name.startsWith(".")) continue; // .git, .silverbullet.auth.json, 書き込み中の .*.tmp など
       const full = path.join(dir, e.name);
       if (e.isDirectory()) await walk(full);
-      else if (e.isFile() && e.name.endsWith(".md")) out.push(full);
+      else if (e.isFile() && accept(e.name)) out.push(full);
     }
   }
   await walk(root);
   out.sort();
-  return out.map((full) => ({
+  return out;
+}
+
+/** スペース内の .md を再帰列挙（.git などは除外）。 */
+export async function listFiles(spaces, space) {
+  const root = spaceRoot(spaces, space);
+  const files = await walkSpace(root, (name) => name.endsWith(".md"));
+  return files.map((full) => ({
     full,
     page: path.relative(root, full).replace(/\.md$/, ""),
+  }));
+}
+
+/**
+ * スペース内の PDF / Office 文書を再帰列挙する。
+ * page には拡張子を残す。.md のページ名と衝突させないためと、
+ * 検索結果からそのまま SilverBullet の添付リンク（![[...]]）を組み立てられるため。
+ */
+export async function listDocs(spaces, space) {
+  const root = spaceRoot(spaces, space);
+  const files = await walkSpace(root, (name) => kindOf(name) !== null);
+  return files.map((full) => ({
+    full,
+    page: path.relative(root, full),
+    kind: kindOf(full),
   }));
 }
 
@@ -252,6 +279,45 @@ export async function assertUnchanged(full, expectedModified) {
   }
 }
 
+/**
+ * ファイルを原子的に書き換える。
+ * 同じディレクトリに一時ファイルを書いてから rename するので、途中で落ちても
+ * 元のファイルが半端な状態にはならず、SilverBullet のウォッチャにも完成した内容だけが見える。
+ * 一時ファイルはドット始まりにして listFiles / listDocs の列挙から外す。
+ */
+export async function writeAtomic(full, data) {
+  // シンボリックリンクは writeFile と同じく指す先を書く（rename でリンクを置き換えない）
+  try {
+    full = await fs.realpath(full);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  const dir = path.dirname(full);
+  // 長い日本語のページ名でも ENAMETOOLONG にならないよう、元の名前は含めない
+  const tmp = path.join(dir, `.mcp-${process.pid}-${crypto.randomBytes(4).toString("hex")}.tmp`);
+  let mode;
+  try {
+    mode = (await fs.stat(full)).mode & 0o7777;
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  try {
+    const fh = await fs.open(tmp, "wx");
+    try {
+      await fh.writeFile(data, "utf-8");
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
+    // 既存ファイルの権限を引き継ぐ（open の mode は umask で削られるので chmod で合わせる）
+    if (mode !== undefined) await fs.chmod(tmp, mode);
+    await fs.rename(tmp, full);
+  } catch (e) {
+    await fs.unlink(tmp).catch(() => {});
+    throw e;
+  }
+}
+
 /** ページ末尾に追記する。存在しなければ initial で作る。 */
 export async function appendToPage(spaces, space, page, text, { expectedModified, initial } = {}) {
   const full = resolvePage(spaces, space, page);
@@ -267,7 +333,7 @@ export async function appendToPage(spaces, space, page, text, { expectedModified
   }
   const sep = current.endsWith("\n") ? "" : "\n";
   const next = `${current}${sep}${text}\n`;
-  await fs.writeFile(full, next, "utf-8");
+  await writeAtomic(full, next);
   const stat = await fs.stat(full);
   return { space, page, bytes: stat.size, modified: stat.mtime.toISOString() };
 }
@@ -287,7 +353,7 @@ export async function insertUnderHeading(spaces, space, page, heading, line, { e
   while (insertAt < lines.length && !/^#{1,6}\s/.test(lines[insertAt])) insertAt++;
   while (insertAt > idx + 1 && lines[insertAt - 1].trim() === "") insertAt--;
   lines.splice(insertAt, 0, line);
-  await fs.writeFile(full, lines.join("\n"), "utf-8");
+  await writeAtomic(full, lines.join("\n"));
   const stat = await fs.stat(full);
   return { space, page, inserted_at_line: insertAt + 1, modified: stat.mtime.toISOString() };
 }
@@ -306,7 +372,7 @@ export async function completeTask(spaces, space, page, lineNumber, completedDat
   let next = lines[i].replace(/^(\s*)\*\s\[\s\]/, "$1* [x]");
   if (!/\[completed:/.test(next)) next = `${next.trimEnd()} [completed: ${completedDate}]`;
   lines[i] = next;
-  await fs.writeFile(full, lines.join("\n"), "utf-8");
+  await writeAtomic(full, lines.join("\n"));
   const stat = await fs.stat(full);
   return { space, page, line: lineNumber, text: next.trim(), modified: stat.mtime.toISOString() };
 }
