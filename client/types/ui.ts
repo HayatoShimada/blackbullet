@@ -12,6 +12,15 @@ import type {
 import type { SyncStatus } from "../spaces/sync.ts";
 import type { Command } from "./command.ts";
 
+export type ConfirmOptions = {
+  /** Style the confirm button as a danger action; Cancel then has focus. */
+  destructive?: boolean;
+  /** The confirm button's verb, e.g. "Move to trash" (default "Ok"). */
+  okLabel?: string;
+  /** Focus Cancel instead of the confirm button (default: when destructive). */
+  focusCancel?: boolean;
+};
+
 export type PanelSlot = "lhs" | "rhs" | "bhs" | "modal";
 
 export type PanelConfig = {
@@ -65,6 +74,8 @@ export type AppViewState = {
   showConfirm: boolean;
   confirmMessage?: string;
   confirmDestructive?: boolean;
+  confirmOkLabel?: string;
+  confirmFocusCancel?: boolean;
   confirmCallback?: (value: boolean) => void;
 };
 
@@ -144,6 +155,8 @@ export type Action =
       type: "show-confirm";
       message: string;
       destructive?: boolean;
+      okLabel?: string;
+      focusCancel?: boolean;
       callback: (value: boolean) => void;
     }
   | { type: "hide-confirm" }

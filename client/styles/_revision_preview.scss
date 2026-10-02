@@ -45,7 +45,7 @@
   margin: 0 0 12px 0;
   background: var(--ui-surface-section-background-color);
   border: 1px solid var(--ui-surface-border-color);
-  border-radius: 0.5em;
+  border-radius: var(--sb-radius-2);
   padding: 12px;
   font-family: var(--editor-font), monospace;
   white-space: pre-wrap;
@@ -54,13 +54,13 @@
 }
 
 .sb-revision-diff-add {
-  color: var(--editor-code-inserted-color, #16a34a);
-  background-color: var(--editor-code-inserted-bg, rgba(187, 247, 208, 0.25));
+  color: var(--editor-code-inserted-color);
+  background-color: var(--editor-code-inserted-bg);
 }
 
 .sb-revision-diff-del {
-  color: var(--editor-code-deleted-color, #dc2626);
-  background-color: var(--editor-code-deleted-bg, rgba(254, 202, 202, 0.25));
+  color: var(--editor-code-deleted-color);
+  background-color: var(--editor-code-deleted-bg);
 }
 
 .sb-revision-diff-hunk {

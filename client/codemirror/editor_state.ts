@@ -59,6 +59,7 @@ import type { TextChange } from "./change.ts";
 import { cleanModePlugins } from "./clean.ts";
 import { conflictMarkers } from "./conflict_markers.ts";
 import { documentExtension, pasteLinkExtension } from "./editor_paste.ts";
+import { escapeThenTab } from "./escape_then_tab.ts";
 import { externalPresence } from "./external_presence.ts";
 import {
   frontmatterFoldingExtension,
@@ -72,6 +73,7 @@ import { lineWrapper } from "./line_wrapper.ts";
 import { blockEditor } from "./block_editor/block_editor.ts";
 import { plugLinter } from "./lint.ts";
 import { customEnterCommand } from "./markdown_enter.ts";
+import { quickNoteEscape } from "./quick_note_escape.ts";
 import { createSmartQuoteKeyBindings } from "./smart_quotes.ts";
 import { postScriptPrefacePlugin } from "./top_bottom_panels.ts";
 import { readOnlyCursorActive } from "./util.ts";
@@ -179,6 +181,19 @@ export function buildSharedEditorExtensions(
     // own handlers to trigger commands. This will mean some vim-mode
     // bindings wont trigger if they have the same keys.
     commandKeyBindings,
+    // Esc then Tab leaves the editor (keyboard users reach the chrome); Esc
+    // in a quick note returns to the page it was opened from.
+    vimMode
+      ? []
+      : [
+          mode.kind === "page"
+            ? quickNoteEscape({
+                name: () => client.currentName(),
+                back: () => client.goBackFromCurrentPage(),
+              })
+            : [],
+          escapeThenTab(),
+        ],
 
     client.vimCompartment.of([]),
     readOnlyExtensions,
@@ -555,7 +570,31 @@ export function createCommandKeyBindings(
     }
   }
 
-  return keymap.of([...commandKeyBindings]);
+  return commandKeymap(commandKeyBindings);
+}
+
+/**
+ * Whether a binding's first stroke carries Ctrl, Cmd, Mod, Alt or Meta, i.e.
+ * it is a shortcut rather than a plain editing key (Enter, Tab, Backspace,
+ * arrows, Shift-<key>).
+ */
+export function isShortcutBinding(binding: KeyBinding): boolean {
+  const first = (binding.key ?? binding.mac ?? "").split(" ")[0];
+  return /(^|-)(Ctrl|Cmd|Mod|Alt|Meta)-/.test(first);
+}
+
+/**
+ * The command key bindings as an extension. Shortcuts get `Prec.high` so that
+ * no other keymap (CodeMirror's search keymap, a language keymap) can swallow
+ * e.g. Ctrl-Shift-f before the command runs. Plain editing keys keep the
+ * default precedence: the markdown Enter/Backspace handlers must stay ahead of
+ * "Editor: Insert Newline" and friends.
+ */
+export function commandKeymap(bindings: readonly KeyBinding[]): Extension {
+  return [
+    Prec.high(keymap.of(bindings.filter(isShortcutBinding))),
+    keymap.of(bindings.filter((b) => !isShortcutBinding(b))),
+  ];
 }
 
 export function createRegularKeyBindings(

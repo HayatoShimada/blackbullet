@@ -5,6 +5,13 @@ import { createPortal } from "preact/compat";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Sidebar } from "preact-feather";
 import { resolveIconNode } from "../lib/icon.ts";
+import { installEscapeThenTab } from "../navigator/ui/chrome_focus.ts";
+import {
+  breadcrumbText,
+  pageTitle,
+  splitPageName,
+  titleCommit,
+} from "../navigator/page_title.ts";
 
 export type ActionButton = {
   icon: FunctionalComponent<any>;
@@ -44,6 +51,18 @@ function DockButton({
     </button>
   );
 }
+
+// Dim and small so the name stays the title; truncates before the name does.
+const BREADCRUMB_STYLE = {
+  opacity: 0.6,
+  fontSize: "0.65em",
+  fontWeight: 400,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  maxWidth: "9em",
+  marginRight: "0.5em",
+} as const;
 
 function pageNameClass(
   isLoading: boolean,
@@ -232,14 +251,20 @@ function ActionButtons({
   );
 }
 
+export { breadcrumbText, splitPageName };
+
 function PageNameEditor({
   pageName,
   readOnly,
   onRename,
+  editing,
+  onEditingChange,
 }: {
   pageName?: string;
   readOnly: boolean;
   onRename: (newName?: string) => Promise<void>;
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
 }) {
   const [name, setName] = useState(pageName ?? "");
   // Guards against the blur that fires when a successful rename refocuses the
@@ -247,18 +272,19 @@ function PageNameEditor({
   const committing = useRef(false);
   useEffect(() => setName(pageName ?? ""), [pageName]);
 
-  const commit = (newName: string) => {
+  const commit = (newName: string, fromBlur = false) => {
     if (committing.current) {
       return;
     }
-    if (newName !== pageName) {
+    const action = titleCommit(newName, pageName, fromBlur);
+    if (action === "rename") {
       committing.current = true;
       Promise.resolve(onRename(newName))
         .catch(() => setName(pageName ?? ""))
         .finally(() => {
           committing.current = false;
         });
-    } else {
+    } else if (action === "confirm") {
       void onRename();
     }
   };
@@ -266,11 +292,19 @@ function PageNameEditor({
   return (
     <Input
       class="sb-page-name-editor"
-      value={name}
+      aria-label="Page name"
+      // At rest the field shows the title (the last segment; "Home" for the
+      // index page; "Quick note · 11:17" for an Inbox note); focused it edits
+      // the path.
+      value={editing ? name : pageTitle(name).title}
       readOnly={readOnly}
+      onFocus={() => onEditingChange(true)}
       onInput={(e) => setName(e.currentTarget.value)}
       onConfirm={(value) => commit(value)}
-      onBlur={(e) => commit(e.currentTarget.value)}
+      onBlur={(e) => {
+        onEditingChange(false);
+        commit(e.currentTarget.value, true);
+      }}
     />
   );
 }
@@ -319,6 +353,10 @@ export function TopBar({
   rightDock?: MobileDockButton;
 }) {
   const pageIconNode = resolveIconNode(pageIcon);
+  const [editingName, setEditingName] = useState(false);
+  // Esc then Tab leaves the editor for the first control of this bar.
+  useEffect(() => installEscapeThenTab(document), []);
+  const crumbs = editingName ? "" : pageTitle(pageName).crumb;
   return (
     <div id="sb-top" className={isOnline ? undefined : "sb-sync-error"}>
       <DockButton side="left" dock={leftDock} />
@@ -331,6 +369,15 @@ export function TopBar({
                 <Icon node={pageIconNode} class="sb-page-decoration-icon" />
               )}
               {pageNamePrefix}
+              {crumbs && (
+                <span
+                  className="sb-page-breadcrumb"
+                  title={pageName}
+                  style={BREADCRUMB_STYLE}
+                >
+                  {crumbs}
+                </span>
+              )}
             </div>
             <span
               id="sb-current-page"
@@ -340,6 +387,8 @@ export function TopBar({
                 pageName={pageName}
                 readOnly={readOnly}
                 onRename={onRename}
+                editing={editingName}
+                onEditingChange={setEditingName}
               />
             </span>
             <NotificationPanel

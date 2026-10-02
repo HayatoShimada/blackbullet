@@ -68,18 +68,42 @@ export function Prompt({
   return returnEl;
 }
 
+// Split a confirmation message into its question and the consequence that
+// follows ("Move X to the trash? You can restore it from Trash."), so the
+// question can be stressed and the consequence stay quieter.
+export function splitQuestion(message: string): {
+  question: string;
+  rest: string;
+} {
+  // ASCII "?" must be followed by whitespace (not a URL query); CJK marks
+  // need no space.
+  const m = message.match(/^([\s\S]*?(?:\?(?=\s)|[？。]))\s*([\s\S]+)$/);
+  if (!m?.[2].trim()) {
+    return { question: message, rest: "" };
+  }
+  return { question: m[1], rest: m[2] };
+}
+
 export function Confirm({
   message,
   destructive,
+  okLabel,
+  focusCancel,
   callback,
 }: {
   message: string;
   destructive?: boolean;
+  okLabel?: string;
+  focusCancel?: boolean;
   callback: (value: boolean) => void;
 }) {
+  const { question, rest } = splitQuestion(message);
   const okButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  // A destructive question starts on Cancel unless the caller says otherwise.
+  const cancelFirst = focusCancel ?? !!destructive;
   setTimeout(() => {
-    okButtonRef.current?.focus();
+    (cancelFirst ? cancelButtonRef : okButtonRef).current?.focus();
   });
   const returnEl = (
     <AlwaysShownModal
@@ -88,9 +112,14 @@ export function Confirm({
       }}
     >
       <div className="sb-prompt">
-        <label>{message}</label>
+        <label>
+          <span className="sb-prompt-question">{question}</span>
+          {rest ? ` ${rest}` : ""}
+        </label>
         <div className="sb-prompt-buttons">
           <Button
+            buttonRef={cancelButtonRef}
+            autofocus={cancelFirst}
             shortcut="esc"
             onClick={(e) => {
               e.stopPropagation();
@@ -102,16 +131,16 @@ export function Confirm({
           </Button>
           <Button
             buttonRef={okButtonRef}
-            autofocus
+            autofocus={!cancelFirst}
             variant={destructive ? "danger" : "primary"}
-            shortcut="⏎"
+            shortcut={cancelFirst ? undefined : "⏎"}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
               callback(true);
             }}
           >
-            Ok
+            {okLabel || "Ok"}
           </Button>
         </div>
       </div>

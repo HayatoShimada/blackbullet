@@ -1,6 +1,6 @@
 import { redoDepth, undo, undoDepth } from "@codemirror/commands";
 import { language, syntaxTree } from "@codemirror/language";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -38,6 +38,7 @@ const {
   buildPageExtensions,
   buildTextDocumentExtensions,
   createCommandKeyBindings,
+  isShortcutBinding,
   buildEditorUpdateListener,
   createEditorUpdateHandler,
   externalUpdate,
@@ -519,4 +520,92 @@ test("text composition defers saving and ignores external updates", () => {
     view: { composing: false },
   } as unknown as ViewUpdate);
   expect(client.save).toHaveBeenCalledOnce();
+});
+
+function chordEvent(key: string, mods: Partial<KeyboardEvent>): KeyboardEvent {
+  return {
+    key,
+    keyCode: key.toUpperCase().charCodeAt(0),
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    shiftKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+    ...mods,
+  } as KeyboardEvent;
+}
+
+test("shortcut bindings are those with Ctrl, Cmd, Mod, Alt or Meta", () => {
+  for (const key of ["Ctrl-Shift-f", "Mod-. h", "Alt-ArrowLeft", "Ctrl-q q"]) {
+    expect(isShortcutBinding({ key })).toBe(true);
+  }
+  expect(isShortcutBinding({ mac: "Cmd-k" })).toBe(true);
+  for (const key of ["Enter", "Tab", "Shift-Tab", "Backspace", "Shift-End"]) {
+    expect(isShortcutBinding({ key })).toBe(false);
+  }
+});
+
+test("a command shortcut wins over another keymap that binds the same key", async () => {
+  const client = clientStub();
+  const ran = vi.fn();
+  const competitor = vi.fn(() => true);
+  client.clientSystem.commandHook.buildAllCommands = () =>
+    new Map([
+      [
+        "search",
+        {
+          name: "search",
+          key: "Ctrl-Shift-f",
+          run: async () => ran(),
+        } as Command,
+      ],
+    ]);
+  // The competing keymap comes first, as CodeMirror's search keymap would.
+  const state = EditorState.create({
+    extensions: [
+      keymap.of([{ key: "Ctrl-Shift-f", run: competitor }]),
+      createCommandKeyBindings(client),
+    ],
+  });
+  const view = { state } as unknown as EditorView;
+  expect(
+    runScopeHandlers(
+      view,
+      chordEvent("F", { ctrlKey: true, shiftKey: true, keyCode: 70 }),
+      "editor",
+    ),
+  ).toBe(true);
+  await Promise.resolve();
+  expect(ran).toHaveBeenCalledOnce();
+  expect(competitor).not.toHaveBeenCalled();
+});
+
+test("plain editing keys stay behind a high-precedence keymap such as markdown Enter", () => {
+  const client = clientStub();
+  const newline = vi.fn();
+  const markdownEnter = vi.fn(() => true);
+  client.clientSystem.commandHook.buildAllCommands = () =>
+    new Map([
+      [
+        "newline",
+        {
+          name: "newline",
+          key: "Enter",
+          run: async () => newline(),
+        } as Command,
+      ],
+    ]);
+  const state = EditorState.create({
+    extensions: [
+      createCommandKeyBindings(client),
+      Prec.high(keymap.of([{ key: "Enter", run: markdownEnter }])),
+    ],
+  });
+  const view = { state } as unknown as EditorView;
+  expect(
+    runScopeHandlers(view, chordEvent("Enter", { keyCode: 13 }), "editor"),
+  ).toBe(true);
+  expect(markdownEnter).toHaveBeenCalledOnce();
+  expect(newline).not.toHaveBeenCalled();
 });

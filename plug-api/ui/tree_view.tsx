@@ -99,6 +99,10 @@ export type TreeViewProps = {
   actionIcons?: (Element | undefined)[];
   documentActions?: boolean;
   actionsDisabled?: boolean;
+  /** A row's tooltip (its full name, say); absent, none. */
+  rowTitle?: (node: TreeNode) => string | undefined;
+  /** Names the row in its actions' labels ("Actions for <row>"). */
+  namedActions?: boolean;
   rowState?: RowStates;
   /** Whether the tree defines row icons at all, i.e. reserves the slot. */
   hasIcon: boolean;
@@ -131,6 +135,8 @@ export function TreeView({
   actionIcons,
   documentActions,
   actionsDisabled,
+  rowTitle,
+  namedActions,
   rowState,
   hasIcon,
   readOnly,
@@ -429,6 +435,8 @@ export function TreeView({
           actionIcons,
           documentActions,
           actionsDisabled,
+          rowTitle,
+          namedActions,
           rowState,
           hasIcon,
           readOnly,
@@ -469,6 +477,10 @@ type SharedRowProps = {
   actionIcons?: (Element | undefined)[];
   documentActions?: boolean;
   actionsDisabled?: boolean;
+  /** A row's tooltip (its full name, say); absent, none. */
+  rowTitle?: (node: TreeNode) => string | undefined;
+  /** Names the row in its actions' labels ("Actions for <row>"). */
+  namedActions?: boolean;
   rowState?: RowStates;
   hasIcon: boolean;
   readOnly: boolean;
@@ -750,6 +762,8 @@ function TreeItemRow(props: TreeItemProps) {
     actionIcons,
     documentActions,
     actionsDisabled,
+    rowTitle,
+    namedActions,
     rowState,
     hasIcon,
     readOnly,
@@ -791,6 +805,7 @@ function TreeItemRow(props: TreeItemProps) {
           paddingLeft: `calc(var(--sb-tree-row-inset, 0px) + ${draggable ? "var(--sb-tree-grip-width, 1.1rem) + " : ""}${depth} * var(--sb-tree-indent, 1.2rem))`,
         }}
         data-path={node.path}
+        title={rowTitle?.(node)}
         aria-current={currentPath === node.path ? "page" : undefined}
         draggable={draggable || fileDragFor(node) !== null}
         tabIndex={focusableRows ? 0 : undefined}
@@ -862,6 +877,9 @@ function TreeItemRow(props: TreeItemProps) {
             readOnly={readOnly}
             documentMode={documentActions}
             disabled={actionsDisabled}
+            subject={
+              namedActions ? (node.row?.label ?? node.segment) : undefined
+            }
             onRun={(actionIndex) => handlers.action(node, actionIndex)}
           />
         )}

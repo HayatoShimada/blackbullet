@@ -99,7 +99,7 @@ body.sb-standalone {
   }
 
   .sb-dashboard-ok {
-    color: #1a7f37;
+    color: var(--sb-ok);
 
     // Live regions are rendered before they have anything to announce; an
     // empty one must not claim a flex gap next to the buttons it follows.
@@ -109,7 +109,7 @@ body.sb-standalone {
   }
 
   .sb-dashboard-warn {
-    color: #9a6700;
+    color: var(--sb-warn);
   }
 }
 
@@ -262,7 +262,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #8884;
+  border-bottom: 1px solid var(--sb-line);
   margin-bottom: 1rem;
 }
 
@@ -312,7 +312,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
   align-items: center;
   column-gap: 1rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid #8884;
+  border-bottom: 1px solid var(--sb-line);
 }
 
 /* Space name: opens the space itself for every account, admin or not. */
@@ -332,7 +332,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
 .sb-standalone .sb-danger-zone {
   margin-top: 2rem;
   padding-top: 1.25rem;
-  border-top: 1px solid #8884;
+  border-top: 1px solid var(--sb-line);
 }
 
 /* Server-side folder picker (client/dashboard/FolderPicker.tsx). */
@@ -374,10 +374,10 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
 
 .sb-standalone .sb-folder-browser {
   margin-top: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--sb-line);
   border-radius: 4px;
   padding: 0.5rem 0.75rem;
-  background: #fafafa;
+  background: var(--sb-bg-panel);
 }
 
 .sb-standalone .sb-folder-crumbs {
@@ -389,7 +389,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
 }
 
 .sb-standalone .sb-folder-crumb-sep {
-  color: #999;
+  color: var(--sb-ink-3);
 }
 
 // Directory names have no length limit, and a crumb or listing entry is one
@@ -428,13 +428,13 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
   text-align: left;
   font-weight: 600;
   font-size: 0.85em;
-  color: #555;
+  color: var(--sb-ink-2);
   padding: 0.35rem 0.5rem;
 }
 
 .sb-standalone .sb-user-table td {
   padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid #8884;
+  border-bottom: 1px solid var(--sb-line);
   vertical-align: middle;
 }
 
@@ -459,7 +459,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
 
 .sb-standalone .sb-token-list {
   padding: 0.5rem;
-  background: #f7f7f7;
+  background: var(--sb-bg-panel);
   border-radius: 0.4em;
   list-style: none;
   margin: 0 0 0.5rem;
@@ -484,7 +484,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
 }
 
 .sb-standalone fieldset {
-  border: 1px solid #ddd;
+  border: 1px solid var(--sb-line);
   border-radius: 0.4em;
   padding: 0.5rem 0.75rem;
   margin-top: 0.5rem;
@@ -502,7 +502,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
   }
 
   .sb-access-public {
-    border-bottom: 1px solid var(--subtle-color, #ccc);
+    border-bottom: 1px solid var(--sb-line);
     padding-bottom: 8px;
     margin-bottom: 4px;
   }
@@ -668,7 +668,7 @@ body.sb-standalone.sb-page:has(.sb-auth-header) {
   .sb-standalone .sb-url-affix:first-child {
     flex: 1 0 100%;
     border-right: 0;
-    border-bottom: 1px solid #0002;
+    border-bottom: 1px solid var(--sb-line);
   }
 }
 

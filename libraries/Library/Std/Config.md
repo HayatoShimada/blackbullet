@@ -529,33 +529,55 @@ Default values that cannot be expressed as schema defaults (e.g. because they co
 ```space-lua
 -- priority: 99
 config.set("actionButtons", {
+  -- Fork: Home · Open · Search · Commands · Help. On the phone only Search and
+  -- New stay on the bar (dropdown = false); the rest sit behind the "..." button.
   {
     icon = "home",
     description = "Go to the index page",
     command = "Navigate: Home",
-    priority = 3,
-    dropdown = false,
+    priority = 5,
   },
   {
     icon = "book",
     description = "Open page",
     command = "Navigate: Page Picker",
-    priority = 2,
+    priority = 4,
+  },
+  {
+    icon = "search",
+    description = "Search notes",
+    priority = 3,
+    dropdown = false,
+    run = function()
+      -- The command is called "Search: Notes"; older libraries call it "Memo: Search".
+      local commands = system.listCommands()
+      if commands["Search: Notes"] then
+        editor.invokeCommand("Search: Notes")
+      else
+        editor.invokeCommand("Memo: Search")
+      end
+    end,
+  },
+  {
+    icon = "plus",
+    description = "New",
+    command = "New",
+    mobile = true,
+    priority = 2.5,
     dropdown = false,
   },
   {
     icon = "terminal",
     description = "Run command",
     command = "Open Command Palette",
-    priority = 1,
+    priority = 2,
   },
   {
     -- Fork: the guide to what this fork added (see Library/Std/Docs/Fork Guide).
     icon = "help-circle",
     description = "Help: how to use this fork",
     command = "Help: Fork Guide",
-    priority = 0.5,
-    dropdown = false,
+    priority = 1,
   },
   {
     icon = "chevron-left",

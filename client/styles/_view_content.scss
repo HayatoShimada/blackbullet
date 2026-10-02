@@ -8,8 +8,8 @@
 
 .sb-nav-root .sb-nav-content {
   font-family: var(--ui-font);
-  font-size: 16px;
-  line-height: 1.4;
+  font-size: var(--sb-text-md);
+  line-height: var(--sb-leading);
   padding: 6px 10px;
   overflow-wrap: anywhere;
 

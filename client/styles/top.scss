@@ -1,7 +1,13 @@
 @use "profile_menu";
 
 :root {
-  --sb-top-height: 55px;
+  --sb-top-height: 52px;
+}
+
+@media only screen and (max-width: 600px) {
+  :root {
+    --sb-top-height: 56px;
+  }
 }
 
 @media (display-mode: standalone) {
@@ -40,15 +46,17 @@
       // Hack to not have SCSS precompile this value but use proper CSS variables
       max-width: var(--#{"editor-width"});
       margin: auto;
-      font-size: 28px;
-      padding: 8px 0;
+      font-size: var(--sb-text-title);
+      height: 100%;
+      padding: 0;
       display: flex;
       flex-direction: row;
 
       .wrapper {
         width: env(titlebar-area-width, 100%);
-        padding: 0 20px;
+        padding: 0 24px;
         display: flex;
+        align-items: center;
         box-sizing: border-box;
         position: relative;
 
@@ -62,14 +70,18 @@
       white-space: nowrap;
       text-align: left;
       display: block;
+      // Room inside the clipped box for the title's focus ring; the negative
+      // margin keeps the layout where it was.
+      padding: 4px;
+      margin: -4px;
 
       -webkit-app-region: drag;
 
       .sb-input {
         font-family: var(--ui-font);
         font-size: inherit;
-        font-weight: bold;
-        line-height: 1.35;
+        font-weight: 600;
+        line-height: 1.3;
         color: inherit;
         background-color: transparent;
         padding: 0;
@@ -83,6 +95,13 @@
 
         &:focus {
           box-shadow: none;
+        }
+
+        // The title is a control: keyboard focus shows the shared ring.
+        &:focus-visible {
+          outline: 2px solid var(--sb-focus);
+          outline-offset: 2px;
+          border-radius: var(--sb-radius-1);
         }
       }
     }
@@ -103,7 +122,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 4px;
     margin-right: 6px;
     padding: 4px;
     background-color: var(--top-background-color);
@@ -149,6 +167,16 @@
   display: none;
 }
 
+// The folder trail before the page name ("Projects ›"): quiet but legible
+// (the component sets an opacity and size inline; the design wants ink-2).
+#sb-top .sb-page-breadcrumb {
+  opacity: 1 !important;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm) !important;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 @media only screen and (max-width: 600px) {
 
   #sb-top .sb-mobile-dock-button {
@@ -189,27 +217,37 @@
     overflow: visible;
   }
 
+  // The page name outranks its breadcrumb: on the phone the title needs the
+  // room (the tree drawer and the tooltip still say where the page lives).
+  #sb-top .sb-page-breadcrumb {
+    display: none;
+  }
+
+  #sb-top .main #sb-current-page .sb-input {
+    font-size: 18px;
+  }
+
   #sb-top .cm-scroller:has(.hamburger) {
     position: relative;
   }
 
   #sb-top .sb-actions.hamburger {
-    width: 2.8rem;
-    margin-top: 2px;
-    background: color-mix(in srgb,
-        var(--top-background-color) 90%,
-        transparent);
-    -webkit-backdrop-filter: blur(20px);
-    backdrop-filter: blur(20px);
+    width: 44px;
+    align-self: flex-start;
+    margin: 6px 0 0;
+    // No box at rest: the ⋯ is a plain icon like its neighbours. The panel
+    // colour belongs to the opened fly-out only (below).
+    background: none;
+    border-radius: var(--sb-radius-2);
     overflow: hidden;
     flex-direction: column;
     align-items: center;
     z-index: 10;
     transition:
-      max-height 0.3s ease-in-out,
-      box-shadow 0.3s ease-in-out;
+      max-height var(--sb-dur-3) var(--sb-ease-out),
+      box-shadow var(--sb-dur-3) var(--sb-ease-out);
 
-    max-height: 2.2rem;
+    max-height: 44px;
 
     button {
       &.expander {
@@ -217,25 +255,33 @@
       }
 
       &:not(.sb-code-copy-button) {
-        display: block;
-        height: 1.8rem;
-        text-align: center;
-        margin: 4px 0;
-        padding: 4px 0;
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 44px;
+        height: 44px;
+        margin: 0;
+        padding: 0;
       }
 
       &:not(:first-of-type) {
-        margin: 8px 0;
         opacity: 0;
-        transform: translateY(-10px);
+        transform: translateY(-4px);
         transition:
-          opacity 0.3s ease-in-out,
-          transform 0.3s ease-in-out;
+          opacity var(--sb-dur-2) var(--sb-ease-out),
+          transform var(--sb-dur-2) var(--sb-ease-out);
       }
+    }
+
+    // The fly-out clips (overflow), so the focus ring sits inside the button.
+    button:focus-visible {
+      outline-offset: -2px;
     }
 
     &.open:hover {
       max-height: calc(100vh - 24px);
+      background: var(--sb-bg-panel);
+      box-shadow: var(--sb-shadow-2);
 
       button {
         opacity: 1;
@@ -248,48 +294,58 @@
     position: fixed;
     bottom: 0;
     left: 0;
-    padding: 10px 0;
-    background: var(--top-background-color);
+    padding: 4px 0;
+    background: var(--sb-bg-panel);
     width: 100vw;
-    box-shadow: 0px 4px 8px black;
+    border-top: 1px solid var(--sb-line);
     justify-content: space-around;
 
     button {
-      padding: 1em;
       margin: 0;
-      height: unset;
-      width: unset;
-
-      svg {
-        margin-bottom: -5px;
-      }
     }
   }
 }
 
+// Toasts sit at the bottom centre: they never cover line 1 of the page, and
+// the phone keeps them above the keyboard bar. Reversible actions put an Undo
+// button in the toast.
 .sb-notifications {
   position: fixed;
   pointer-events: none;
-  left: calc(var(--sb-editor-pane-left, 0px) + max(20px,
-      (var(--sb-editor-pane-width, 100vw) - var(--#{"editor-width"})) / 2 + 20px));
-  right: calc(100vw - var(--sb-editor-pane-left, 0px) - var(--sb-editor-pane-width, 100vw) + max(20px,
-      (var(--sb-editor-pane-width, 100vw) - var(--#{"editor-width"})) / 2 + 20px));
-  top: 60px;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(480px, calc(100vw - 32px));
 
-  font-size: 15px;
+  font-size: var(--sb-text-md);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  gap: var(--sb-space-2);
+
+  @media only screen and (max-width: 600px) {
+    bottom: 72px;
+  }
 
   >div {
     pointer-events: auto;
-    padding: 3px 8px;
-    margin-bottom: 3px;
-    border-radius: 0;
+    box-sizing: border-box;
+    max-width: 100%;
+    padding: 10px 14px;
+    border-radius: var(--sb-radius-3);
+    box-shadow: var(--sb-shadow-3);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    line-height: var(--sb-leading);
+    animation: sb-toast-in var(--sb-dur-3) var(--sb-ease-out) both;
+  }
+
+  .sb-notification-message {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .sb-notification-actions {
@@ -298,23 +354,52 @@
     flex-shrink: 0;
 
     .sb-button {
-      font-size: 0.85em;
-      padding: 1px 6px;
+      min-height: 28px;
+      padding: 0 10px;
+      font-size: var(--sb-text-md);
       white-space: nowrap;
+
+      @media (pointer: coarse) {
+        min-height: var(--sb-control-touch);
+      }
     }
   }
 
   .sb-notification-dismiss {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
     background: none;
     border: none;
+    border-radius: var(--sb-radius-1);
     color: inherit;
     cursor: pointer;
     font-size: 1.1em;
-    padding: 0 2px;
-    opacity: 0.7;
+    padding: 0;
+    opacity: 0.8;
 
     &:hover {
       opacity: 1;
+      background-color: var(--sb-overlay-8);
     }
+
+    &:focus-visible {
+      outline: 2px solid var(--sb-focus);
+      outline-offset: 2px;
+    }
+  }
+}
+
+@keyframes sb-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

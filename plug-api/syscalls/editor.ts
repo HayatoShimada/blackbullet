@@ -323,11 +323,13 @@ export function prompt(
 
 /**
  * @param options optional settings; set `destructive: true` to style the
- *   confirm button as a destructive (danger) action
+ *   confirm button as a destructive (danger) action (Cancel then has focus
+ *   unless `focusCancel: false`); `okLabel` names the confirm button's verb
+ *   (e.g. "Move to trash"); `focusCancel` focuses Cancel instead of confirm
  */
 export function confirm(
   message: string,
-  options?: { destructive?: boolean },
+  options?: { destructive?: boolean; okLabel?: string; focusCancel?: boolean },
 ): Promise<boolean> {
   return syscall("editor.confirm", message, options);
 }

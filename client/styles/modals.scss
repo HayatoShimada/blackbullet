@@ -1,102 +1,218 @@
 .sb-modal-box {
   margin-top: 60px;
   padding: 0;
-  width: 700px;
+  width: 640px;
   max-width: 90%;
-  border-radius: 4px;
+  border-radius: var(--sb-radius-3);
   overflow: hidden;
   box-sizing: border-box;
 
+  // The modal dims what is behind it; the dim, not a blur, carries the
+  // elevation (blur costs frames on small hosts).
   &::backdrop {
     background-color: var(--modal-backdrop-color);
   }
 
   @media only screen and (max-width: 600px) {
     margin-top: calc(8px + var(--sb-top-height) + var(--sb-standalone-top-offset, 0px));
-    width: 100%;
-    max-width: 100%;
+    width: calc(100% - 16px);
+    max-width: calc(100% - 16px);
     max-height: calc(var(--sb-viewport-height, 100vh) - 16px - var(--sb-top-height) - var(--sb-standalone-top-offset, 0px));
-    border-radius: 0;
+    border-radius: var(--sb-radius-3);
   }
 
   .sb-header {
-    padding: 13px 10px 10px 10px;
+    box-sizing: border-box;
+    min-height: 48px;
+    padding: 0 12px;
     display: flex;
+    align-items: center;
+    gap: var(--sb-space-2);
 
     label {
-      margin: 3px;
+      margin: 0;
+      font-size: var(--sb-text-md);
+      color: var(--modal-header-label-color);
+      white-space: nowrap;
     }
 
     .sb-input {
       flex-grow: 1;
       min-width: 0;
+      height: 36px;
       background-color: transparent;
       padding: 0;
+      border: 0;
       border-radius: 0;
+      font-size: var(--sb-text-lg);
 
-      &:focus {
+      &:focus,
+      &:focus-visible {
         box-shadow: none;
+        outline: none;
       }
     }
   }
 
   .sb-prompt {
-    padding: 13px 10px 10px 10px;
+    box-sizing: border-box;
+    padding: 20px 20px 16px;
 
     label {
-      font-weight: bold;
+      display: block;
+      line-height: 1.45;
+      font-size: var(--sb-text-md);
+      color: var(--sb-ink-2);
+
+      // The label is uniform; a caller that wants the question stressed marks
+      // it with `.sb-prompt-question` (or <b>) and the consequence stays ink-2.
+      b,
+      strong,
+      .sb-prompt-question {
+        font-weight: 600;
+        color: var(--sb-ink);
+      }
     }
 
     .sb-input {
       width: 100%;
       box-sizing: border-box;
-      margin: 10px 0;
-      padding: 0.4em 0.8em;
+      margin: 12px 0 0;
+      font-size: var(--sb-text-lg);
     }
 
     .sb-prompt-buttons {
       display: flex;
       justify-content: flex-end;
-      margin-top: 10px;
-      gap: 10px;
+      margin-top: 20px;
+      gap: var(--sb-space-2);
+
+      .sb-button,
+      .sb-button-primary,
+      .sb-button-danger {
+        min-width: 72px;
+      }
     }
   }
 
   .sb-help-text {
-    padding: 5px;
+    padding: 6px 12px;
+    font-size: var(--sb-text-sm);
+    line-height: 1.4;
   }
 
   .sb-result-list {
-    max-height: 250px;
-    overflow-y: scroll;
+    // 11 rows, then it scrolls; a fade at the bottom says there is more.
+    max-height: min(60vh, 396px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+
+    &:has(.sb-option:nth-child(12), .sb-selected-option:nth-child(12)) {
+      -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+      mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+    }
 
     .sb-icon {
+      display: inline-flex;
+      align-items: center;
       padding: 0 8px 0 5px;
-      position: relative;
-      top: 3px;
     }
 
     .sb-description {
-      font-size: 75%;
+      font-size: var(--sb-text-sm);
     }
   }
 
   .sb-option,
   .sb-selected-option {
-    padding: 8px;
+    box-sizing: border-box;
+    min-height: var(--sb-row);
+    padding: 8px 12px;
     cursor: pointer;
     line-height: 20px;
+    font-size: var(--sb-text-md);
+
+    // A row is icon, name, hint (pushed to the right edge), then the
+    // description on its own line, so hints/tags share one right edge.
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+
+    // `min-width` is what keeps the name on the icon's line: with a zero
+    // basis and a zero floor the name and the 100%-wide description fit on
+    // one line, the name gets no width and wraps a letter per line.
+    .sb-name {
+      flex: 1 1 0;
+      min-width: 12ch;
+      overflow-wrap: anywhere;
+    }
+
+    .sb-description {
+      flex: 0 0 100%;
+    }
   }
 
+  // Key hints are kbd chips, not coloured pills.
   .sb-option .sb-hint,
   .sb-selected-option .sb-hint {
-    float: right;
-    margin-right: 0;
-    margin-top: -4px;
-    padding-left: 5px;
-    padding-right: 5px;
-    padding-top: 3px;
-    padding-bottom: 3px;
-    border-radius: 4px;
+    flex: none;
+    margin: 0 0 0 auto;
+    padding: 2px 6px;
+    border-radius: var(--sb-radius-1);
+    font-family: var(--sb-font-mono);
+    font-size: var(--sb-text-xs);
+    line-height: 16px;
+    border: 1px solid var(--sb-line);
+  }
+
+  // Group headers inside a result list ("Recent", "Suggested", …).
+  .sb-nav-group {
+    padding: 10px 12px 4px;
+    font-size: var(--sb-text-xs);
+    line-height: 1.35;
+    color: var(--sb-ink-3);
+  }
+
+  // The hint row under a result list; keyboard users only.
+  .sb-modal-footer {
+    padding: 6px 12px;
+    border-top: 1px solid var(--modal-border-color);
+    font-size: var(--sb-text-xs);
+    color: var(--sb-ink-3);
+
+    @media (pointer: coarse) {
+      display: none;
+    }
+  }
+
+  @media (pointer: coarse) {
+
+    .sb-option,
+    .sb-selected-option {
+      min-height: 44px;
+    }
+
+    .sb-header .sb-input {
+      height: 44px;
+    }
+
+    .sb-prompt .sb-prompt-buttons {
+
+      .sb-button,
+      .sb-button-primary,
+      .sb-button-danger {
+        min-height: 44px;
+      }
+    }
+  }
+}
+
+// A dialog (trash, delete forever) is narrower than a palette.
+.sb-modal-box:has(.sb-prompt) {
+  width: 440px;
+
+  @media only screen and (max-width: 600px) {
+    width: calc(100% - 32px);
+    max-width: calc(100% - 32px);
   }
 }

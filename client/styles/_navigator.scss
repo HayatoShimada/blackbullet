@@ -10,10 +10,13 @@
 }
 
 .sb-nav-root {
-  --sb-nav-muted: var(--subtle-color);
+  --sb-nav-muted: var(--sb-ink-2);
   // One row, top padding to bottom padding (see `.sb-nav-row`). The modal's
   // list cap is a multiple of it, so the cap lands between rows.
-  --sb-nav-row-height: 36px;
+  --sb-nav-row-height: var(--sb-row, 36px);
+  // What a row's own surface is, so the fade behind a row's `⋯` can match it.
+  --sb-nav-bg: var(--modal-background-color);
+  --sb-nav-hover: color-mix(in srgb, var(--sb-ink) 7%, var(--sb-nav-bg));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -22,7 +25,8 @@
   // would read as a stray one down the side of the dock.
   overflow: hidden;
   font-family: var(--ui-font);
-  font-size: 16px;
+  font-size: var(--sb-text-md, 14px);
+  line-height: var(--sb-leading, 1.45);
   background: var(--modal-background-color);
   color: var(--modal-color);
 }
@@ -42,7 +46,7 @@
   flex: 0 0 auto;
   background: transparent;
   border: 0;
-  color: inherit;
+  color: var(--sb-ink-2);
   font-size: 1.2em;
   line-height: 1;
   cursor: pointer;
@@ -50,7 +54,7 @@
 }
 
 .sb-nav-close:hover {
-  color: var(--modal-header-label-color);
+  color: var(--sb-ink);
 }
 
 // Keep the drag handle beside classic scrollbars, not on top of them.
@@ -67,7 +71,7 @@
   flex-direction: column;
   gap: 8px;
   flex: 0 0 auto;
-  padding: 13px 10px 10px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--ui-surface-border-color);
 }
 
@@ -82,11 +86,27 @@
 
 .sb-nav-header-row {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
   // A dock this narrow can still shrink the input (min-width: 0 below); the
   // row itself must not overflow it.
   min-width: 0;
+  min-height: var(--sb-control, 32px);
+  padding: 0 4px 0 8px;
+  border-radius: var(--sb-radius-1, 4px);
+}
+
+// The focus ring sits on the whole header row, not as an underline under the text.
+.sb-nav-header-row:focus-within {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: 0;
+}
+
+// A dock names itself in the placeholder ("Open…"); the label is the modal's.
+.sb-nav-root-lhs .sb-nav-title,
+.sb-nav-root-rhs .sb-nav-title,
+.sb-nav-root-bhs .sb-nav-title {
+  display: none;
 }
 
 .sb-nav-segment-row-actions {
@@ -164,6 +184,7 @@
 .sb-nav-title {
   color: var(--modal-header-label-color);
   white-space: nowrap;
+  font-size: var(--sb-text-md, 14px);
 }
 
 .sb-nav-input {
@@ -176,6 +197,12 @@
   border: 0;
   outline: none;
   padding: 0;
+}
+
+// 5.5:1 on the panel in light, 7.4:1 in dark (the browser's own grey is 4.3 / 3.8).
+.sb-nav-input::placeholder {
+  color: var(--sb-ink-2);
+  opacity: 1;
 }
 
 // A filterless view (`filter = false`): the input stays in the DOM as the
@@ -195,6 +222,7 @@
 
 .sb-nav-copy,
 .sb-dock-button,
+.sb-nav-new,
 .sb-page-widget-tools .sb-nav-close,
 .sb-nav-header-row .sb-nav-close {
   flex: 0 0 auto;
@@ -202,21 +230,37 @@
   align-items: center;
   justify-content: center;
   align-self: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: transparent;
   border: 0;
+  border-radius: var(--sb-radius-1, 4px);
   line-height: 1;
   cursor: pointer;
 }
 
-.sb-nav-copy {
-  color: var(--subtle-color);
+.sb-nav-copy,
+.sb-nav-new {
+  color: var(--sb-ink-2);
 }
 
-.sb-nav-copy:hover {
-  color: var(--modal-header-label-color);
+.sb-nav-copy:hover,
+.sb-nav-new:hover,
+.sb-nav-close:hover,
+.sb-dock-button:hover {
+  color: var(--sb-ink);
+  background: var(--sb-overlay-8);
+}
+
+.sb-nav-copy:focus-visible,
+.sb-nav-new:focus-visible,
+.sb-nav-close:focus-visible,
+.sb-dock-button:focus-visible,
+.sb-nav-entry-points button:focus-visible,
+.sb-row-action:focus-visible {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: 1px;
 }
 
 .sb-nav-root-content.sb-nav-root-modal .sb-nav-body {
@@ -239,9 +283,37 @@
   overflow-y: auto;
 }
 
-.sb-nav-row {
+.sb-nav-root .sb-nav-row {
   height: var(--sb-nav-row-height);
   --sb-nav-band: transparent;
+  // What this row is painted with; the fade behind its `⋯` is painted with the same.
+  --sb-nav-row-bg: var(--sb-nav-bg);
+  background-color: var(--sb-nav-row-bg);
+  align-items: center;
+  line-height: var(--sb-leading, 1.45);
+}
+
+// Keyboard users see where they are: a 2px ring inside the row.
+.sb-nav-root .sb-nav-row:focus-visible {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: -2px;
+}
+
+// The tree's rows are not tabbable (the filter keeps focus), so the row the
+// keyboard is on gets the same ring while the filter has focus: the tint
+// alone (about 1.2:1) cannot be told from the current page's row.
+.sb-nav-root:has(.sb-nav-input:focus) .sb-nav-row.sb-nav-selected {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: -2px;
+}
+
+// Forced colours drop the selection's tint, and with it the only sign of where
+// the keyboard is (the tree's rows are not tabbable: the filter keeps focus).
+@media (forced-colors: active) {
+  .sb-nav-root .sb-nav-row.sb-nav-selected {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 .sb-nav-row:has(> .sb-nav-text) {
@@ -249,30 +321,67 @@
   min-height: var(--sb-nav-row-height);
 }
 
-.sb-nav-selected {
-  background-color: var(--modal-selected-option-background-color);
-  color: var(--modal-selected-option-color);
-  --sb-nav-muted: var(--modal-selected-option-color);
+.sb-nav-row.sb-nav-selected {
+  --sb-nav-row-bg: var(--sb-accent-soft);
+  color: var(--sb-ink);
+  --sb-nav-muted: var(--sb-ink-2);
 }
 
-.sb-nav-row.sb-nav-selected .sb-row-actions {
-  background-color: var(--modal-selected-option-background-color);
+.sb-nav-row:hover:not(.sb-nav-row-passive) {
+  --sb-nav-row-bg: var(--sb-nav-hover);
+}
+
+.sb-nav-row.sb-nav-selected:hover {
+  --sb-nav-row-bg: var(--sb-accent-soft);
+}
+
+// The actions fade in over the row's own surface and only when asked for:
+// pointing at the row or tabbing into it. Being selected is not asking, so
+// the row you are on keeps its whole name.
+.sb-nav-row .sb-row-actions {
+  display: none;
+  gap: 0;
+  padding: 0 4px 0 20px;
+  background-color: var(--sb-nav-row-bg);
   background-image: none;
+  // 20px of fade, then the 24px button.
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 20px);
+  mask-image: linear-gradient(to right, transparent, #000 20px);
+}
+
+.sb-nav-row:hover > .sb-row-actions,
+.sb-nav-row:focus-within > .sb-row-actions {
+  display: flex;
+}
+
+.sb-nav-row.sb-nav-selected:not(:hover):not(:focus-within) > .sb-row-actions {
+  display: none;
 }
 
 .sb-row-action {
   color: var(--sb-nav-muted);
+  min-width: 24px;
+  height: 24px;
+  border-radius: var(--sb-radius-1, 4px);
 }
 
-.sb-nav-selected .sb-row-action:hover {
-  color: var(--modal-selected-option-color);
+.sb-row-action:hover {
+  color: var(--sb-ink);
+  background-color: var(--sb-overlay-8);
+}
+
+.sb-row-more svg {
+  display: block;
+}
+
+.sb-row-action-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .sb-nav-row.sb-nav-folder {
-  --sb-nav-band: color-mix(in srgb,
-      var(--ui-surface-section-background-color) 60%,
-      transparent);
-  font-weight: 600;
+  --sb-nav-band: transparent;
+  font-weight: 500;
   background-image: none;
 }
 
@@ -286,6 +395,13 @@
 
 .sb-nav-icon {
   color: var(--sb-nav-muted);
+}
+
+// The name has layout priority: the actions overlay the row's right end and
+// the text never shrinks below about a dozen characters.
+.sb-nav-primary {
+  flex: 1 1 auto;
+  min-width: 12ch;
 }
 
 .sb-nav-more {
@@ -303,19 +419,35 @@
 .sb-nav-create-pinned {
   position: sticky;
   bottom: 0;
-  background-color: var(--modal-background-color);
+  background-color: var(--sb-nav-row-bg);
 }
 
-.sb-nav-create-pinned.sb-nav-selected {
-  background-color: var(--modal-selected-option-background-color);
+.sb-nav-create .sb-nav-primary {
+  flex: 0 1 auto;
+}
+
+// Where the page will go, after the name: "Foo   in Projects/".
+.sb-nav-create-in {
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  margin-right: auto;
 }
 
 .sb-nav-description {
-  color: var(--modal-description-color);
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
 }
 
 .sb-nav-selected .sb-nav-description {
-  color: var(--modal-selected-option-description-color);
+  color: var(--sb-ink-2);
+}
+
+// A tree row's description is short ("Quick note · 16:54  :25", the seconds that
+// tell two notes apart): it keeps its own width and the name gives way.
+.sb-tree .sb-nav-description {
+  flex: 0 0 auto;
+  max-width: 14ch;
+  margin-left: var(--sb-space-1, 4px);
 }
 
 .sb-nav-chip.sb-hashtag {
@@ -332,24 +464,31 @@
   color: var(--sb-nav-muted);
 }
 
+// A key hint is a keycap: quiet, mono, never a coloured pill.
 .sb-nav-chip-hint {
   margin-left: auto;
-  padding: 3px 5px;
-  border-radius: 5px;
-  font-size: inherit;
-  background-color: var(--modal-hint-background-color);
-  color: var(--modal-hint-color);
+  padding: 1px 6px;
+  border-radius: var(--sb-radius-1, 4px);
+  font-family: var(--sb-font-mono);
+  font-size: var(--sb-text-xs, 11px);
+  line-height: 1.5;
+  background-color: var(--sb-bg-2);
+  color: var(--sb-ink-2);
 }
 
 .sb-nav-chip-key {
-  font-family: var(--ui-font);
+  font-family: var(--sb-font-mono);
+}
+
+// Several bindings: the first chip is pushed to the right edge, the others
+// follow it with the row's gap (a second `auto` would split the free space).
+.sb-nav-chip-hint + .sb-nav-chip-hint {
+  margin-left: 0;
 }
 
 .sb-nav-selected .sb-nav-chip:not(.sb-hashtag) {
-  background-color: color-mix(in srgb,
-      var(--modal-selected-option-color) 22%,
-      transparent);
-  color: var(--modal-selected-option-color);
+  background-color: color-mix(in srgb, var(--sb-ink) 10%, transparent);
+  color: var(--sb-ink-2);
 }
 
 .sb-nav-aspiring .sb-nav-primary {
@@ -381,7 +520,7 @@
 .sb-tree .sb-nav-row {
   position: relative;
   content-visibility: auto;
-  contain-intrinsic-size: auto 36px;
+  contain-intrinsic-size: auto var(--sb-nav-row-height);
 }
 
 // The drag handle sits on the row's left edge and shows on hover or selection;
@@ -474,17 +613,20 @@
 .sb-nav-root-lhs,
 .sb-nav-root-rhs,
 .sb-nav-root-bhs {
+  --sb-nav-bg: var(--panel-background-color);
   background: var(--panel-background-color);
 }
 
+// The ring is the header row's (see `.sb-nav-header-row:focus-within`).
 .sb-nav-input:focus-visible {
   outline: none;
-  box-shadow: inset 0 -1px var(--text-field-focus-color);
+  box-shadow: none;
 }
 
 .sb-nav-row[aria-current="page"] {
   position: relative;
   border-radius: 0;
+  --sb-nav-row-bg: var(--sb-accent-soft);
 
   &::before {
     content: "";
@@ -498,12 +640,8 @@
   }
 }
 
-.sb-nav-row:hover:not(.sb-nav-selected) {
-  background-color: var(--subtle-background-color);
-}
-
 .sb-nav-root .sb-nav-row.sb-nav-passive:hover:not(.sb-nav-selected) {
-  background-color: transparent;
+  --sb-nav-row-bg: var(--sb-nav-bg);
 }
 
 :is(#sb-main, .sb-nav-root) .sb-table-scroll {
@@ -559,4 +697,142 @@
 
 .sb-view-table .sb-checkbox:disabled {
   cursor: default;
+}
+
+// Passive rows: a count, a sentence, a group title. Not hovered, not selected,
+// not announced as something to press.
+.sb-nav-root .sb-nav-row.sb-nav-row-passive {
+  cursor: default;
+  height: auto;
+  min-height: 0;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  --sb-nav-row-bg: var(--sb-nav-bg);
+}
+
+// A count sits at the right, small and tabular; a sentence wraps.
+.sb-nav-row-passive.sb-nav-count {
+  font-variant-numeric: tabular-nums;
+
+  .sb-nav-primary {
+    text-align: right;
+  }
+}
+
+.sb-nav-row-passive.sb-nav-sentence {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+
+  .sb-nav-primary {
+    white-space: normal;
+  }
+}
+
+// Group titles in the palette ("Recent", "Suggested", "Page"…).
+.sb-nav-root .sb-nav-row.sb-nav-group {
+  padding: 10px 12px 4px;
+  // ink-3 is 4.6:1 on the page but 4.3 on the panel; titles are small.
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-xs, 11px);
+  font-weight: 500;
+}
+
+// The Mediator's `+` in the tree's empty state, and the phone's three doors.
+.sb-nav-empty-folder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+
+  .sb-nav-new {
+    flex: 0 0 auto;
+  }
+}
+
+.sb-nav-entry-points {
+  display: none;
+}
+
+// Touch: every thumb target is 44px, with 8px between neighbours, and the
+// three things a phone is for are one tap from the drawer's top.
+@media (pointer: coarse) {
+  .sb-nav-root {
+    --sb-nav-row-height: 44px;
+  }
+
+  .sb-nav-header-row {
+    min-height: 44px;
+  }
+
+  .sb-nav-input {
+    font-size: var(--sb-text-lg, 16px);
+  }
+
+  .sb-segment {
+    min-height: 44px;
+    // An icon-only segment is as wide as it is tall, with room between them.
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  .sb-nav-root .sb-segments {
+    gap: 4px;
+  }
+
+  // The phone's New is the one in the three doors below the input.
+  .sb-nav-header-row .sb-nav-new {
+    display: none;
+  }
+
+  .sb-nav-close,
+  .sb-dock-button,
+  .sb-nav-copy,
+  .sb-nav-header-row .sb-nav-close,
+  .sb-page-widget-tools .sb-nav-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  // One control per row, always there: nothing here waits for a hover.
+  .sb-nav-root .sb-nav-row .sb-row-actions,
+  .sb-nav-row.sb-nav-selected:not(:hover):not(:focus-within) > .sb-row-actions {
+    display: flex;
+    gap: 0;
+    padding-left: 12px;
+  }
+
+  .sb-row-more,
+  .sb-row-action {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .sb-nav-entry-points {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 44px;
+      padding: 0 8px;
+      border: 1px solid var(--sb-line);
+      border-radius: var(--sb-radius-2, 8px);
+      background: var(--sb-bg);
+      color: var(--sb-ink);
+      font: inherit;
+      font-size: var(--sb-text-md, 14px);
+      cursor: pointer;
+    }
+  }
+
+  .sb-nav-row.sb-nav-group {
+    padding-top: 14px;
+  }
 }

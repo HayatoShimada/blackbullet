@@ -65,55 +65,86 @@
 }
 
 .sb-notifications {
-  font-family: var(--editor-font);
+  font-family: var(--ui-font);
 }
 
+// The three types the client produces. Reversible actions ("Done · Undo")
+// are info toasts with an action button.
 .sb-notifications>div {
   border: var(--notifications-border-color) 1px solid;
 }
 
 .sb-notification-info {
-  background-color: var(--notification-info-background-color);
+  background-color: var(--sb-toast-info-bg);
+  color: var(--sb-toast-info-fg);
 }
 
 .sb-notification-error {
-  background-color: var(--notification-error-background-color);
+  background-color: var(--sb-toast-error-bg);
+  color: var(--sb-toast-error-fg);
+  border-color: color-mix(in srgb, var(--sb-toast-error-fg) 30%, transparent) !important;
 }
 
 .sb-notification-warning {
-  background-color: var(--notification-warning-background-color);
+  background-color: var(--sb-toast-warning-bg);
+  color: var(--sb-toast-warning-fg);
+  border-color: color-mix(in srgb, var(--sb-toast-warning-fg) 30%, transparent) !important;
+}
+
+.sb-notifications .sb-button {
+  --color: inherit;
+  --background-color: transparent;
+  --hover-background-color: var(--sb-overlay-16);
+  --border-color: currentColor;
 }
 
 .sb-actions button {
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
   border: 0;
-  margin: 2px;
-  margin-top: 6px;
-  padding: 5px;
+  margin: 0 2px;
+  padding: 0;
+  border-radius: var(--sb-radius-1);
   background-color: var(--action-button-background-color);
   color: var(--action-button-color);
   cursor: pointer;
+  transition: background-color var(--sb-dur-1) var(--sb-ease-out), color var(--sb-dur-1) var(--sb-ease-out);
 }
 
 .sb-actions button.sb-enabled {
-  background-color: var(--top-border-color);
-  border-radius: 5px;
+  background-color: var(--sb-accent-soft);
+  color: var(--sb-accent);
 }
 
 .sb-actions button:hover {
+  background-color: var(--sb-overlay-8);
   color: var(--action-button-hover-color);
+}
+
+.sb-actions button:focus-visible {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: 1px;
 }
 
 .sb-actions:not(.open) button.expander:hover {
   color: var(--action-button-color);
 }
 
+@media (pointer: coarse) {
+  .sb-actions button {
+    width: 44px;
+    height: 44px;
+    margin: 0 4px;
+  }
+}
+
 .sb-modal-box {
   color: var(--modal-color);
   background-color: var(--modal-background-color);
   border: var(--modal-border-color) 1px solid;
-  box-shadow: rgba(0, 0, 0, 0.35) 0px 20px 20px;
+  box-shadow: var(--sb-shadow-3);
 
   .sb-header {
     border-bottom: 1px var(--modal-border-color) solid;
@@ -173,16 +204,164 @@
     background-color: var(--editor-panels-bottom-background-color);
     border-top: var(--editor-panels-bottom-border-color) 1px solid;
 
+    // "Find in page": one grammar with the app's own controls (.sb-input,
+    // .sb-button, segments), not the native widgets.
     .cm-search {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) repeat(6, auto);
+      align-items: center;
+      gap: 6px;
+      padding: 6px 44px 6px 12px;
+      font-family: var(--ui-font);
+      font-size: var(--sb-text-md);
+
+      > br {
+        display: none;
+      }
+
+      input,
+      button,
+      label {
+        margin: 0;
+      }
+
       .cm-textfield {
+        min-width: 0;
+        height: 28px;
+        box-sizing: border-box;
+        padding: 0 8px;
+        font: inherit;
+        color: var(--root-color);
         background-color: var(--editor-panels-bottom-input-background-color);
+        border: 1px solid var(--sb-line-strong);
+        border-radius: var(--sb-radius-1);
+        outline: none;
+
+        &:focus-visible {
+          outline: 2px solid var(--sb-focus);
+          outline-offset: 1px;
+        }
       }
 
       .cm-button {
-        background-image: var(--editor-panels-bottom-button-background-image);
+        height: 28px;
+        padding: 0 10px;
+        font: inherit;
+        color: var(--button-color);
+        background: var(--button-background-color);
+        border: 1px solid var(--button-border-color);
+        border-radius: var(--sb-radius-1);
+        white-space: nowrap;
+        cursor: pointer;
+
+        &:hover {
+          background: var(--button-hover-background-color);
+        }
 
         &:active {
-          background-image: var(--editor-panels-bottom-button-active-background-image);
+          background: var(--sb-overlay-16);
+        }
+
+        &:focus-visible {
+          outline: 2px solid var(--sb-focus);
+          outline-offset: 1px;
+        }
+      }
+
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 28px;
+        box-sizing: border-box;
+        padding: 0 8px;
+        font-size: var(--sb-text-sm);
+        color: var(--sb-ink-2);
+        background: var(--sb-bg-2);
+        border-radius: var(--sb-radius-1);
+        white-space: nowrap;
+        cursor: pointer;
+
+        &:has(input:checked) {
+          color: var(--sb-ink);
+          background: var(--sb-accent-soft);
+        }
+
+        &:has(input:focus-visible) {
+          outline: 2px solid var(--sb-focus);
+          outline-offset: 1px;
+        }
+
+        input {
+          accent-color: var(--sb-accent);
+        }
+      }
+
+      button[name="close"] {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--sb-radius-1);
+        background: transparent;
+        color: var(--sb-ink-2);
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+
+        &:hover {
+          background: var(--sb-overlay-8);
+          color: var(--sb-ink);
+        }
+      }
+
+      // Touch: the search field on its own row, then one row of controls at
+      // 40px. Replace stays a desktop affordance.
+      @media (pointer: coarse) {
+        grid-template-columns: repeat(6, max-content);
+        justify-content: space-between;
+        gap: 8px 4px;
+        padding: 8px;
+
+        .cm-textfield {
+          grid-column: 1 / -1;
+          height: 40px;
+          margin-right: 44px;
+          font-size: var(--sb-text-lg);
+        }
+
+        .cm-textfield[name="replace"],
+        .cm-button[name="replace"],
+        .cm-button[name="replaceAll"] {
+          display: none;
+        }
+
+        .cm-button,
+        label {
+          height: 40px;
+        }
+
+        .cm-button {
+          padding: 0 6px;
+          font-size: var(--sb-text-sm);
+        }
+
+        label {
+          gap: 3px;
+          padding: 0 4px;
+          font-size: var(--sb-text-sm);
+        }
+
+        button[name="close"] {
+          top: 8px;
+          right: 8px;
+          width: 40px;
+          height: 40px;
         }
       }
     }
@@ -208,8 +387,8 @@
 
     ul li:hover,
     ul li[aria-selected]:hover {
-      background: #17c;
-      color: white;
+      background: var(--sb-accent);
+      color: var(--sb-on-accent);
     }
   }
 
@@ -402,13 +581,13 @@ tbody tr:nth-of-type(even) {
 }
 
 .sb-deleted {
-  color: var(--editor-code-deleted-color, #dc2626);
-  background-color: var(--editor-code-deleted-bg, rgba(254, 202, 202, 0.25));
+  color: var(--editor-code-deleted-color);
+  background-color: var(--editor-code-deleted-bg);
 }
 
 .sb-inserted {
-  color: var(--editor-code-inserted-color, #16a34a);
-  background-color: var(--editor-code-inserted-bg, rgba(187, 247, 208, 0.25));
+  color: var(--editor-code-inserted-color);
+  background-color: var(--editor-code-inserted-bg);
 }
 
 .sb-admonition {
@@ -439,7 +618,7 @@ tbody tr:nth-of-type(even) {
 }
 
 .sb-strong {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .sb-sub {
@@ -512,7 +691,7 @@ a.sb-wiki-link-ambiguous,
   border-radius: 3px;
   padding: 0 2px;
   font-size: 0.75em;
-  background-color: #f3eeee;
+  background-color: var(--sb-bg-2);
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
@@ -520,15 +699,59 @@ a.sb-wiki-link-ambiguous,
 }
 
 .sb-footnote-ref-unresolved {
-  color: var(--editor-error-color, #d32f2f);
-  border-color: var(--editor-error-color, #d32f2f);
-  background-color: rgba(211, 47, 47, 0.1);
+  color: var(--editor-error-color);
+  border-color: var(--editor-error-color);
+  background-color: color-mix(in srgb, var(--editor-error-color) 10%, transparent);
 }
 
 .sb-footnote-tooltip-error {
-  color: var(--editor-error-color, #d32f2f);
+  color: var(--editor-error-color);
 }
 
 .sb-line-comment {
   background-color: var(--editor-comment-background-color);
+}
+
+// Skeletons: a section that is still loading keeps its shape instead of
+// showing a spinner. Lua widgets opt in by emitting these classes; the global
+// reduced-motion clamp (theme.scss) makes the shimmer static.
+.sb-skeleton {
+  background: linear-gradient(90deg,
+      var(--sb-skeleton) 25%,
+      color-mix(in srgb, var(--sb-skeleton) 60%, var(--sb-bg)) 50%,
+      var(--sb-skeleton) 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
+  animation: sb-shimmer var(--sb-dur-shimmer) linear infinite;
+}
+
+.sb-skeleton-line {
+  height: 1em;
+  margin: 6px 0;
+
+  &:nth-child(3n + 1) {
+    width: 90%;
+  }
+
+  &:nth-child(3n + 2) {
+    width: 70%;
+  }
+
+  &:nth-child(3n) {
+    width: 50%;
+  }
+}
+
+.sb-skeleton-row {
+  height: var(--sb-row);
+}
+
+@keyframes sb-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
 }

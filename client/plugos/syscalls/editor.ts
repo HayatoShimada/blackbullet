@@ -87,7 +87,7 @@ import { resolveDocumentCapability } from "../../document_editor_resolver.ts";
 import { isMobileDevice, isNarrowScreen } from "../../lib/mobile.ts";
 import { browserMediaCapabilities } from "../../media.ts";
 import { hide as hideNavigatorSlot } from "../../navigator/navigator.ts";
-import type { PanelSlot } from "../../types/ui.ts";
+import type { ConfirmOptions, PanelSlot } from "../../types/ui.ts";
 import { getVimModule } from "../../vim_loader.ts";
 import type { SysCallMapping } from "../system.ts";
 
@@ -1109,7 +1109,7 @@ export function editorSyscalls(client: Client): SysCallMapping {
       callback: (
         _ctx,
         message: string,
-        options?: { destructive?: boolean },
+        options?: ConfirmOptions,
       ): Promise<boolean> => {
         return client.ui.confirm(message, options);
       },
@@ -1122,8 +1122,9 @@ export function editorSyscalls(client: Client): SysCallMapping {
         },
         {
           name: "options",
-          type: "{ destructive?: boolean }",
-          description: "Optional dialog styling settings.",
+          type: "{ destructive?: boolean, okLabel?: string, focusCancel?: boolean }",
+          description:
+            "Optional dialog settings: destructive styles the confirm button as danger, okLabel names its verb, focusCancel focuses Cancel (the default when destructive).",
           optional: true,
         },
       ],

@@ -1,5 +1,7 @@
 // The dock menu: the ⋯ button in a panel or page-widget title bar, and the
 // popup it anchors. Shared by every dock, so it belongs to none of them.
+// The same popup is the row menu in the tree and the New menu (`.sb-popover`
+// is its shared name), so every ⋯ opens one shape.
 
 .sb-dock-menu-anchor {
   position: relative;
@@ -10,22 +12,34 @@
 
 .sb-dock-button {
   cursor: pointer;
-  color: var(--subtle-color);
+  color: var(--sb-ink-2);
 }
 
 .sb-dock-button:hover {
-  color: var(--action-button-hover-color);
+  color: var(--sb-ink);
 }
 
 .sb-dock-menu {
   position: fixed;
   z-index: 20;
   min-width: 180px;
-  background: var(--modal-background-color);
-  border: 1px solid var(--modal-border-color);
-  border-radius: 4px;
+  max-width: min(320px, calc(100vw - 16px));
+  background: var(--sb-bg-panel);
+  color: var(--sb-ink);
+  border: 1px solid var(--sb-line);
+  border-radius: var(--sb-radius-2, 8px);
   padding: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--sb-shadow-2);
+  font-family: var(--ui-font);
+  font-size: var(--sb-text-md, 14px);
+  animation: sb-dock-menu-in var(--sb-dur-2, 160ms) var(--sb-ease-out, ease-out);
+}
+
+@keyframes sb-dock-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .sb-dock-menu-item {
@@ -33,33 +47,87 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  min-height: var(--sb-control, 32px);
+  padding: 0 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--sb-radius-1, 4px);
   background: transparent;
   cursor: pointer;
-  font-family: var(--ui-font);
-  font-size: 14px;
-  color: var(--modal-color);
+  font: inherit;
+  text-align: left;
+  color: var(--sb-ink);
+}
+
+.sb-dock-menu-icon {
+  flex: 0 0 16px;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--sb-ink-2);
+
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.sb-dock-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-dock-menu-description {
+  flex: 0 1 auto;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-dock-menu-separator {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--sb-line);
 }
 
 .sb-dock-menu-item:hover {
-  background: var(--subtle-background-color);
+  background: var(--sb-overlay-8);
 }
 
 .sb-dock-menu-current {
   background: transparent;
-  color: var(--modal-color);
-  box-shadow: inset 3px 0 var(--ui-accent-color);
+  color: var(--sb-ink);
+  box-shadow: inset 3px 0 var(--sb-accent);
   border-radius: 0;
 }
 
 .sb-dock-menu-item.sb-dock-menu-current:hover {
-  background: var(--subtle-background-color);
+  background: var(--sb-overlay-8);
+}
+
+// The way out is last and red: the one place red means "this takes it away".
+.sb-dock-menu-danger,
+.sb-dock-menu-danger .sb-dock-menu-icon {
+  color: var(--sb-danger);
 }
 
 .sb-dock-menu-item:focus-visible {
-  outline: none;
-  background: var(--modal-selected-option-background-color);
-  color: var(--modal-selected-option-color);
+  outline: 2px solid var(--sb-focus);
+  outline-offset: -2px;
+  background: var(--sb-accent-soft);
+  color: var(--sb-ink);
+}
+
+.sb-dock-menu-item.sb-dock-menu-danger:focus-visible {
+  color: var(--sb-danger);
+}
+
+@media (pointer: coarse) {
+  .sb-dock-menu-item {
+    min-height: 44px;
+  }
 }

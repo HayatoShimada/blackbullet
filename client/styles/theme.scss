@@ -2,17 +2,17 @@
 
 @use "tokens";
 
+// Semantic roles. Everything here is a var() of the palette in _tokens.scss
+// (light) and of the dark mixin below, so one reading flips with the palette.
+// Upstream token names are kept and re-pointed.
 html {
   --ui-accent-text-color: var(--ui-accent-color);
-  --text-field-focus-color: color-mix(in srgb, var(--ui-accent-color) 45%, var(--ui-surface-border-color));
-  --highlight-color: rgba(255, 255, 0, 0.5);
-  --link-color: #0330cb;
-  --link-missing-color: #9e4705;
-  --link-invalid-color: #bb08e7;
-  --meta-color: #650007;
-  --meta-subtle-color: #959595;
-  --subtle-color: #676767;
-  --subtle-background-color: rgba(72, 72, 72, 0.1);
+  --text-field-focus-color: var(--sb-focus);
+  --highlight-color: color-mix(in srgb, var(--sb-warn) 30%, transparent);
+  --link-color: var(--sb-link);
+  --meta-subtle-color: var(--sb-ink-3);
+  --subtle-color: var(--sb-ink-2);
+  --subtle-background-color: color-mix(in srgb, var(--sb-ink) 7%, transparent);
 
   /* Shared panel-surface palette — chrome colors for plug panels (e.g.
      Configuration Manager, Object Graph). Bundled into components.css, so
@@ -20,337 +20,232 @@ html {
   --ui-surface-background-color: var(--root-background-color);
   --ui-surface-color: var(--root-color);
   --ui-surface-subtle-color: var(--subtle-color);
-  --ui-surface-border-color: #d8dce1;
-  --ui-surface-section-background-color: var(--subtle-background-color);
+  --ui-surface-border-color: var(--sb-line);
+  --ui-surface-section-background-color: var(--sb-bg-2);
   --ui-surface-hover-background-color: var(--subtle-background-color);
 
-  --root-background-color: #fff;
-  --root-color: #20252d;
+  --root-background-color: var(--sb-bg);
+  --root-color: var(--sb-ink);
 
-  --top-color: inherit;
-  --top-background-color: #eee;
-  --top-border-color: #cacaca;
+  // Top bar: the page's own colour with a hairline, not a grey slab.
+  --top-color: var(--sb-ink);
+  --top-background-color: var(--sb-bg);
+  --top-border-color: var(--sb-line);
   --top-sync-error-color: var(--top-color);
-  --top-sync-error-background-color: #fdf8cb;
-  --top-saved-color: #111;
-  --top-unsaved-color: #5e5e5e;
-  --top-loading-color: #7a7a7a;
+  --top-sync-error-background-color: color-mix(in srgb, var(--sb-warn) 16%, var(--sb-bg));
+  --top-saved-color: var(--sb-ink);
+  --top-unsaved-color: var(--sb-ink-2);
+  --top-loading-color: var(--sb-ink-3);
 
-  --panel-background-color: #f6f7f8;
-  --panel-border-color: var(--ui-surface-border-color);
+  // Dock: one step darker than the page.
+  --panel-background-color: var(--sb-bg-panel);
+  --panel-border-color: var(--sb-line);
 
-  --bhs-background-color: #fff;
-  --bhs-border-color: rgb(193, 193, 193);
+  --bhs-background-color: var(--sb-bg);
+  --bhs-border-color: var(--sb-line);
 
-  --modal-color: inherit;
-  --modal-background-color: #fff;
-  --modal-border-color: var(--ui-surface-border-color);
-  --modal-backdrop-color: transparent;
-  --modal-header-label-color: var(--ui-accent-text-color);
-  --modal-help-background-color: #eee;
-  --modal-help-color: #555;
-  --modal-selected-option-background-color: color-mix(in srgb, var(--ui-accent-color) 12%, var(--modal-background-color));
-  --modal-selected-option-color: var(--root-color);
-  --modal-hint-background-color: #212476;
-  --modal-hint-color: #eee;
-  --modal-hint-inactive-background-color: #e1e1e1;
-  --modal-hint-inactive-color: #111;
-  --modal-description-color: #6b6b6b;
-  --modal-selected-option-description-color: var(--subtle-color);
+  --modal-color: var(--sb-ink);
+  --modal-background-color: var(--sb-bg-panel);
+  --modal-border-color: var(--sb-line);
+  --modal-backdrop-color: var(--sb-backdrop);
+  --modal-header-label-color: var(--sb-ink-2);
+  --modal-help-background-color: var(--sb-bg-2);
+  --modal-help-color: var(--sb-ink-2);
+  --modal-selected-option-background-color: var(--sb-accent-soft);
+  --modal-selected-option-color: var(--sb-ink);
+  --modal-hint-background-color: var(--sb-bg-2);
+  --modal-hint-color: var(--sb-ink-2);
+  --modal-hint-inactive-background-color: var(--sb-bg-2);
+  --modal-hint-inactive-color: var(--sb-ink-2);
+  --modal-description-color: var(--sb-ink-2);
+  --modal-selected-option-description-color: var(--sb-ink-2);
 
-  --notifications-background-color: inherit;
-  --notifications-border-color: var(--ui-surface-border-color);
-  --notification-info-background-color: color-mix(in srgb, var(--alert-info-color) 10%, var(--modal-background-color));
-  --notification-error-background-color: color-mix(in srgb, var(--alert-error-color) 10%, var(--modal-background-color));
-  --notification-warning-background-color: color-mix(in srgb, var(--alert-warning-color) 10%, var(--modal-background-color));
+  --notifications-background-color: var(--sb-toast-info-bg);
+  --notifications-border-color: var(--sb-line);
+  --notification-info-background-color: var(--sb-toast-info-bg);
+  --notification-info-color: var(--sb-toast-info-fg);
+  --notification-error-background-color: var(--sb-toast-error-bg);
+  --notification-error-color: var(--sb-toast-error-fg);
+  --notification-warning-background-color: var(--sb-toast-warning-bg);
+  --notification-warning-color: var(--sb-toast-warning-fg);
 
-  --button-background-color: #f6f7f8;
-  --button-hover-background-color: #edf0f3;
-  --button-color: var(--root-color);
-  --button-border-color: var(--ui-surface-border-color);
-  --primary-button-background-color: var(--ui-accent-color);
+  --button-background-color: var(--sb-bg);
+  --button-hover-background-color: var(--sb-bg-2);
+  --button-color: var(--sb-ink);
+  --button-border-color: var(--sb-line-strong);
+  --primary-button-background-color: var(--sb-accent);
   --primary-button-hover-background-color: color-mix(in srgb,
-      var(--ui-accent-color),
+      var(--sb-accent),
       black 18%);
-  --primary-button-color: var(--ui-accent-contrast-color);
+  --primary-button-color: var(--sb-on-accent);
   --primary-button-border-color: transparent;
 
-  --text-field-background-color: var(--button-background-color);
+  --text-field-background-color: var(--sb-bg);
 
-  --progress-background-color: #eee;
-  --progress-sync-color: black;
-  --progress-index-color: #0772be;
+  --progress-background-color: var(--sb-line);
+  --progress-sync-color: var(--sb-ink);
+  --progress-index-color: var(--sb-accent);
 
   --action-button-background-color: transparent;
-  --action-button-color: #292929;
-  --action-button-hover-color: #0772be;
-  --action-button-active-color: #0772be;
+  --action-button-color: var(--sb-ink-2);
+  --action-button-hover-color: var(--sb-ink);
+  --action-button-active-color: var(--sb-accent);
 
-  --editor-caret-color: black;
-  --editor-selection-background-color: #d7e1f6;
-  --editor-panels-bottom-color: inherit;
-  --editor-panels-bottom-background-color: #e1e1e1;
-  --editor-panels-bottom-border-color: #cacaca;
-  --editor-completion-detail-color: #555;
-  --editor-completion-detail-selected-color: #d2d2d2;
-  --editor-list-bullet-color: rgb(150, 150, 150);
-  --editor-heading-color: #333;
-  --editor-heading-meta-color: var(--meta-subtle-color);
-  --editor-hashtag-background-color: #002b6aad;
-  --editor-hashtag-color: #e2e9ff;
-  --editor-hashtag-border-color: #0120416b;
-  --editor-at-mention-color: #1a56b0;
-  --editor-at-mention-signature-color: #6b6b64;
-  --editor-at-mention-background-color: #e8f0fe;
-  --editor-at-mention-border-color: #c4d7f5;
-  --editor-ruler-color: rgb(76, 75, 75);
+  --editor-caret-color: var(--sb-ink);
+  --editor-text-color: var(--sb-ink);
+  --editor-selection-background-color: color-mix(in srgb, var(--sb-accent) 18%, transparent);
+  --editor-panels-bottom-color: var(--sb-ink);
+  --editor-panels-bottom-background-color: var(--sb-bg-panel);
+  --editor-panels-bottom-border-color: var(--sb-line);
+  --editor-panels-bottom-input-background-color: var(--sb-bg);
+  --editor-completion-detail-color: var(--sb-ink-2);
+  --editor-completion-detail-selected-color: color-mix(in srgb, var(--sb-on-accent) 85%, transparent);
+  --editor-list-bullet-color: var(--sb-ink-3);
+  --editor-heading-color: var(--sb-ink);
+  --editor-hashtag-border-color: color-mix(in srgb, var(--sb-accent) 30%, transparent);
+  --editor-at-mention-color: var(--sb-link);
+  --editor-at-mention-signature-color: var(--sb-ink-2);
+  --editor-at-mention-background-color: color-mix(in srgb, var(--sb-accent) 10%, transparent);
+  --editor-at-mention-border-color: color-mix(in srgb, var(--sb-accent) 25%, transparent);
+  --editor-ruler-color: var(--sb-line-strong);
   --editor-naked-url-color: var(--link-color);
-  --editor-code-color: #7c828e;
+  --editor-code-color: var(--sb-ink-2);
   --editor-link-color: var(--link-color);
   --editor-link-url-color: var(--link-color);
   --editor-link-meta-color: var(--meta-subtle-color);
-  --editor-wiki-link-page-background-color: rgba(77, 141, 255, 0.07);
+  --editor-wiki-link-page-background-color: color-mix(in srgb, var(--sb-link) 8%, transparent);
   --editor-wiki-link-page-color: var(--link-color);
   --editor-wiki-link-page-missing-color: var(--link-missing-color);
   --editor-wiki-link-page-invalid-color: var(--link-invalid-color);
-  --editor-wiki-link-color: #8f96c2;
-  --editor-command-button-color: inherit;
-  --editor-command-button-background-color: #e3dfdf;
-  --editor-command-button-hover-background-color: inherit;
+  --editor-wiki-link-color: var(--sb-ink-3);
+  --editor-command-button-color: var(--sb-ink);
+  --editor-command-button-background-color: var(--sb-bg-2);
+  --editor-command-button-hover-background-color: color-mix(in srgb, var(--sb-ink) 10%, var(--sb-bg-2));
   --editor-command-button-meta-color: var(--meta-subtle-color);
-  --editor-command-button-border-color: gray;
+  --editor-command-button-border-color: var(--sb-line-strong);
   --editor-line-meta-color: var(--meta-subtle-color);
   --editor-meta-color: var(--meta-color);
-  --editor-table-head-background-color: #333;
-  --editor-table-head-color: #eee;
-  --editor-table-even-background-color: #f3f3f3;
+  --editor-table-head-background-color: var(--sb-bg-2);
+  --editor-table-head-color: var(--sb-ink);
+  --editor-table-even-background-color: var(--sb-overlay-8);
   --editor-blockquote-background-color: var(--subtle-background-color);
-  --editor-blockquote-color: var(--subtle-color);
-  --editor-blockquote-border-color: rgb(74, 74, 74);
-  // Use a lighter tint than quotes; the outline already distinguishes the region.
-  --editor-comment-background-color: rgba(72, 72, 72, 0.05);
-  --editor-comment-border-color: rgb(178, 178, 178);
-  --editor-code-background-color: var(--subtle-background-color);
-  --editor-struct-color: darkred;
+  --editor-blockquote-color: var(--sb-ink-2);
+  --editor-blockquote-border-color: var(--sb-line-strong);
+  // Lighter than quotes; the outline already distinguishes the region.
+  --editor-comment-background-color: color-mix(in srgb, var(--sb-ink) 4%, transparent);
+  --editor-comment-border-color: var(--sb-line-strong);
+  --editor-code-background-color: var(--sb-bg-2);
   --editor-highlight-background-color: var(--highlight-color);
-  --editor-external-edit-color: rgba(255, 191, 71, 0.28);
-  --editor-external-caret-color: #e8a33d;
-  --editor-code-comment-color: var(--meta-subtle-color);
-  --editor-code-variable-color: #024866;
-  --editor-code-typename-color: #038138;
-  --editor-code-string-color: #540293;
-  --editor-code-number-color: #01833c;
-  --editor-code-operator-color: #808080;
+  --editor-code-comment-color: var(--sb-ink-2);
+  --editor-code-operator-color: var(--sb-ink-2);
   --editor-code-info-color: var(--subtle-color);
-  --editor-code-atom-color: #5a0000;
-  --editor-frontmatter-background-color: rgba(255, 246, 189, 0.3);
-  --editor-frontmatter-color: var(--subtle-color);
-  --editor-frontmatter-marker-color: #89000080;
-  --editor-widget-background-color: rgb(238, 238, 238);
-  --editor-task-marker-color: var(--subtle-color);
-  --editor-task-state-color: var(--subtle-color);
+  --editor-code-inserted-color: var(--sb-ok);
+  --editor-code-deleted-color: var(--sb-danger);
+  --editor-error-color: var(--sb-danger);
+  --editor-frontmatter-color: var(--sb-ink-2);
+  // The widget frame is a hairline, not a grey slab; strips use --sb-bg-2.
+  --editor-widget-background-color: var(--sb-line);
+  --editor-task-marker-color: var(--sb-ink-2);
+  --editor-task-state-color: var(--sb-ink-2);
+  --editor-task-completed-color: var(--sb-ink-3);
 
-  --editor-directive-mark-color: #6c0101;
-  --editor-directive-color: #696969;
-  --editor-directive-background-color: #ebebeb7d;
+  --editor-directive-color: var(--sb-ink-2);
+  --editor-directive-background-color: color-mix(in srgb, var(--sb-bg-2) 55%, transparent);
 
-  --editor-panels-bottom-input-background-color: #fff;
-  --editor-panels-bottom-button-background-image: linear-gradient(#eff1f5,
-      #d9d9df);
-  --editor-panels-bottom-button-active-background-image: linear-gradient(#b4b4b4,
-      #d0d3d6);
-
-  --ui-font: "iA-Mono", "Menlo", monospace;
-  --editor-font: "iA-Mono", "Menlo";
+  // Prose and chrome are proportional; iA Writer Mono S is for code, raw
+  // frontmatter and editorFont = "mono".
+  --ui-font: var(--sb-font-sans);
+  --editor-font: var(--sb-font-sans);
+  --editor-monospace-font: var(--sb-font-mono);
   --editor-width: 800px;
 
-  --danger-color: #dc3545;
-  --danger-contrast-color: #fff;
-  --success-color: #16a34a;
-  --alert-error-background-color: #fef2f2;
-  --alert-error-color: #dc3545;
-  --alert-error-border-color: #fecaca;
-  --alert-warning-background-color: #fffbeb;
-  --alert-warning-color: #b45309;
-  --alert-warning-border-color: #fde68a;
-  --alert-info-background-color: #eaf4fd;
-  --alert-info-color: #0b4a7a;
-  --alert-info-border-color: #cfe6fb;
-  --badge-background-color: #edf0f3;
-  --badge-color: #535d69;
+  --danger-color: var(--sb-danger);
+  --danger-contrast-color: var(--sb-on-danger);
+  --success-color: var(--sb-ok);
+  --alert-error-background-color: color-mix(in srgb, var(--sb-danger) 9%, var(--sb-bg));
+  --alert-error-color: var(--sb-danger);
+  --alert-error-border-color: color-mix(in srgb, var(--sb-danger) 30%, transparent);
+  --alert-warning-background-color: color-mix(in srgb, var(--sb-warn) 10%, var(--sb-bg));
+  --alert-warning-color: var(--sb-warn);
+  --alert-warning-border-color: color-mix(in srgb, var(--sb-warn) 30%, transparent);
+  --alert-info-background-color: color-mix(in srgb, var(--sb-accent) 9%, var(--sb-bg));
+  --alert-info-color: var(--sb-link);
+  --alert-info-border-color: color-mix(in srgb, var(--sb-accent) 30%, transparent);
+  --badge-background-color: var(--sb-bg-2);
+  --badge-color: var(--sb-ink-2);
+
+  // Status roles the database view reads, per scheme without its own hex.
+  --db-overdue: var(--sb-danger);
+  --db-today: var(--sb-warn);
+  --db-soon: var(--sb-warn);
+  --db-ok: var(--sb-ok);
+  --db-danger: var(--sb-danger);
+  --db-on-accent: var(--sb-on-accent);
+  --db-drop: var(--sb-accent);
+}
+
+html[data-editor-font="mono"] {
+  --editor-font: var(--sb-font-mono);
 }
 
 html[data-theme="light"] {
   color-scheme: light;
 }
 
+// The dark reading of the same palette: same roles, same relationships.
 @mixin dark-theme {
   color-scheme: dark;
 
-  --ui-accent-color: #79a9f2;
-  --ui-accent-contrast-color: #13243e;
-  --ui-accent-text-color: var(--ui-accent-color);
+  --sb-bg: #131518;
+  --sb-bg-panel: #191b1f;
+  --sb-bg-2: #202329;
+  --sb-line: #2b3037;
+  --sb-line-strong: #5c6670;
+  --sb-ink: #e6e9ee;
+  --sb-ink-2: #a3abb6;
+  --sb-ink-3: #8b939e;
+  --sb-accent: #79a9f2;
+  --sb-on-accent: #0c1a30;
+  --sb-link: #8fb3ff;
+  --sb-danger: #ff8a80;
+  --sb-on-danger: #1a0a08;
+  --sb-warn: #f3b74d;
+  --sb-ok: #5fd39a;
+  --sb-skeleton: #23272d;
+  --sb-backdrop: rgb(0 0 0 / 0.48);
+  --sb-shadow-1: 0 1px 2px rgb(var(--sb-shadow-color) / 0.12);
+  --sb-shadow-2: 0 4px 16px rgb(var(--sb-shadow-color) / 0.24), 0 1px 2px rgb(var(--sb-shadow-color) / 0.12);
+  --sb-shadow-3: 0 16px 48px rgb(var(--sb-shadow-color) / 0.4), 0 2px 6px rgb(var(--sb-shadow-color) / 0.16);
 
-  --highlight-color: rgba(255, 255, 0, 0.5);
-  --link-color: #7e99fc;
-  --link-missing-color: #9e4705;
-  --link-invalid-color: #d444f8;
-  --meta-color: #d6222e;
-  --meta-subtle-color: #959595;
-  --subtle-color: #959595;
-  --subtle-background-color: rgba(105, 105, 105, 0.1);
+  --sb-toast-info-bg: #23272d;
+  --sb-toast-info-fg: #e6e9ee;
+  --sb-toast-warning-bg: #3a2d12;
+  --sb-toast-warning-fg: #f3d08a;
+  --sb-toast-error-bg: #3a1b19;
+  --sb-toast-error-fg: #ffb3ad;
 
-  // Shared panel-surface palette (dark). Only the concrete border needs a
-  // dark value; the rest reference tokens that already flip with the theme.
-  --ui-surface-border-color: #343b44;
-
-  --root-background-color: #111;
-  --root-color: #e9edf2;
-
-  --top-color: #fff;
-  --top-background-color: #222;
-  --top-border-color: rgb(62, 62, 62);
-  --top-sync-error-color: var(--top-color);
-  --top-sync-error-background-color: #622626;
-  --top-saved-color: #fff;
-  --top-unsaved-color: #c7c7c7;
-  --top-loading-color: #c7c7c7;
-
-  --panel-background-color: #191919;
-  --panel-border-color: rgb(62, 62, 62);
-
-  --bhs-background-color: #111;
-  --bhs-border-color: rgb(62, 62, 62);
-
-  --modal-color: var(--root-color);
-  --modal-background-color: #191919;
-  --modal-border-color: var(--ui-surface-border-color);
-  --modal-backdrop-color: transparent;
-  --modal-header-label-color: var(--ui-accent-text-color);
-  --modal-help-background-color: #333;
-  --modal-help-color: #ccc;
-  --modal-selected-option-background-color: color-mix(in srgb, var(--ui-accent-color) 12%, var(--modal-background-color));
-  --modal-selected-option-color: var(--root-color);
-  --modal-hint-background-color: #212476;
-  --modal-hint-color: #eee;
-  --modal-hint-inactive-background-color: #353535;
-  --modal-hint-inactive-color: #ccc;
-  --modal-description-color: #969696;
-  --modal-selected-option-description-color: var(--subtle-color);
-
-  --notifications-background-color: #333;
-  --notifications-border-color: var(--ui-surface-border-color);
-  --notification-info-background-color: color-mix(in srgb, var(--alert-info-color) 10%, var(--modal-background-color));
-  --notification-error-background-color: color-mix(in srgb, var(--alert-error-color) 10%, var(--modal-background-color));
-  --notification-warning-background-color: color-mix(in srgb, var(--alert-warning-color) 10%, var(--modal-background-color));
-
-  --button-background-color: #20242a;
-  --button-hover-background-color: #292f36;
-  --button-color: var(--root-color);
-  --button-border-color: var(--ui-surface-border-color);
-  --primary-button-background-color: var(--ui-accent-color);
-  --primary-button-hover-background-color: color-mix(in srgb,
-      var(--ui-accent-color),
-      black 18%);
-  --primary-button-color: var(--ui-accent-contrast-color);
-  --primary-button-border-color: transparent;
-
-  --progress-background-color: #555;
-  --progress-sync-color: white;
-  --progress-index-color: yellow;
-
-  --text-field-background-color: var(--button-background-color);
-
-  --action-button-background-color: transparent;
-  --action-button-color: #adadad;
-  --action-button-hover-color: #37a1ed;
-  --action-button-active-color: #37a1ed;
-
-  --editor-caret-color: #fff;
-  --editor-selection-background-color: #d7e1f630;
-  --editor-panels-bottom-color: #fff;
-  --editor-panels-bottom-background-color: #262626;
-  --editor-panels-bottom-border-color: rgb(62, 62, 62);
-  --editor-completion-detail-color: #aaa;
-  --editor-completion-detail-selected-color: #d2d2d2;
-  --editor-list-bullet-color: rgb(150, 150, 150);
-  --editor-heading-color: #d1d1d1;
-  --editor-heading-meta-color: var(--meta-subtle-color);
-  --editor-hashtag-background-color: #004bbb;
-  --editor-hashtag-color: #e2e9ff;
-  --editor-hashtag-border-color: #007bff6b;
-  --editor-at-mention-color: #8ab4f8;
-  --editor-at-mention-signature-color: #9a9a90;
-  --editor-at-mention-background-color: rgba(138, 180, 248, 0.15);
-  --editor-at-mention-border-color: rgba(138, 180, 248, 0.35);
-  --editor-ruler-color: rgb(76, 75, 75);
-  --editor-naked-url-color: var(--link-color);
-  --editor-link-color: var(--link-color);
-  --editor-link-url-color: var(--link-color);
-  --editor-link-meta-color: var(--meta-subtle-color);
-  --editor-wiki-link-page-background-color: #a3bce712;
-  --editor-wiki-link-page-color: var(--link-color);
-  --editor-wiki-link-page-missing-color: var(--link-missing-color);
-  --editor-wiki-link-page-invalid-color: var(--link-invalid-color);
-  --editor-wiki-link-color: #8f96c2;
-  --editor-command-button-color: #fff;
-  --editor-command-button-background-color: #555;
-  --editor-command-button-hover-background-color: #777;
-  --editor-command-button-meta-color: var(--meta-subtle-color);
-  --editor-command-button-border-color: #666;
-  --editor-line-meta-color: var(--meta-subtle-color);
-  --editor-meta-color: var(--meta-color);
-  --editor-table-head-background-color: rgba(72, 72, 72, 0.4);
-  --editor-table-head-color: #eee;
-  --editor-table-even-background-color: rgba(72, 72, 72, 0.3);
-  --editor-blockquote-background-color: var(--subtle-background-color);
-  --editor-blockquote-color: var(--subtle-color);
-  --editor-blockquote-border-color: rgb(128, 128, 128);
-  --editor-comment-background-color: rgba(105, 105, 105, 0.05);
-  --editor-comment-border-color: rgb(90, 90, 90);
-  --editor-code-background-color: var(--subtle-background-color);
-  --editor-struct-color: #d6222e;
-  --editor-highlight-background-color: var(--highlight-color);
-  --editor-external-edit-color: rgba(255, 191, 71, 0.18);
+  --link-missing-color: #e08a4b;
+  --link-invalid-color: #d98aff;
+  --meta-color: #ef9aa0;
+  --editor-heading-meta-color: #7f8894;
+  --editor-hashtag-background-color: #223b66;
+  --editor-hashtag-color: #cfe0ff;
+  --editor-code-variable-color: #6fbbe0;
+  --editor-code-typename-color: #5fd39a;
+  --editor-code-string-color: #c3a0e0;
+  --editor-code-number-color: #c3a0e0;
+  --editor-code-atom-color: #ef9aa0;
+  --editor-struct-color: #ef9aa0;
+  --editor-external-edit-color: rgb(255 191 71 / 0.18);
   --editor-external-caret-color: #d99a2b;
-  --editor-code-comment-color: var(--meta-subtle-color);
-  --editor-code-variable-color: #41a3ce;
-  --editor-code-typename-color: #038138;
-  --editor-code-string-color: #986db9;
-  --editor-code-number-color: #986db9;
-  --editor-code-info-color: var(--subtle-color);
-  --editor-code-atom-color: #d6222e;
-  --editor-frontmatter-background-color: rgb(41, 40, 35, 0.5);
-  --editor-frontmatter-color: var(--subtle-color);
-  --editor-frontmatter-marker-color: #fff;
-  --editor-widget-background-color: rgba(72, 72, 72, 0.5);
-  --editor-task-marker-color: var(--subtle-color);
-  --editor-task-state-color: var(--subtle-color);
+  --editor-frontmatter-background-color: #1d1d1a;
+  --editor-frontmatter-marker-color: #e8858c;
+  --editor-directive-mark-color: #ef9aa0;
+  --editor-code-inserted-bg: rgb(95 211 154 / 0.14);
+  --editor-code-deleted-bg: rgb(255 138 128 / 0.14);
 
-  --editor-directive-mark-color: #ba0303;
-  --editor-directive-color: #898989;
-  --editor-directive-background-color: #4c4c4c7d;
-
-  --editor-panels-bottom-input-background-color: inherit;
-  --editor-panels-bottom-button-background-image: linear-gradient(#393939,
-      #111);
-  --editor-panels-bottom-button-active-background-image: linear-gradient(#111,
-      #333);
-
-  --danger-color: #f87171;
-  --danger-contrast-color: #fff;
-  --success-color: #4ade80;
-  --alert-error-background-color: rgba(220, 53, 69, 0.1);
-  --alert-error-color: #f87171;
-  --alert-error-border-color: rgba(220, 53, 69, 0.3);
-  --alert-warning-background-color: rgba(180, 83, 9, 0.1);
-  --alert-warning-color: #fbbf24;
-  --alert-warning-border-color: rgba(180, 83, 9, 0.3);
-  --alert-info-background-color: #14324f;
-  --alert-info-color: #8fc4ef;
-  --alert-info-border-color: rgba(143, 196, 239, 0.3);
-  --badge-background-color: #242a31;
-  --badge-color: #b9c2cd;
+  --editor-selection-background-color: color-mix(in srgb, var(--sb-accent) 28%, transparent);
+  --editor-hashtag-border-color: color-mix(in srgb, var(--sb-accent) 35%, transparent);
 }
 
 html[data-theme="dark"] {
@@ -360,6 +255,20 @@ html[data-theme="dark"] {
 @media (prefers-color-scheme: dark) {
   html:not([data-theme]):has(body.sb-standalone) {
     @include dark-theme;
+  }
+}
+
+// One clamp for every transition and animation the app and its sandboxed
+// views define; spinners stay legible as static rings.
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
   }
 }
 

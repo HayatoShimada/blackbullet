@@ -55,9 +55,10 @@ function setupNavigator() {
   };
   vi.stubGlobal("history", history);
   const flashNotification = vi.fn();
+  let shownPath = "Current.md";
   const client = {
     getIndexRef: () => ({ path: "index.md" }),
-    currentPath: () => "Current.md",
+    currentPath: () => shownPath,
     editorView: {
       state: { selection: { main: { head: 0, anchor: 0 } } },
       scrollDOM: { scrollTop: 0 },
@@ -67,6 +68,9 @@ function setupNavigator() {
   const navigator = new PathPageNavigator(client);
   return {
     navigator,
+    showPage: (path: string) => {
+      shownPath = path;
+    },
     history,
     location,
     flashNotification,
@@ -122,4 +126,43 @@ test("failed browser history navigation restores the displayed page URL", async 
     "Failed to navigate: Offline",
     "error",
   );
+});
+
+test("goBackFrom returns to the page an in-app navigation came from, once", async () => {
+  const { navigator, history, showPage } = setupNavigator();
+  navigator.subscribe(async () => {});
+
+  // Nothing was opened from inside the app yet: do not touch the history.
+  expect(navigator.goBackFrom("Other.md")).toBe(false);
+
+  await navigator.navigate({ path: "Other.md" });
+  showPage("Other.md");
+  history.go.mockClear();
+
+  // A different page is on screen: not ours to go back from.
+  expect(navigator.goBackFrom("Third.md")).toBe(false);
+  expect(history.go).not.toHaveBeenCalled();
+
+  expect(navigator.goBackFrom("Other.md")).toBe(true);
+  expect(history.go).toHaveBeenCalledWith(-1);
+
+  // Back on the first page the arrival no longer applies.
+  showPage("Current.md");
+  expect(navigator.goBackFrom("Other.md")).toBe(false);
+});
+
+test("goBackFrom ignores a failed navigation and an in-place replace", async () => {
+  const { navigator, showPage } = setupNavigator();
+  navigator.subscribe(async () => {
+    throw new Error("Offline");
+  });
+  await navigator.navigate({ path: "Other.md" });
+  showPage("Other.md");
+  expect(navigator.goBackFrom("Other.md")).toBe(false);
+
+  const second = setupNavigator();
+  second.navigator.subscribe(async () => {});
+  await second.navigator.navigate({ path: "Other.md" }, true);
+  second.showPage("Other.md");
+  expect(second.navigator.goBackFrom("Other.md")).toBe(false);
 });

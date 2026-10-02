@@ -47,6 +47,7 @@ import reducer from "./reducer.ts";
 import {
   type Action,
   type AppViewState,
+  type ConfirmOptions,
   initialViewState,
 } from "./types/ui.ts";
 
@@ -280,15 +281,14 @@ export class MainUI {
     });
   }
 
-  confirm(
-    message: string,
-    options?: { destructive?: boolean },
-  ): Promise<boolean> {
+  confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
     return new Promise((resolve) => {
       this.viewDispatch({
         type: "show-confirm",
         message,
         destructive: options?.destructive,
+        okLabel: options?.okLabel,
+        focusCancel: options?.focusCancel,
         callback: (value: boolean) => {
           this.viewDispatch({ type: "hide-confirm" });
           this.client.focus();
@@ -491,6 +491,8 @@ export class MainUI {
           <Confirm
             message={viewState.confirmMessage!}
             destructive={viewState.confirmDestructive}
+            okLabel={viewState.confirmOkLabel}
+            focusCancel={viewState.confirmFocusCancel}
             callback={(value) => {
               dispatch({ type: "hide-confirm" });
               viewState.confirmCallback!(value);
@@ -545,8 +547,8 @@ export class MainUI {
               .includes("hamburger")
               ? [
                   {
-                    icon: featherIcons.Menu,
-                    description: "Open Menu",
+                    icon: featherIcons.MoreHorizontal,
+                    description: "More",
                     class: "expander",
                     callback: () => {
                       document

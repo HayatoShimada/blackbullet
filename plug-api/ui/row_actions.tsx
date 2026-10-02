@@ -10,6 +10,8 @@ export type RowActionsProps = {
   readOnly: boolean;
   documentMode?: boolean;
   disabled?: boolean;
+  /** Names the row for assistive technology: "<label> for <subject>". */
+  subject?: string;
   onRun: (index: number) => void;
 };
 
@@ -20,6 +22,7 @@ export function RowActions({
   readOnly,
   documentMode,
   disabled,
+  subject,
   onRun,
 }: RowActionsProps) {
   const visible = actions
@@ -40,7 +43,9 @@ export function RowActions({
             class="sb-row-action"
             tabIndex={documentMode ? 0 : -1}
             title={action.label}
-            aria-label={action.label}
+            aria-label={
+              subject ? `${action.label} for ${subject}` : action.label
+            }
             disabled={disabled}
             onMouseDown={documentMode ? undefined : (e) => e.preventDefault()}
             onKeyDown={documentMode ? (e) => e.stopPropagation() : undefined}

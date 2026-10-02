@@ -65,7 +65,7 @@ async fn boots_and_serves_ping_config_and_bundle() {
     assert_eq!(index.status(), reqwest::StatusCode::OK);
     let index_body = index.text().await.unwrap();
     assert!(
-        index_body.contains("Welcome to the wondrous world of SilverBullet"),
+        index_body.contains("Your notes live here as Markdown files"),
         "got: {index_body}"
     );
 

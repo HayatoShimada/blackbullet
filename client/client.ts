@@ -1149,6 +1149,15 @@ export class Client {
   }
 
   /**
+   * Goes back to the page the current one was opened from, when it was opened
+   * from inside the app. False (and nothing happens) when there is no such
+   * page, e.g. after a reload.
+   */
+  goBackFromCurrentPage(): boolean {
+    return this.pageNavigator.goBackFrom(this.currentPath());
+  }
+
+  /**
    * Navigates the client to a particular ref (ingoring previous state)
    */
   navigate(ref: Ref | null, replaceState = false, newWindow = false) {

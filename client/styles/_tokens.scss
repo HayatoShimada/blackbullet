@@ -1,13 +1,132 @@
-// Palette custom properties shared by the editor, the Dashboard, the
-// login page and the setup wizard.
+// Palette, scale and motion tokens shared by the editor, the Dashboard, the
+// login page, the setup wizard and (through components.css) every sandboxed
+// view and panel. The dark readings live in `theme.scss` (dark-theme mixin).
+// Upstream token names (--ui-*, --editor-*, --modal-*, --button-*) are
+// re-pointed to these in theme.scss; new names are prefixed --sb-.
 html {
-  --ui-accent-color: #3569b8;
-  --ui-accent-contrast-color: #fff;
+  // Type
+  --sb-font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, Arial, sans-serif;
+  --sb-font-mono: "iA-Mono", ui-monospace, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+  --sb-text-xs: 11px;
+  --sb-text-sm: 12.5px;
+  --sb-text-md: 14px;
+  --sb-text-lg: 16px;
+  --sb-text-editor: 17px;
+  --sb-text-title: 20px;
+  --sb-leading: 1.45;
+
+  // Spacing, control and row sizes (touch values are set below).
+  --sb-space-1: 4px;
+  --sb-space-2: 8px;
+  --sb-space-3: 12px;
+  --sb-space-4: 16px;
+  --sb-space-5: 24px;
+  --sb-space-6: 32px;
+  --sb-control: 32px;
+  --sb-control-touch: 44px;
+  --sb-row: 36px;
+
+  // Radius
+  --sb-radius-1: 4px;
+  --sb-radius-2: 8px;
+  --sb-radius-3: 12px;
+  --sb-radius-pill: 999px;
+
+  // Motion
+  --sb-dur-1: 80ms;
+  --sb-dur-2: 160ms;
+  --sb-dur-3: 240ms;
+  // Ambient motion (loops and slow fades); the reduced-motion clamp in
+  // theme.scss stills them.
+  --sb-dur-blink: 1s;
+  --sb-dur-delay: 0.3s;
+  --sb-dur-spin: 0.8s;
+  --sb-dur-shimmer: 1.4s;
+  --sb-dur-fade-slow: 3s;
+  --sb-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sb-ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  // Surfaces (light reading)
+  --sb-bg: #ffffff;
+  --sb-bg-panel: #f6f7f8;
+  --sb-bg-2: #eef1f4;
+  --sb-line: #e4e7eb;
+  --sb-line-strong: #8e97a1;
+
+  // Ink
+  --sb-ink: #1c2128;
+  --sb-ink-2: #5b6572;
+  --sb-ink-3: #667180;
+
+  // Accent and semantic roles
+  --sb-accent: #2f5fb3;
+  --sb-on-accent: #ffffff;
+  --sb-accent-soft: color-mix(in srgb, var(--sb-accent) 12%, var(--sb-bg-panel));
+  --sb-link: #2456b0;
+  --sb-danger: #b42318;
+  --sb-warn: #8a5a00;
+  --sb-ok: #1e7a4b;
+  --sb-info: var(--sb-accent);
+  --sb-focus: var(--sb-accent);
+
+  // Theme-aware tints; currentColor resolves where the variable is used.
+  --sb-overlay-8: color-mix(in srgb, currentColor 8%, transparent);
+  --sb-overlay-16: color-mix(in srgb, currentColor 16%, transparent);
+  --sb-skeleton: #e9ecf0;
+
+  // Elevation: shadows carry elevation, hairlines carry edges.
+  --sb-shadow-color: 0 0 0;
+  --sb-shadow-1: 0 1px 2px rgb(var(--sb-shadow-color) / 0.06);
+  --sb-shadow-2: 0 4px 16px rgb(var(--sb-shadow-color) / 0.1), 0 1px 2px rgb(var(--sb-shadow-color) / 0.06);
+  --sb-shadow-3: 0 16px 48px rgb(var(--sb-shadow-color) / 0.18), 0 2px 6px rgb(var(--sb-shadow-color) / 0.08);
+
+  --sb-backdrop: rgb(0 0 0 / 0.24);
+
+  --sb-on-danger: #ffffff;
+  --sb-toast-info-bg: #f6f7f8;
+  --sb-toast-info-fg: #1c2128;
+  --sb-toast-warning-bg: #fdf3df;
+  --sb-toast-warning-fg: #5c3b00;
+  --sb-toast-error-bg: #fdecec;
+  --sb-toast-error-fg: #7f1d1d;
+
+  // Editor roles whose light reading is a literal (every other role is a
+  // var() of the palette above and lives in theme.scss).
+  --link-missing-color: #9e4705;
+  --link-invalid-color: #a40bc8;
+  --meta-color: #7a2630;
+  --editor-heading-meta-color: #7b8591;
+  --editor-hashtag-background-color: #e3ecfb;
+  --editor-hashtag-color: #1d4a94;
+  --editor-code-variable-color: #024866;
+  --editor-code-typename-color: #05723a;
+  --editor-code-string-color: #540293;
+  --editor-code-number-color: #05723a;
+  --editor-code-atom-color: #5a0000;
+  --editor-struct-color: #8b1a1a;
+  --editor-external-edit-color: rgb(255 191 71 / 0.28);
+  --editor-external-caret-color: #e8a33d;
+  --editor-frontmatter-background-color: #fbf8ea;
+  --editor-frontmatter-marker-color: #8a3a42;
+  --editor-directive-mark-color: #6c0101;
+  --editor-code-inserted-bg: rgb(30 122 75 / 0.14);
+  --editor-code-deleted-bg: rgb(180 35 24 / 0.12);
+
+  // Legacy names (kept; upstream and plugs still read them).
+  --ui-accent-color: var(--sb-accent);
+  --ui-accent-contrast-color: var(--sb-on-accent);
   --primary-button-color: var(--ui-accent-contrast-color);
   --primary-button-background-color: var(--ui-accent-color);
   --primary-button-hover-background-color: color-mix(in srgb,
       var(--primary-button-background-color),
       black 18%);
   --primary-button-border-color: transparent;
-  --modal-border-color: #d8dce1;
+  --modal-border-color: var(--sb-line);
+}
+
+@media (pointer: coarse) {
+  html {
+    --sb-control: 44px;
+    --sb-row: 44px;
+  }
 }

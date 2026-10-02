@@ -31,7 +31,8 @@ $comment-border: 1px;
 }
 
 #sb-main .cm-editor {
-  font-size: 18px;
+  font-size: var(--sb-text-editor);
+  line-height: 1.6;
   height: 100%;
 
   .cm-content {
@@ -39,7 +40,7 @@ $comment-border: 1px;
     margin-left: auto;
     margin-right: auto;
     max-width: var(--#{"editor-width"});
-    padding: 5px 20px;
+    padding: 8px 24px 0;
 
     --editor-column: 1ch;
     --editor-base-font: 1em;
@@ -71,8 +72,14 @@ $comment-border: 1px;
     &.sb-line-h4,
     &.sb-line-h5,
     &.sb-line-h6 {
-      font-weight: bold;
+      font-weight: 600;
+      line-height: 1.3;
       --sb-line-pad-y: 2px;
+    }
+
+    &.sb-line-h1,
+    &.sb-line-h2 {
+      --sb-line-pad-y: 6px;
     }
   }
 
@@ -82,17 +89,17 @@ $comment-border: 1px;
 
   .sb-line-h1,
   h1 {
-    font-size: 1.5em;
+    font-size: 1.6em;
   }
 
   .sb-line-h2,
   h2 {
-    font-size: 1.2em;
+    font-size: 1.3em;
   }
 
   .sb-line-h3,
   h3 {
-    font-size: 1.1em;
+    font-size: 1.15em;
   }
 
   .sb-line-h4,
@@ -118,15 +125,16 @@ $comment-border: 1px;
   }
 
   .cm-panels-bottom .cm-vim-panel {
-    padding: 0 20px;
+    padding: 0 24px;
     max-width: var(--editor-width);
     margin: auto;
-    font-family: var(--editor-font);
+    font-family: var(--sb-font-mono);
+    font-size: 0.92em;
     height: 1.5em;
     line-height: 1.5em;
 
     input {
-      font-family: var(--editor-font);
+      font-family: var(--sb-font-mono);
       font-size: 1em;
     }
   }
@@ -158,19 +166,19 @@ $comment-border: 1px;
 
   .sb-external-edit {
     background-color: var(--editor-external-edit-color);
-    transition: background-color 3s ease-out 1s;
+    transition: background-color var(--sb-dur-fade-slow) var(--sb-ease-out) var(--sb-dur-blink);
   }
 
   .sb-external-caret {
     position: relative;
     border-left: 2px solid var(--editor-external-caret-color);
     margin-left: -1px;
-    animation: sb-external-caret-blink 1s steps(1) infinite;
+    animation: sb-external-caret-blink var(--sb-dur-blink) steps(1) infinite;
   }
 
   .cm-tooltip.sb-external-caret-label {
     border: none;
-    font-family: var(--editor-font);
+    font-family: var(--ui-font);
     text-indent: 0;
     font-size: 0.65em;
     line-height: 1.3;
@@ -204,11 +212,17 @@ $comment-border: 1px;
     width: 100%;
   }
 
+  .cm-frontmatterFoldPlaceholder,
   .cm-frontmatterFoldStatus {
-    color: var(--subtle-color);
+    font-family: var(--ui-font);
+    font-size: var(--sb-text-md);
+  }
+
+  .cm-frontmatterFoldStatus {
+    color: var(--sb-ink-2);
     font-size: 0.85em;
     margin-left: 0.4em;
-    opacity: 0.75;
+    opacity: 1;
   }
 
   .sb-line-comment {
@@ -223,6 +237,15 @@ $comment-border: 1px;
   .cm-task-checked,
   .sb-line-task:has(.cm-task-checked) .sb-wiki-link {
     text-decoration: line-through !important;
+  }
+
+  // A completed task goes quiet, not red: the [completed: …] attribute is
+  // grey. It stays inline (native wrapping, caret and selection geometry);
+  // CSS cannot un-strike a descendant, so it is struck with the task text.
+  .sb-line-task:has(.cm-task-checked) .sb-meta,
+  .cm-task-checked .sb-attribute-name,
+  .sb-line-task:has(.cm-task-checked) .sb-attribute-name {
+    color: var(--editor-task-completed-color);
   }
 
   .cm-tooltip-autocomplete {
@@ -374,6 +397,29 @@ $comment-border: 1px;
     }
   }
 
+  // Code, raw frontmatter and key hints keep iA Writer Mono S.
+  .sb-line-code,
+  .sb-line-fenced-code,
+  .sb-code,
+  .sb-frontmatter,
+  .sb-conflict-section-body,
+  .sb-kbd,
+  .cm-vim-panel,
+  tt,
+  code,
+  pre {
+    font-family: var(--sb-font-mono);
+    font-size: 0.92em;
+  }
+
+  .sb-line-code .sb-code,
+  .sb-line-fenced-code .sb-code,
+  .sb-frontmatter .sb-frontmatter,
+  pre code,
+  .cm-vim-panel .cm-vim-panel {
+    font-size: inherit;
+  }
+
   .sb-line-hr {
     margin-top: 1em;
     margin-bottom: -1em;
@@ -423,10 +469,10 @@ $comment-border: 1px;
     display: inline-flex;
     align-items: center;
     gap: 0.4em;
-    color: var(--top-loading-color, #888);
+    color: var(--top-loading-color);
     opacity: 0.7;
     vertical-align: middle;
-    animation: sb-loading-appear 0.2s ease-out 0.3s both;
+    animation: sb-loading-appear var(--sb-dur-2) var(--sb-ease-out) var(--sb-dur-delay) both;
   }
 
   @keyframes sb-loading-appear {
@@ -451,7 +497,7 @@ $comment-border: 1px;
     border: 2px solid currentColor;
     border-top-color: transparent;
     border-radius: 50%;
-    animation: sb-loading-spin 0.8s linear infinite;
+    animation: sb-loading-spin var(--sb-dur-spin) linear infinite;
     box-sizing: border-box;
   }
 
@@ -477,7 +523,7 @@ $comment-border: 1px;
   }
 
   .sb-task-deadline {
-    background-color: rgba(22, 22, 22, 0.07);
+    background-color: var(--sb-overlay-8);
   }
 
   .sb-line-frontmatter-outside,
@@ -544,6 +590,16 @@ $comment-border: 1px;
     overflow: auto;
   }
 
+  // A wide table scrolls inside its container instead of clipping its last
+  // column or widening the page. The table itself stays display:table at
+  // full width so the header fill and zebra stripes span the frame.
+  .sb-markdown-widget .content,
+  .sb-lua-directive-block .content,
+  .sb-page-widget-body {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
   .sb-html-widget {
     font-weight: normal;
   }
@@ -566,14 +622,20 @@ $comment-border: 1px;
   }
 
   thead tr td {
-    // Primarily to make the column headers look reasonable with the button bar that may be put on top
-    padding: 11px 8px;
+    padding: 8px 10px;
   }
 
   th,
   td {
-    padding: 8px;
-    white-space: nowrap;
+    padding: 6px 10px;
+    // Cells wrap instead of clipping; only code keeps its line.
+    white-space: normal;
+    overflow-wrap: anywhere;
+
+    code,
+    .sb-code {
+      white-space: nowrap;
+    }
   }
 
   .sb-table-align-left {
@@ -604,11 +666,18 @@ $comment-border: 1px;
     float: right;
     cursor: pointer;
     margin: 0 3px;
+    color: var(--sb-ink-3);
   }
 
   .sb-code-copy-button>svg {
     height: 1rem;
     width: 1rem;
+  }
+
+  // A database view has its own header and menu; a lone copy icon floating
+  // above its frame is a second, unlabelled copy. Other rendered fences keep it.
+  .sb-fenced-code-iframe:has(.sb-db-widget) .sb-code-copy-button {
+    display: none;
   }
 
   .sb-line-fenced-code .sb-code {
@@ -656,15 +725,16 @@ $comment-border: 1px;
 
   .sb-lua-top-widget,
   .sb-lua-bottom-widget {
-    border: 1px solid var(--editor-widget-background-color);
-    border-radius: 5px;
+    border: 1px solid var(--sb-line);
+    border-radius: var(--sb-radius-2);
     white-space: normal;
     position: relative;
     min-height: 48px;
   }
 
+  // Room above for the host bar, which sits half outside the frame.
   .sb-lua-top-widget {
-    margin: 0 0 10px 0;
+    margin: 14px 0 10px 0;
   }
 
   .sb-lua-bottom-widget {
@@ -674,23 +744,25 @@ $comment-border: 1px;
   .sb-lua-top-widget h1,
   .sb-lua-bottom-widget h1 {
     margin: -10px -10px 10px -10px !important;
-    // Vertical padding chosen so the rendered h1 strip has the same total
-    // height as the hover-revealed `.button-bar` overlay sitting on top of it
-    padding: 16px 10px !important;
-    background-color: var(--editor-widget-background-color);
-    font-size: 1.2em;
-    line-height: 1;
+    padding: 11px 12px !important;
+    background-color: var(--sb-bg-2);
+    border-radius: 7px 7px 0 0;
+    font-size: 1.15em;
+    line-height: 1.3;
   }
 
   .sb-markdown-top-widget h1,
   .sb-markdown-bottom-widget h1 {
     margin: 0 0 5px 0;
-    padding: 10px !important;
-    background-color: var(--editor-widget-background-color);
-    font-size: 1.2em;
+    padding: 11px 12px !important;
+    background-color: var(--sb-bg-2);
+    border-radius: 7px 7px 0 0;
+    font-size: 1.15em;
+    line-height: 1.3;
   }
 
   .sb-markdown-top-widget:has(*) {
+    margin-top: 14px;
     margin-bottom: 10px;
   }
 
@@ -707,8 +779,8 @@ $comment-border: 1px;
   .sb-lua-bottom-widget p strong {
     display: block;
     padding: 10px 12px;
-    background-color: var(--editor-widget-background-color);
-    border: 1px solid var(--editor-widget-background-color);
+    background-color: var(--sb-bg-2);
+    border: 1px solid var(--sb-line);
     border-radius: 8px 8px 0 0;
     font-weight: 600;
   }
@@ -716,11 +788,11 @@ $comment-border: 1px;
   .sb-lua-bottom-widget blockquote {
     margin: 0 5px;
     padding: 12px;
-    border: 1px solid var(--editor-widget-background-color);
+    border: 1px solid var(--sb-line);
     border-radius: 8px;
-    background-color: var(--editor-widget-background-color);
+    background-color: var(--sb-bg-2);
     color: var(--editor-text-color);
-    border-top: 1px solid var(--editor-widget-background-color);
+    border-top: 1px solid var(--sb-line);
   }
 
   .sb-markdown-top-widget:has(*) .content {
@@ -734,13 +806,14 @@ $comment-border: 1px;
   }
 
   // Navigator page widgets provide their own frame; share only the typography.
+  // The frame is a hairline with an 8px radius.
   .sb-markdown-widget,
   .sb-lua-directive-block,
   .sb-lua-directive-inline,
   .sb-markdown-top-widget:has(*),
   .sb-markdown-bottom-widget:has(*) {
-    border: 1px solid var(--editor-widget-background-color);
-    border-radius: 5px;
+    border: 1px solid var(--sb-line);
+    border-radius: var(--sb-radius-2);
     white-space: normal;
     position: relative;
     min-height: 48px;
@@ -749,76 +822,158 @@ $comment-border: 1px;
       overflow-y: auto;
     }
 
-    // Anchored to the frame's own `position: relative` above, which is why
-    // these live here rather than with the typography below.
-    &:hover .button-bar {
-      display: block;
-    }
-
-    @media (hover: none) and (pointer: coarse) {
-      .button-bar {
-        display: block !important;
-      }
-    }
-
+    // The host bar sits half outside the frame's top-right edge so it never
+    // covers the widget's own header. Hover or focus shows it; touch shows
+    // only the more button.
     .button-bar {
       position: absolute;
-      right: 0;
-      top: 0;
-      display: none;
-      background: var(--editor-widget-background-color);
-      padding-inline: 3px;
-      padding: 4px 0;
-      border-radius: 0 0 0 5px;
-
-      button {
-        border: none;
-        background: none;
-        cursor: pointer;
-        color: var(--root-color);
-        margin-right: -8px;
-        padding: 11px 8px;
-      }
-
-      button:last-of-type {
-        margin-right: 2px;
-      }
-    }
-  }
-
-  .sb-lua-view {
-    > div > .content {
-      padding-right: 44px;
-
-      &:has(.sb-nav-row) {
-        padding-right: 0;
-      }
-    }
-
-    > div > .button-bar {
-      z-index: 1;
-      display: block;
+      top: -14px;
+      right: 8px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      height: 28px;
+      box-sizing: border-box;
+      padding: 0 2px;
+      background: var(--sb-bg);
+      border: 1px solid var(--sb-line);
+      border-radius: var(--sb-radius-1);
+      box-shadow: var(--sb-shadow-1);
       opacity: 0;
       pointer-events: none;
+      transition: opacity var(--sb-dur-2) var(--sb-ease-out);
 
       button {
-        min-width: 44px;
-        min-height: 44px;
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 28px;
+        height: 28px;
+        margin: 0;
+        padding: 0;
+        border: none;
+        border-radius: var(--sb-radius-1);
+        background: none;
+        color: var(--sb-ink-2);
+        cursor: pointer;
+
+        &:hover {
+          background: var(--sb-overlay-8);
+          color: var(--sb-ink);
+        }
+
+        &:focus-visible {
+          outline: 2px solid var(--sb-focus);
+          outline-offset: 1px;
+        }
+      }
+
+      // Copy and Bake are secondary: the visible bar is Reload · Edit. With a
+      // ⋯ button they appear once it is open; until the owner emits one, the
+      // bar itself is the disclosure (pointer over it, or focus inside it).
+      button:is([data-button="copy"], [data-button="bake"]) {
+        display: none;
+      }
+
+      &:not(:has(button[data-button="more"])):is(:hover, :focus-within) button:is([data-button="copy"], [data-button="bake"]),
+      &.open button:is([data-button="copy"], [data-button="bake"]) {
+        display: grid;
       }
     }
 
-    &:hover > div > .button-bar,
-    &:focus-within > div > .button-bar {
+    &:hover .button-bar,
+    &:focus-within .button-bar,
+    .button-bar.open {
       opacity: 1;
       pointer-events: auto;
     }
 
+    // A database view has its own header; the host never adds a second bar.
+    &.sb-db-widget .button-bar {
+      display: none;
+    }
+
+    // Touch: one 44px ⋯ at the desktop bar's spot (on the frame's top edge,
+    // right 8px; the drawn 32px chip centred on the edge, so it covers a half
+    // line above at most and never the widget's own header). Without a ⋯ button from the host the bar draws one (::after);
+    // touching it (hover is sticky on touch) or focusing inside it opens the
+    // bar to Reload · Edit, with the ⋯ staying where the finger is.
     @media (hover: none) and (pointer: coarse) {
-      > div > .button-bar {
+      .button-bar {
+        top: -22px;
+        right: 8px;
+        height: 44px;
+        padding: 0;
+        background: none;
+        border: none;
+        border-radius: var(--sb-radius-2);
+        box-shadow: none;
         opacity: 1;
         pointer-events: auto;
+
+        button {
+          width: 44px;
+          height: 44px;
+        }
+
+        // Copy and Bake never show on touch: they live behind the desktop bar.
+        button:is([data-button="copy"], [data-button="bake"]) {
+          display: none !important;
+        }
+
+        &:not(:has(button[data-button="more"])) {
+          // Reload and Edit wait behind the ⋯.
+          button {
+            display: none;
+          }
+
+          &::after {
+            content: "\22EF";
+            box-sizing: border-box;
+            display: grid;
+            place-items: center;
+            order: 1;
+            width: 44px;
+            height: 44px;
+            // A 32px drawn chip inside the 44px hit area.
+            border: 6px solid transparent;
+            border-radius: 50%;
+            background: var(--sb-bg) padding-box;
+            box-shadow: inset 0 0 0 1px var(--sb-line);
+            color: var(--sb-ink-2);
+            font-size: 18px;
+            line-height: 1;
+          }
+
+          &:is(:hover, :focus-within, .open) {
+            background: var(--sb-bg);
+            box-shadow:
+              0 0 0 1px var(--sb-line),
+              var(--sb-shadow-1);
+
+            button:is([data-button="reload"], [data-button="edit"]) {
+              display: grid;
+            }
+
+            &::after {
+              box-shadow: none;
+            }
+          }
+        }
+
+        &:has(button[data-button="more"]):not(.open) button:not([data-button="more"]) {
+          display: none;
+        }
       }
     }
+  }
+
+  // An inline widget flows with the text: a frame would fragment into broken
+  // boxes across wrapped lines.
+  .sb-lua-directive-inline {
+    border: none;
+    border-radius: 0;
+    min-height: 0;
   }
 
   // Page-docked content views share document typography; panel views use
@@ -850,17 +1005,32 @@ $comment-border: 1px;
 
 
     span.task-deadline {
-      background-color: rgba(22, 22, 22, 0.07);
+      background-color: var(--sb-overlay-8);
     }
 
     tt {
       background-color: var(--editor-code-background-color);
     }
 
-    button:not(.sb-button):not(.sb-button-primary):not(.sb-button-danger):not(.sb-button-icon) {
-      font-family: var(--editor-font);
-      font-size: inherit;
+    button:not(.sb-button):not(.sb-button-primary):not(.sb-button-danger):not(.sb-button-icon):not([data-button]) {
+      font-family: var(--ui-font);
+      font-size: var(--sb-text-md);
+      min-height: 28px;
+      padding: 0 12px;
+      color: var(--button-color);
+      background: var(--button-background-color);
+      border: 1px solid var(--button-border-color);
+      border-radius: var(--sb-radius-1);
+      cursor: pointer;
       white-space: nowrap;
+
+      &:hover {
+        background: var(--button-hover-background-color);
+      }
+
+      @media (pointer: coarse) {
+        min-height: var(--sb-control-touch);
+      }
     }
 
   }
@@ -954,7 +1124,7 @@ $comment-border: 1px;
   .sb-conflict-section-hash {
     margin-left: 6px;
     font-weight: normal;
-    font-family: var(--editor-monospace-font, monospace);
+    font-family: var(--sb-font-mono);
     font-size: 0.9em;
     opacity: 0.6;
   }
@@ -966,8 +1136,8 @@ $comment-border: 1px;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: var(--editor-monospace-font, monospace);
-    font-size: 0.85em;
+    font-family: var(--sb-font-mono);
+    font-size: 0.92em;
     color: var(--editor-code-color);
     background-color: var(--editor-code-background-color);
     border-radius: 3px;
@@ -994,6 +1164,13 @@ $comment-border: 1px;
       margin: 0 0 -2ch 0;
       border: 1px solid var(--editor-widget-background-color);
       border-radius: 5px;
+    }
+
+    // The database view sits inside the widget frame; the iframe's own edge
+    // would be a second line against it.
+    .sb-db-widget iframe {
+      border: 0;
+      border-radius: 0;
     }
   }
 
@@ -1085,8 +1262,9 @@ $comment-border: 1px;
   .sb-frontmatter-marker {
     cursor: pointer;
     float: right;
-    font-size: 80%;
-    opacity: 0.8;
+    font-family: var(--ui-font);
+    font-size: var(--sb-text-sm);
+    opacity: 1;
     padding-right: 7px;
     user-select: none;
   }
@@ -1098,6 +1276,7 @@ $comment-border: 1px;
 
   .cm-scroller {
     padding-bottom: 20em;
+    line-height: 1.6;
   }
 
   // Block editor: the handle and the fold toggle hang in the left margin of a
@@ -1117,7 +1296,7 @@ $comment-border: 1px;
         opacity: 0;
         color: var(--subtle-color);
         user-select: none;
-        transition: opacity 0.12s;
+        transition: opacity var(--sb-dur-1) var(--sb-ease-out);
       }
 
       // The handle: a grip, pressed and dragged to move the block.
@@ -1157,7 +1336,7 @@ $comment-border: 1px;
 .sb-block-drop-line {
   position: fixed;
   height: 2px;
-  background: var(--link-color, #3a6fd8);
+  background: var(--sb-accent);
   border-radius: 1px;
   pointer-events: none;
   z-index: 100;

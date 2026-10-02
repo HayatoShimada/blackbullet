@@ -14,79 +14,78 @@ textarea,
   font-family: var(--ui-font);
 }
 
+/* The control grammar: seven shapes (text, primary, danger, icon, segment,
+   chip, input) at two sizes (--sb-control: 32px; 44px on touch), one 2px
+   focus ring, one hover tint, the 4/8/12 radius scale. */
+
 /* Button base (so panels linking components.css get it) */
 .sb-button,
-.sb-button-primary {
+.sb-button-primary,
+.sb-button-danger {
   --color: var(--button-color);
   --background-color: var(--button-background-color);
   --hover-background-color: var(--button-hover-background-color);
   --border-color: var(--button-border-color);
 
-  &.sb-button-primary {
-    --color: var(--primary-button-color);
-    --background-color: var(--primary-button-background-color);
-    --hover-background-color: var(--primary-button-hover-background-color);
-    --border-color: var(--primary-button-border-color);
-  }
-
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: var(--sb-control);
+  padding: 0 12px;
   background-color: var(--background-color);
   color: var(--color);
-
   box-shadow: none;
-
   border: 1px solid var(--border-color);
-  border-radius: 2px;
-  padding: 0.35em 0.75em;
-  font-size: 13px;
+  border-radius: var(--sb-radius-1);
+  font-size: var(--sb-text-md);
+  font-weight: 500;
+  line-height: 1.2;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--sb-dur-1) var(--sb-ease-out);
 
   &:hover {
     background-color: var(--hover-background-color);
   }
-
-  &:focus-visible {
-    outline: 2px solid var(--ui-accent-color);
-    outline-offset: 2px;
-  }
 }
 
+.sb-button.sb-button-primary,
+.sb-button-primary {
+  --color: var(--primary-button-color);
+  --background-color: var(--primary-button-background-color);
+  --hover-background-color: var(--primary-button-hover-background-color);
+  --border-color: var(--primary-button-border-color);
+}
+
+// Red is for actions that cannot be undone from here.
+.sb-button.sb-button-danger,
 .sb-button-danger {
-  background-color: var(--danger-color);
-  color: var(--danger-contrast-color);
-  border: 1px solid var(--danger-color);
-  border-radius: 2px;
-  padding: 0.35em 0.75em;
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
-
-  // Subtle darken on hover (keeps it red — the base .sb-button:hover would
-  // otherwise repaint it with --button-hover-background-color).
-  &:hover {
-    background-color: color-mix(in srgb, var(--danger-color), black 12%);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
+  --color: var(--danger-contrast-color);
+  --background-color: var(--danger-color);
+  --hover-background-color: color-mix(in srgb, var(--danger-color), black 12%);
+  --border-color: var(--danger-color);
 }
 
 .sb-button-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35em;
+  box-sizing: border-box;
+  width: var(--sb-control);
+  height: var(--sb-control);
+  padding: 0;
   background: none;
   border: none;
-  color: var(--subtle-color);
-  border-radius: 2px;
+  color: var(--sb-ink-2);
+  border-radius: var(--sb-radius-1);
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color var(--sb-dur-1) var(--sb-ease-out), color var(--sb-dur-1) var(--sb-ease-out);
 
   &:hover {
-    background-color: var(--subtle-background-color);
-    color: var(--button-color);
+    background-color: var(--sb-overlay-8);
+    color: var(--sb-ink);
   }
 
   svg {
@@ -102,18 +101,40 @@ textarea,
   cursor: default;
 }
 
+// One focus ring for every control.
+.sb-button:focus-visible,
+.sb-button-primary:focus-visible,
+.sb-button-danger:focus-visible,
+.sb-button-icon:focus-visible,
+.sb-segment:focus-visible,
+.sb-chip:focus-visible,
+.sb-tab:focus-visible,
+.sb-checkbox:focus-visible {
+  outline: 2px solid var(--sb-focus);
+  outline-offset: 2px;
+}
+
 .sb-input,
 .sb-select {
-  padding: 0.3em 0.6em;
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: var(--sb-control);
+  padding: 6px 10px;
+  font-size: var(--sb-text-md);
+  line-height: 1.3;
   background-color: var(--text-field-background-color);
   color: var(--root-color);
-  border: 1px solid var(--button-border-color);
-  border-radius: 2px;
+  border: 1px solid var(--sb-line-strong);
+  border-radius: var(--sb-radius-1);
   outline: none;
 
+  &::placeholder {
+    color: var(--sb-ink-2);
+  }
+
   &:focus-visible {
-    border-color: var(--text-field-focus-color);
+    border-color: var(--sb-focus);
+    outline: 2px solid var(--sb-focus);
+    outline-offset: 1px;
     box-shadow: none;
   }
 
@@ -124,7 +145,51 @@ textarea,
 }
 
 .sb-select {
-  padding-right: 1.2em;
+  padding-right: 1.6em;
+}
+
+// A chip: a status, a tag, a filter. Text-sized, pill-shaped.
+.sb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 22px;
+  padding: 0 8px;
+  background-color: var(--sb-bg-2);
+  color: var(--sb-ink-2);
+  border: 1px solid transparent;
+  border-radius: var(--sb-radius-pill);
+  font-family: inherit;
+  font-size: var(--sb-text-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+button.sb-chip {
+  cursor: pointer;
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--sb-ink) 10%, var(--sb-bg-2));
+  }
+}
+
+@media (pointer: coarse) {
+
+  .sb-input,
+  .sb-select {
+    min-height: var(--sb-control-touch);
+    font-size: var(--sb-text-lg);
+  }
+
+  button.sb-chip {
+    min-height: var(--sb-control-touch);
+    padding: 0 14px;
+  }
+
+  .sb-button .sb-kbd {
+    display: none;
+  }
 }
 
 .sb-checkbox {
@@ -148,7 +213,7 @@ textarea,
   color: var(--subtle-color);
   font-size: 0.9em;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color var(--sb-dur-1) var(--sb-ease-out), border-color var(--sb-dur-1) var(--sb-ease-out);
 
   &:hover {
     color: var(--root-color);
@@ -164,7 +229,7 @@ textarea,
 .sb-alert {
   padding: 8px 12px;
   font-size: 0.85em;
-  border-radius: 2px;
+  border-radius: var(--sb-radius-1);
   border: 1px solid transparent;
 }
 
@@ -191,11 +256,11 @@ textarea,
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  font-size: 10px;
+  font-size: var(--sb-text-xs);
   font-weight: 500;
   background-color: var(--badge-background-color);
   color: var(--badge-color);
-  border-radius: 2px;
+  border-radius: var(--sb-radius-1);
 }
 
 .sb-progress {
@@ -209,21 +274,35 @@ textarea,
 .sb-progress-bar {
   height: 100%;
   background-color: var(--ui-accent-color);
-  transition: width 150ms ease;
+  transition: width var(--sb-dur-2) var(--sb-ease-out);
 }
 
-/* Subtle and inherits the button's text color. */
+/* A key hint: a small chip. Inside a button it takes the button's colour. */
 .sb-kbd {
+  display: inline-block;
   margin-left: 0.5em;
-  font-size: 0.85em;
-  opacity: 0.6;
+  padding: 1px 5px;
+  background-color: var(--sb-bg-2);
+  color: var(--sb-ink-2);
+  border-radius: var(--sb-radius-1);
+  font-family: var(--sb-font-mono);
+  font-size: var(--sb-text-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.sb-button .sb-kbd,
+.sb-button-primary .sb-kbd,
+.sb-button-danger .sb-kbd {
+  background-color: color-mix(in srgb, currentColor 16%, transparent);
+  color: inherit;
 }
 
 .sb-url-input {
   display: flex;
   align-items: stretch;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--sb-radius-1);
   background: var(--text-field-background-color);
   overflow: hidden;
 }
@@ -256,11 +335,11 @@ textarea,
 }
 
 .sb-url-affix:first-child {
-  border-right: 1px solid #0002;
+  border-right: 1px solid var(--sb-line);
 }
 
 .sb-url-affix:last-child {
-  border-left: 1px solid #0002;
+  border-left: 1px solid var(--sb-line);
 }
 
 .sb-segments-wrap {
@@ -274,10 +353,8 @@ textarea,
   flex-wrap: wrap;
   gap: 2px;
   padding: 2px;
-  border-radius: 6px;
-  background-color: color-mix(in srgb,
-      var(--ui-surface-section-background-color) 60%,
-      transparent);
+  border-radius: var(--sb-radius-2);
+  background-color: var(--sb-bg-2);
 }
 
 .sb-segment {
@@ -285,26 +362,37 @@ textarea,
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
-  padding: 3px 8px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 0 10px;
   border: 0;
-  border-radius: 2px;
+  border-radius: 6px;
   background-color: transparent;
-  color: var(--subtle-color);
-  font-family: inherit;
-  font-size: 12px;
+  color: var(--sb-ink-2);
+  font-family: var(--ui-font, var(--sb-font-sans, system-ui, sans-serif));
+  font-size: var(--sb-text-sm);
   line-height: 16px;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--sb-dur-1) var(--sb-ease-out), color var(--sb-dur-1) var(--sb-ease-out);
 }
 
 .sb-segment:hover:not(.sb-segment-active) {
-  background-color: var(--ui-surface-hover-background-color);
-  color: var(--modal-color);
+  background-color: var(--sb-overlay-8);
+  color: var(--sb-ink);
 }
 
+// The raised pill: the active segment is the page's colour lifted off the wrap.
 .sb-segment-active {
-  background-color: var(--modal-selected-option-background-color);
-  color: var(--modal-selected-option-color);
+  background-color: var(--sb-bg);
+  box-shadow: var(--sb-shadow-1);
+  color: var(--sb-ink);
+}
+
+@media (pointer: coarse) {
+  .sb-segment {
+    min-height: var(--sb-control-touch);
+  }
 }
 
 .sb-segment-icon {
@@ -341,7 +429,7 @@ textarea,
   bottom: 0;
   width: 2px;
   background-color: transparent;
-  transition: background-color 120ms ease-out;
+  transition: background-color var(--sb-dur-1) var(--sb-ease-out);
 }
 
 .sb-resizer-lhs::after {
@@ -354,12 +442,6 @@ textarea,
 
 .sb-resizer:hover::after {
   background-color: var(--ui-surface-border-color);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sb-resizer::after {
-    transition: none;
-  }
 }
 
 .sb-resizer-lhs {
@@ -395,8 +477,8 @@ textarea,
   background-color: var(--modal-background-color);
   background-image: linear-gradient(var(--sb-nav-band, transparent),
       var(--sb-nav-band, transparent));
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 20px);
-  mask-image: linear-gradient(to right, transparent, #000 20px);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 20px);
+  mask-image: linear-gradient(to right, transparent, black 20px);
   pointer-events: none;
 }
 
@@ -410,11 +492,11 @@ textarea,
   height: 22px;
   padding: 0 3px;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--sb-radius-1);
   background-color: transparent;
   color: var(--subtle-color);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--sb-text-xs);
   line-height: 1;
   cursor: pointer;
 }
@@ -525,8 +607,8 @@ textarea,
   flex: none;
   padding: 2px 6px;
   line-height: 1;
-  font-size: 10px;
-  border-radius: 2px;
+  font-size: var(--sb-text-xs);
+  border-radius: var(--sb-radius-1);
   background-color: var(--badge-background-color);
   color: var(--badge-color);
 }
@@ -553,7 +635,7 @@ textarea,
 .sb-tabs { border-bottom: 1px solid var(--ui-surface-border-color); }
 a.sb-tab { text-decoration: none; color: var(--subtle-color); }
 a.sb-tab.sb-active { color: var(--ui-accent-color); }
-.sb-section-link, .sb-tab { font-size: 13px; }
+.sb-section-link, .sb-tab { font-size: var(--sb-text-md); }
 .sb-section-nav { min-width: 0; }
 .sb-section-links { display: grid; gap: 0.25rem; }
 .sb-section-link {
@@ -570,7 +652,7 @@ a.sb-tab.sb-active { color: var(--ui-accent-color); }
 }
 .sb-section-nav-mobile { display: none; }
 .sb-field { display: grid; gap: 0.6rem; margin-block: 1.4rem; min-width: 0; }
-.sb-field > label, .sb-checkbox-field-line > label { margin: 0; font-size: 13px; font-weight: 400; }
+.sb-field > label, .sb-checkbox-field-line > label { margin: 0; font-size: var(--sb-text-md); font-weight: 400; }
 .sb-field > .sb-input, .sb-field > .sb-select { width: 100%; }
 .sb-field-error { color: var(--alert-error-color); }
 .sb-checkbox-field { margin-block: 0.75rem; }
@@ -582,13 +664,12 @@ a.sb-tab.sb-active { color: var(--ui-accent-color); }
 .sb-password-field > .sb-input { width: 100%; padding-right: 4.5rem; }
 .sb-password-field > .sb-button { position: absolute; right: 4px; border: 0; background: transparent; color: inherit; padding: 4px 8px; }
 .sb-badge-group { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
-.sb-button-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 6px; text-decoration: none; }
+.sb-button-icon { flex: 0 0 auto; text-decoration: none; }
 .sb-button-icon > svg { flex: 0 0 auto; width: 18px; height: 18px; }
 @media (max-width: 640px) {
   .sb-section-nav.sb-section-nav-responsive > .sb-section-nav-desktop { display: none; }
   .sb-section-nav-responsive > .sb-section-nav-mobile { display: grid; gap: 0.5rem; }
   .sb-section-nav-mobile .sb-select { appearance: none; min-height: 44px; height: 44px; font-size: 16px; padding: 0.5rem 0.75rem; }
-  .sb-button-icon { min-width: 44px; min-height: 44px; }
   .sb-field .sb-input { min-height: 44px; font-size: 16px; }
 }
 
@@ -632,4 +713,100 @@ a.sb-tab.sb-active { color: var(--ui-accent-color); }
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .sb-button-icon {
+    width: var(--sb-control-touch);
+    height: var(--sb-control-touch);
+  }
+}
+
+// The popover: one menu look for the tree, the views, the graph and the
+// widget bar. It mirrors `.sb-dock-menu` (which stays for the dock) so panels
+// and iframes that load only components.css can use it. The first item is
+// focused on open; Esc and click-away close it; the danger item comes last.
+.sb-popover {
+  position: fixed;
+  z-index: 30;
+  box-sizing: border-box;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  padding: var(--sb-space-1);
+  background: var(--sb-bg-panel);
+  color: var(--sb-ink);
+  border: 1px solid var(--sb-line);
+  border-radius: var(--sb-radius-2);
+  box-shadow: var(--sb-shadow-2);
+  font-family: var(--ui-font);
+  font-size: var(--sb-text-md);
+  animation: sb-popover-in var(--sb-dur-2) var(--sb-ease-out) both;
+}
+
+.sb-popover-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sb-space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--sb-control);
+  padding: 0 var(--sb-space-2);
+  border: 0;
+  border-radius: var(--sb-radius-1);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+
+  svg {
+    flex: none;
+    width: 16px;
+    height: 16px;
+  }
+
+  .sb-kbd {
+    margin-left: auto;
+    padding-left: 6px;
+  }
+
+  &:hover {
+    background: var(--sb-overlay-8);
+  }
+
+  &:focus-visible {
+    outline: none;
+    background: var(--sb-accent-soft);
+    box-shadow: inset 0 0 0 2px var(--sb-focus);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.sb-popover-item.sb-popover-danger,
+.sb-popover-danger {
+  color: var(--sb-danger);
+}
+
+.sb-popover-separator {
+  height: 1px;
+  margin: var(--sb-space-1) 0;
+  border: 0;
+  background: var(--sb-line);
+}
+
+@keyframes sb-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

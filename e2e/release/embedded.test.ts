@@ -34,7 +34,7 @@ test.describe("Release binary: embedded bundle", () => {
     const editor = page.locator("#sb-editor .cm-content");
     await expect(editor).toBeVisible();
     await expect(editor).toContainText(
-      "Welcome to the wondrous world of SilverBullet",
+      "Your notes live here as Markdown files",
     );
 
     // Type some text and confirm it persists across a reload.

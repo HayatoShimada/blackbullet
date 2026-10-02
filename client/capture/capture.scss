@@ -10,9 +10,9 @@
 .sb-capture {
   background: var(--modal-background-color);
   border: 1px solid var(--modal-border-color);
-  border-radius: 4px;
+  border-radius: var(--sb-radius-3);
   box-sizing: border-box;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--sb-shadow-3);
   color: var(--modal-color);
   display: flex;
   flex-direction: column;

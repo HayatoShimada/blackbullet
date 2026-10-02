@@ -45,13 +45,13 @@ html.sb-viewport-tracked #sb-main .cm-editor .cm-scroller {
     height: 36px;
     padding: 0;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--sb-radius-2);
     background: transparent;
     color: var(--action-button-color);
     -webkit-tap-highlight-color: transparent;
 
     &:active {
-      background-color: var(--top-border-color);
+      background-color: var(--sb-overlay-16);
     }
   }
 }
@@ -80,6 +80,6 @@ html.sb-viewport-tracked #sb-main .cm-editor .cm-scroller {
 
 .sb-keyboard-bar-dismiss {
   margin-left: 4px;
-  border-left: 1px solid var(--top-border-color) !important;
+  border-left: 1px solid var(--sb-line) !important;
   border-radius: 0 !important;
 }

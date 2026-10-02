@@ -1,8 +1,8 @@
 // Rendered via portal into document.body, same reason as .sb-notifications above.
 .sb-anchored-menu {
   font-family: var(--ui-font);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--sb-text-md);
+  line-height: var(--sb-leading);
   position: fixed;
   box-sizing: border-box;
   width: 232px;
@@ -12,8 +12,8 @@
   background: var(--modal-background-color);
   color: var(--modal-color);
   border: 1px solid var(--modal-border-color);
-  border-radius: 2px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-radius: var(--sb-radius-2);
+  box-shadow: var(--sb-shadow-2);
   padding: 6px;
   display: flex;
   flex-direction: column;

@@ -31,6 +31,10 @@ export class PathPageNavigator {
   private restoreOnPopstate = true;
   private skipNextPopstate = false;
 
+  // The last page opened from inside the app (not by a reload or a pasted
+  // link) and the page it was opened from: what `goBackFrom` may return to.
+  private lastArrival: { path: Path; from: Path } | null = null;
+
   constructor(private client: Client) {
     this.indexRef = this.client.getIndexRef();
   }
@@ -90,6 +94,10 @@ export class PathPageNavigator {
 
     const error = await this.navigationPromise.promise;
 
+    if (error === null && !replaceState && currentState.path !== ref.path) {
+      this.lastArrival = { path: ref.path, from: currentState.path };
+    }
+
     if (error !== null) {
       if (error !== "Opened externally") {
         this.client.ui.flashNotification(
@@ -118,6 +126,25 @@ export class PathPageNavigator {
     }
 
     this.navigationPromise = null;
+  }
+
+  /**
+   * Goes back to the page `path` was opened from, if it was opened from inside
+   * the app and is still the page on screen. Returns false and does nothing
+   * otherwise (a reload, a pasted link, a page reached by Back), so a "back"
+   * key can never leave the app.
+   */
+  goBackFrom(path: Path): boolean {
+    const arrival = this.lastArrival;
+    if (
+      !arrival ||
+      arrival.path !== path ||
+      this.client.currentPath() !== path
+    ) {
+      return false;
+    }
+    globalThis.history.go(-1);
+    return true;
   }
 
   private pathToURI(path: Path): string {

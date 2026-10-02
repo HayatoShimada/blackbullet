@@ -36,8 +36,19 @@ import {
 import { autoScrollDelta } from "./auto_scroll.ts";
 import { type Block, blocksOf } from "./blocks.ts";
 import { createBlockRunner, type BlockRunner } from "./block_runner.ts";
+import {
+  driftAt,
+  dropLineTop,
+  type GapSources,
+  gapY,
+  type LineBox,
+} from "./drop_geometry.ts";
 import type { Boundary } from "./drop_target.ts";
 import type { BlockState } from "./block_mediator.ts";
+import {
+  type PageName,
+  quickNotePlaceholder,
+} from "./quick_note_placeholder.ts";
 
 /** The strips left of a block's first line: the handle, then the fold toggle. */
 const HANDLE_STRIP = { from: -24, to: 0 };
@@ -184,9 +195,7 @@ class BlockEditorPlugin {
     if (this.runner.getState().kind === "dragging" || this.view.composing) {
       return;
     }
-    const top = this.view.documentTop;
-    const block = this.view.lineBlockAtHeight(event.clientY - top);
-    const line = this.view.state.doc.lineAt(block.from).number;
+    const line = this.lineAtY(event.clientY);
     const inner = innermostAt(this.view.state.field(blocksField), line);
     this.runner.emit({ type: "hover", line: inner ? inner.startLine : null });
   }
@@ -242,8 +251,20 @@ class BlockEditorPlugin {
       doc.removeEventListener("mousemove", move);
       doc.removeEventListener("mouseup", up);
       doc.removeEventListener("keydown", key, true);
+      resize?.disconnect();
       this.cleanupDrag = null;
     };
+    // The layout can move under a still pointer (a cover or an icon above the
+    // page finishes loading, a panel opens): re-pick, so the drop line follows.
+    // (It also fires once as soon as it starts observing: one extra move, from
+    // the start point, which is harmless.)
+    const resize =
+      typeof win.ResizeObserver === "function"
+        ? new win.ResizeObserver(() => emitMove())
+        : null;
+    resize?.observe(this.view.contentDOM);
+    const slots = this.view.contentDOM.querySelectorAll(".sb-page-slot");
+    for (const slot of slots) resize?.observe(slot);
     doc.addEventListener("mousemove", move);
     doc.addEventListener("mouseup", up);
     doc.addEventListener("keydown", key, true);
@@ -264,24 +285,66 @@ class BlockEditorPlugin {
     const view = this.view;
     const { doc } = view.state;
     const blocks = view.state.field(blocksField);
-    const centre = doc.lineAt(
-      view.lineBlockAtHeight(pointerY - view.documentTop).from,
-    ).number;
+    const centre = this.lineAtY(pointerY);
     const near = (line: number) => Math.abs(line - centre) <= NEARBY_LINES;
     const lines = new Set<number>([moving.startLine, moving.endLine + 1]);
     for (const b of blocks) {
       if (near(b.startLine)) lines.add(b.startLine);
       if (near(b.endLine + 1)) lines.add(b.endLine + 1);
     }
+    const documentTop = view.documentTop;
+    const modelled = (line: number): LineBox => {
+      const block = view.lineBlockAt(doc.line(line).from);
+      return {
+        top: documentTop + block.top,
+        bottom: documentTop + block.bottom,
+      };
+    };
+    const measured = (line: number) => this.lineBox(line);
+    const sources: GapSources = {
+      lineCount: doc.lines,
+      modelled,
+      measured,
+      // the line under the pointer is on screen, so it tells how far the
+      // height map is off (a slot above the first line it does not know)
+      drift: driftAt(centre, measured, modelled),
+    };
     const boundaries: Boundary[] = [];
     for (const insertAt of lines) {
-      const y =
-        insertAt <= doc.lines
-          ? view.lineBlockAt(doc.line(insertAt).from).top
-          : view.lineBlockAt(doc.length).bottom;
-      boundaries.push({ insertAt, y: view.documentTop + y });
+      boundaries.push({ insertAt, y: gapY(insertAt, sources) });
     }
     return { boundaries, indentPx: this.indentPx(blocks) };
+  }
+
+  /** The line (1-based) at a viewport y, from what is drawn, not from the height map. */
+  private lineAtY(clientY: number): number {
+    const view = this.view;
+    const rect = view.contentDOM.getBoundingClientRect();
+    const pos = view.posAtCoords(
+      { x: rect.left + rect.width / 2, y: clientY },
+      false,
+    );
+    return view.state.doc.lineAt(pos).number;
+  }
+
+  /** A line's box on screen, or undefined when it is not drawn (outside the viewport, folded away). */
+  private lineBox(lineNumber: number): LineBox | undefined {
+    const view = this.view;
+    const from = view.state.doc.line(lineNumber).from;
+    if (from < view.viewport.from || from > view.viewport.to) return undefined;
+    try {
+      const { node } = view.domAtPos(from);
+      let el: Element | null =
+        node.nodeType === 1 ? (node as Element) : node.parentElement;
+      while (el && el.parentElement !== view.contentDOM) el = el.parentElement;
+      if (!el?.classList.contains("cm-line")) return undefined;
+      // a line hidden inside a fold resolves to the fold's host line: that box is not this line's
+      if (view.posAtDOM(el) !== from) return undefined;
+      const { top, bottom } = el.getBoundingClientRect();
+      return { top, bottom };
+    } catch {
+      return undefined;
+    }
   }
 
   private indentPx(blocks: readonly Block[]): number {
@@ -402,7 +465,7 @@ class BlockEditorPlugin {
     const indent = this.indentPx(this.view.state.field(blocksField));
     const left = rect.left + ui.target.depth * indent;
     Object.assign(this.dropLine.style, {
-      top: `${ui.target.y}px`,
+      top: `${dropLineTop(ui.target.y)}px`,
       left: `${left}px`,
       width: `${Math.max(0, rect.right - left)}px`,
     });
@@ -416,9 +479,14 @@ class BlockEditorPlugin {
 
 /**
  * Drag handles, fold toggles and block reordering for the page editor.
- * `flash` shows the user a message (a refused move).
+ * `flash` shows the user a message (a refused move). `pageName` (the client's
+ * current page by default) decides where an empty page shows the quick-note
+ * placeholder.
  */
-export function blockEditor(flash: (message: string) => void): Extension {
+export function blockEditor(
+  flash: (message: string) => void,
+  pageName?: PageName,
+): Extension {
   const plugin = ViewPlugin.define(
     (view) => new BlockEditorPlugin(view, flash),
     {
@@ -436,5 +504,5 @@ export function blockEditor(flash: (message: string) => void): Extension {
       },
     },
   );
-  return [blocksField, plugin];
+  return [blocksField, plugin, quickNotePlaceholder(pageName)];
 }

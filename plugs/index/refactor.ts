@@ -39,6 +39,8 @@ type RangedRelation = RelationObject & { range: [number, number] };
  *   the current page selected in the editor.
  * @param cmdDef.page The name to rename the page to. If not provided the
  *   user will be prompted to enter a new name.
+ * @param cmdDef.silent Skip the "Renamed X to Y" notification, for callers that
+ *   show their own (Trash, with its Undo).
  * @returns True if the rename succeeded; otherwise, false.
  */
 export async function renamePageCommand(cmdDef: any) {
@@ -57,7 +59,7 @@ export async function renamePageCommand(cmdDef: any) {
     return false;
   }
   const pageList: [string, string][] = [[`${oldName}.md`, `${newName}.md`]];
-  await batchRenameFiles(pageList);
+  await batchRenameFiles(pageList, cmdDef.silent === true);
   return true;
 }
 
@@ -106,6 +108,7 @@ export async function renamePageLinkCommand() {
  * @param cmdDef.oldDocument The current name of the document to rename.
  * @param cmdDef.document The name to rename the document to. If not provided the
  *   user will be prompted to enter a new name.
+ * @param cmdDef.silent Skip the "Renamed X to Y" notification.
  * @returns True if the rename succeeded; otherwise, false.
  */
 export async function renameDocumentCommand(cmdDef: any) {
@@ -124,7 +127,7 @@ export async function renameDocumentCommand(cmdDef: any) {
     return false;
   }
   const pageList: [string, string][] = [[oldName, newName]];
-  await batchRenameFiles(pageList);
+  await batchRenameFiles(pageList, cmdDef.silent === true);
   return true;
 }
 
@@ -132,9 +135,13 @@ export async function renameDocumentCommand(cmdDef: any) {
  * Renames any amount of files.
  * If renaming pages, names should be passed with a .md extension
  * @param fileList An array of tuples containing [FileToBeRenamed, NewFileName]
+ * @param silent Skip the per-file "Renamed X to Y" notification.
  * @returns True if the rename succeeded; otherwise, false.
  */
-export async function batchRenameFiles(fileList: [string, string][]) {
+export async function batchRenameFiles(
+  fileList: [string, string][],
+  silent = false,
+) {
   await editor.save();
 
   fileList = fileList.filter(([oldName, newName]) => {
@@ -175,9 +182,9 @@ export async function batchRenameFiles(fileList: [string, string][]) {
       console.log("Renaming", oldName, "to", newName);
       try {
         if (newName.endsWith(".md") && oldName.endsWith(".md")) {
-          await renamePage(oldName.slice(0, -3), newName.slice(0, -3));
+          await renamePage(oldName.slice(0, -3), newName.slice(0, -3), silent);
         } else {
-          await renameDocument(oldName, newName);
+          await renameDocument(oldName, newName, silent);
         }
       } catch (e: any) {
         if (e.message === notFoundError.message) {
@@ -209,7 +216,7 @@ async function existsWithExactCasing(path: string): Promise<boolean> {
 }
 
 // Rename a page, update any backlinks and linked documents
-async function renamePage(oldName: string, newName: string) {
+async function renamePage(oldName: string, newName: string, silent = false) {
   let text = await space.readPage(oldName);
 
   const oldFolder = folderName(oldName);
@@ -269,7 +276,7 @@ async function renamePage(oldName: string, newName: string) {
   await space.writePage(newName, text);
 
   if (documentsToMove.size > 0) {
-    await batchRenameFiles([...documentsToMove]);
+    await batchRenameFiles([...documentsToMove], silent);
   }
 
   // A server-side re-case can fail (a Windows sharing violation, a symlinked
@@ -301,11 +308,15 @@ async function renamePage(oldName: string, newName: string) {
   if (documentsToMove.size > 0) {
     message = `${message}, moved ${documentsToMove.size} documents`;
   }
-  await editor.flashNotification(message, "info");
+  if (!silent) await editor.flashNotification(message, "info");
 }
 
 // Rename a document and update any backlinks
-async function renameDocument(oldPath: string, newPath: string) {
+async function renameDocument(
+  oldPath: string,
+  newPath: string,
+  silent = false,
+) {
   const oldFile = await space.readDocument(oldPath);
   await space.writeDocument(newPath, oldFile);
 
@@ -327,7 +338,7 @@ async function renameDocument(oldPath: string, newPath: string) {
   if (updatedRefences > 0) {
     message = `${message}, updated ${updatedRefences} backlinks`;
   }
-  await editor.flashNotification(message, "info");
+  if (!silent) await editor.flashNotification(message, "info");
 }
 
 /**
