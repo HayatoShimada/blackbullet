@@ -121,3 +121,93 @@ test("writeAtomic: 新規作成・権限維持・失敗時は元のまま一時�
   await writeAtomic(long, "long");
   assert.equal(await fs.readFile(long, "utf8"), "long");
 });
+
+test("同じファイルへの同時書き込みは直列化され、更新が失われない", async () => {
+  const { appendToPage, insertUnderHeading, parseSpaces } = await import("../src/space.mjs");
+  const spaces = parseSpaces(`notes=${TMP}`);
+  const rel = "Projects/Race";
+  await fs.writeFile(`${TMP}/${rel}.md`, "# Race\n\n## List\n\n");
+  const jobs = [];
+  for (let i = 0; i < 15; i++) {
+    jobs.push(appendToPage(spaces, "notes", rel, `append-${i}`));
+    jobs.push(insertUnderHeading(spaces, "notes", rel, "## List", `insert-${i}`));
+  }
+  await Promise.all(jobs);
+  const text = await fs.readFile(`${TMP}/${rel}.md`, "utf8");
+  for (let i = 0; i < 15; i++) {
+    assert.ok(text.includes(`append-${i}\n`), `append-${i} が消えた`);
+    assert.ok(text.includes(`insert-${i}\n`), `insert-${i} が消えた`);
+  }
+  assert.deepEqual(await tmpFiles(TMP), []);
+});
+
+test("withFileLock は失敗しても次の仕事を止めず、順序を守る", async () => {
+  const { withFileLock } = await import("../src/space.mjs");
+  const order = [];
+  const a = withFileLock("k", async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    order.push("a");
+    throw new Error("boom");
+  });
+  const b = withFileLock("k", async () => order.push("b"));
+  await assert.rejects(a, /boom/);
+  await b;
+  assert.deepEqual(order, ["a", "b"]);
+});
+
+test("doc_status と reindex_docs は MCP から呼べる", async () => {
+  await fs.writeFile(`${TMP}/Projects/note.txt`, "plain document text");
+  const st = JSON.parse((await call("doc_status", { space: "notes" })).text);
+  assert.ok(st.spaces[0].documents.some((d) => d.page === "Projects/note.txt" && d.status === "ok"));
+  assert.equal((await call("doc_status", { status: "bogus" })).isError, true);
+  assert.equal((await call("reindex_docs", { page: "x" })).isError, true, "page は space と一緒に");
+  const r = JSON.parse((await call("reindex_docs", { space: "notes", page: "Projects/note.txt" })).text);
+  assert.equal(r.reindexed[0].changed, 1);
+  const ls = JSON.parse((await call("list_spaces")).text);
+  assert.equal(ls.spaces[0].index.docs_pending, 0);
+});
+
+test("add_inbox は既定でアプリのクイックメモと同じ Inbox/<日付>/<時刻> ページを作る", async () => {
+  const r = JSON.parse((await call("add_inbox", { space: "notes", text: "buy milk", tag: "next", due: "2026-10-05" })).text);
+  assert.match(r.page, /^Inbox\/\d{4}-\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/);
+  const body = await fs.readFile(`${TMP}/${r.page}.md`, "utf8");
+  assert.match(body, /\* \[ \] buy milk #next \[due: 2026-10-05\]\n$/);
+  await assert.rejects(fs.access(`${TMP}/Inbox.md`));
+});
+
+test("add_inbox のページ名は MEMO_TZ の時刻で作られる", async () => {
+  // サーバーは別プロセスなので、MEMO_TZ を付けた専用のサーバーを起動する（テスト側の process.env は届かない）
+  const TZ = "Pacific/Kiritimati"; // UTC+14。どの時刻でも UTC と日付か時刻がずれる
+  const tzTransport = new StdioClientTransport({
+    command: "node",
+    args: [fileURLToPath(new URL("../src/stdio.mjs", import.meta.url))],
+    env: { ...process.env, MEMO_SPACES: `notes=${TMP}`, MEMO_INDEX_DIR: `${TMP}.idx`, MEMO_EMBED: "off", MEMO_TZ: TZ },
+    stderr: "ignore",
+  });
+  const tzClient = new Client({ name: "wtest-tz", version: "1.0.0" });
+  await tzClient.connect(tzTransport);
+  try {
+    const before = new Date().toLocaleDateString("sv-SE", { timeZone: TZ });
+    const res = await tzClient.callTool({ name: "add_inbox", arguments: { space: "notes", text: "tz check" } });
+    const after = new Date().toLocaleDateString("sv-SE", { timeZone: TZ });
+    const r = JSON.parse(res.content?.[0]?.text ?? "{}");
+    // 日付の境目をまたいだ場合も通るよう、呼び出し前後どちらかの日付と一致すればよい
+    assert.ok(r.page?.startsWith(`Inbox/${before}/`) || r.page?.startsWith(`Inbox/${after}/`), r.page);
+    const utc = new Date().toISOString().slice(0, 10);
+    if (utc !== before && utc !== after) assert.ok(!r.page.startsWith(`Inbox/${utc}/`), "UTC の日付で作られている");
+  } finally {
+    await tzClient.close();
+  }
+});
+
+test("doc_status は status=unsupported で絞り込める", async () => {
+  assert.notEqual((await call("doc_status", { status: "unsupported" })).isError, true);
+});
+
+test("add_inbox mode=append は従来どおり Inbox.md に追記する", async () => {
+  const r = JSON.parse((await call("add_inbox", { space: "notes", mode: "append", text: "legacy one" })).text);
+  assert.equal(r.page, "Inbox");
+  await call("add_inbox", { space: "notes", mode: "append", text: "legacy two" });
+  const body = await fs.readFile(`${TMP}/Inbox.md`, "utf8");
+  assert.match(body, /\* \[ \] legacy one\n\* \[ \] legacy two\n$/);
+});

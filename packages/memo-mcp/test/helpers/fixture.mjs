@@ -28,6 +28,8 @@ export const FILES = {
   ),
   "Journal/2026-09-20.md": page("journal", "# 2026-09-20\n\n## Done\n\nWrote the newsletter for the demo launch."),
   "CONFIG.md": '# Config\n\n```space-lua\nconfig.set("memoSidecar", {token="SECRET-TOKEN-XYZ"})\n```\n',
+  // DB ビューで「削除」されたページ（Trash/ へ移動）。検索・Ask に出てはいけない
+  "Trash/Old Plan.md": "---\ntrashedFrom: Projects/Old Plan\n---\n# Old Plan\n\n## Notes\nTRASHED-MARKER discarded idea\n",
 };
 
 export const WORK_FILES = {

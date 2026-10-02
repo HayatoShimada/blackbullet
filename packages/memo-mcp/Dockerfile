@@ -6,6 +6,14 @@ FROM node:24-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends poppler-utils unzip \
   && rm -rf /var/lib/apt/lists/*
+# OCR（MEMO_OCR=on）は任意。イメージを細く保つため既定では入れない:
+#   docker build --build-arg WITH_OCR=1 ...  で tesseract（日本語・英語）を足す。
+ARG WITH_OCR=0
+RUN if [ "$WITH_OCR" = "1" ]; then \
+    apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-jpn tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*; \
+  fi
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

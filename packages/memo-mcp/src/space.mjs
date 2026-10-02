@@ -279,6 +279,34 @@ export async function assertUnchanged(full, expectedModified) {
   }
 }
 
+/** rename を電源断でも失わないようディレクトリを fsync する。対応しない環境（EINVAL / EPERM など）は黙って諦める。 */
+async function syncDir(dir) {
+  let fh;
+  try {
+    fh = await fs.open(dir, "r");
+    await fh.sync();
+  } catch {
+    // 非対応なら何もしない（書き込み自体は成功している）
+  } finally {
+    await fh?.close().catch(() => {});
+  }
+}
+
+// ファイルごとの直列化。読む→計算→書くの間に別の書き込みが割り込んで更新が消えるのを防ぐ（同一プロセス内）。
+const locks = new Map();
+export async function withFileLock(file, fn) {
+  const full = await fs.realpath(file).catch(() => file); // シンボリックリンク経由でも同じ鍵にする
+  const prev = locks.get(full) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  const tail = run.catch(() => {});
+  locks.set(full, tail);
+  try {
+    return await run;
+  } finally {
+    if (locks.get(full) === tail) locks.delete(full);
+  }
+}
+
 /**
  * ファイルを原子的に書き換える。
  * 同じディレクトリに一時ファイルを書いてから rename するので、途中で落ちても
@@ -312,6 +340,7 @@ export async function writeAtomic(full, data) {
     // 既存ファイルの権限を引き継ぐ（open の mode は umask で削られるので chmod で合わせる）
     if (mode !== undefined) await fs.chmod(tmp, mode);
     await fs.rename(tmp, full);
+    await syncDir(dir);
   } catch (e) {
     await fs.unlink(tmp).catch(() => {});
     throw e;
@@ -319,8 +348,12 @@ export async function writeAtomic(full, data) {
 }
 
 /** ページ末尾に追記する。存在しなければ initial で作る。 */
-export async function appendToPage(spaces, space, page, text, { expectedModified, initial } = {}) {
+export async function appendToPage(spaces, space, page, text, opts = {}) {
   const full = resolvePage(spaces, space, page);
+  return withFileLock(full, () => appendUnlocked(full, space, page, text, opts));
+}
+
+async function appendUnlocked(full, space, page, text, { expectedModified, initial } = {}) {
   let current;
   try {
     current = await fs.readFile(full, "utf-8");
@@ -339,14 +372,18 @@ export async function appendToPage(spaces, space, page, text, { expectedModified
 }
 
 /** 指定セクション（## 見出し）の直後に行を挿入する。無ければ末尾に追記。 */
-export async function insertUnderHeading(spaces, space, page, heading, line, { expectedModified } = {}) {
+export async function insertUnderHeading(spaces, space, page, heading, line, opts = {}) {
   const full = resolvePage(spaces, space, page);
+  return withFileLock(full, () => insertUnlocked(full, space, page, heading, line, opts));
+}
+
+async function insertUnlocked(full, space, page, heading, line, { expectedModified } = {}) {
   const current = await fs.readFile(full, "utf-8");
   await assertUnchanged(full, expectedModified);
   const lines = current.split(/\r?\n/);
   const idx = lines.findIndex((l) => l.trim() === heading.trim());
   if (idx === -1) {
-    return appendToPage(spaces, space, page, `\n${heading}\n\n${line}`, { expectedModified: undefined });
+    return appendUnlocked(full, space, page, `\n${heading}\n\n${line}`, { expectedModified: undefined });
   }
   // 見出し直後の空行を飛ばし、そのセクションの末尾（次の見出しの手前）に入れる
   let insertAt = idx + 1;
@@ -359,8 +396,12 @@ export async function insertUnderHeading(spaces, space, page, heading, line, { e
 }
 
 /** タスク行の [ ] を [x] にし、[completed: ...] を付ける。 */
-export async function completeTask(spaces, space, page, lineNumber, completedDate, { expectedModified } = {}) {
+export async function completeTask(spaces, space, page, lineNumber, completedDate, opts = {}) {
   const full = resolvePage(spaces, space, page);
+  return withFileLock(full, () => completeUnlocked(full, space, page, lineNumber, completedDate, opts));
+}
+
+async function completeUnlocked(full, space, page, lineNumber, completedDate, { expectedModified } = {}) {
   const current = await fs.readFile(full, "utf-8");
   await assertUnchanged(full, expectedModified);
   const lines = current.split(/\r?\n/);

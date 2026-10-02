@@ -38,7 +38,9 @@ async function eachSpace(space, fn) {
   return out;
 }
 
-const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD（ローカル時刻）
+// MEMO_TZ（無ければ TZ、さらに無ければ実行環境の時刻）の時刻で日付・時刻を作る。コンテナは既定で UTC。
+const tzOpt = () => (process.env.MEMO_TZ ? { timeZone: process.env.MEMO_TZ } : {});
+const today = () => new Date().toLocaleDateString("sv-SE", tzOpt()); // YYYY-MM-DD
 
 export function registerTools(server) {
   // ---------- 読み取り ----------
@@ -49,6 +51,7 @@ export function registerTools(server) {
       title: "スペース一覧",
       description:
         "公開されているメモスペースと、その規模を返す。最初に呼ぶと全体像がつかめる。" +
+        "index.docs_pending / docs_unreadable は文書の取り込み状況（詳細は doc_status）。" +
         "docs は索引対象の PDF / Office 文書（拡張子つきのページ名で検索に出る）のファイル数。index.docs は実際にテキストを取り出せた数。",
       inputSchema: {},
     },
@@ -75,6 +78,68 @@ export function registerTools(server) {
           });
         }
         return json({ spaces: out, embedding: EMBED_ENABLED ? EMBED_MODEL : "off" });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    "doc_status",
+    {
+      title: "文書の取り込み状況",
+      description:
+        "PDF / Office 文書ごとの索引状況。status: ok（検索できる）/ empty（テキスト無し。画像だけの PDF など）/ " +
+        "too_large（サイズ上限超過）/ unsupported（旧式の .doc / .xls / .ppt）/ error（壊れ・暗号化など）/ timeout / tool_missing（pdftotext 等が無い。再試行待ち）/ " +
+        "pending（1 回の処理時間の上限で未処理。次の呼び出しで続く）。検索に出ない文書の理由を調べるのに使う。",
+      inputSchema: {
+        space: spaceEnum.optional().describe("省略すると全スペース"),
+        status: z.enum(["ok", "empty", "too_large", "unsupported", "error", "timeout", "tool_missing", "pending"]).optional().describe("この状況のものだけ"),
+        limit: z.number().int().min(1).max(2000).optional().describe("スペースごとの最大件数（既定 200）。超えると truncated: true"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ space, status, limit }) => {
+      try {
+        const out = [];
+        for (const idx of await indexes.all(space)) {
+          const r = idx.docReport();
+          const docs = idx.docList(status);
+          const max = limit ?? 200;
+          out.push({
+            space: idx.space,
+            docs_pending: r.docs_pending,
+            docs_unreadable: r.docs_unreadable,
+            counts: r.docs_status,
+            documents: docs.slice(0, max),
+            truncated: docs.length > max,
+          });
+        }
+        return json({ spaces: out });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    "reindex_docs",
+    {
+      title: "索引の再構築",
+      description:
+        "既知の索引情報を捨てて取り込み直す。poppler を入れた後や MEMO_EXTRACT_* を変えた後、timeout / tool_missing の再試行待ちを待たずに直したいときに使う。" +
+        "page を渡すとその 1 件（例 Images/report.pdf。知らないページは warning: not_found）、省略すると全文書（.md ページは読み直さない）。時間がかかる場合は残りが pending になるので、もう一度呼ぶ。",
+      inputSchema: {
+        space: spaceEnum.optional().describe("省略すると全スペース"),
+        page: z.string().optional().describe("1 件だけ。space と一緒に指定する"),
+      },
+    },
+    async ({ space, page }) => {
+      try {
+        if (page && !space) throw new Error("page を指定するときは space も指定してください");
+        const out = [];
+        for (const idx of await indexes.all(space)) out.push(await idx.reindex(page));
+        return json({ reindexed: out });
       } catch (e) {
         return fail(e);
       }
@@ -426,20 +491,28 @@ export function registerTools(server) {
     {
       title: "Inbox に追加",
       description:
-        "未振り分けのメモを Inbox.md にタスクとして追加する。後で本人が Projects / Areas に振り分ける。",
+        "未振り分けのメモをタスクとして追加する。既定ではアプリのクイックメモと同じ Inbox/<日付>/<時刻> ページを新規に作る" +
+        "（ホームの Recent quick notes に出る）。mode=\"append\" なら従来どおり Inbox.md の末尾に追記する。",
       inputSchema: {
         space: spaceEnum,
+        mode: z.enum(["page", "append"]).default("page").describe('"page"（既定）: Inbox/<日付>/<時刻> を作る。"append": Inbox.md に追記'),
         text: z.string().describe("追加する内容（チェックボックスは自動で付く）"),
         due: z.string().optional().describe("YYYY-MM-DD"),
         tag: z.string().optional().describe("付けるハッシュタグ。例 next"),
         expected_modified: z.string().optional(),
       },
     },
-    async ({ space, text, due, tag, expected_modified }) => {
+    async ({ space, mode = "page", text, due, tag, expected_modified }) => {
       try {
         let line = `* [ ] ${text}`;
         if (tag) line += ` #${tag}`;
         if (due) line += ` [due: ${due}]`;
+        if (mode === "page") {
+          // Library/Std/Page Templates/Quick Note.md の suggestedName と同じ形（ローカル時刻）
+          const now = new Date();
+          const time = now.toLocaleTimeString("en-GB", { hour12: false, ...tzOpt() }).replaceAll(":", "-");
+          return json(await appendToPage(spaces, space, `Inbox/${today()}/${time}`, line, { initial: "---\ntags: inbox\n---\n\n" }));
+        }
         const initial = `---\ntags: inbox\n---\n\n# Inbox\n\n未振り分けのキャプチャ。処理したら Projects か Areas へ移す。\n\n`;
         try {
           return json(
