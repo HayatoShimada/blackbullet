@@ -60,7 +60,6 @@ export function App({
         hideEdgeLabels={state.filters.hideEdgeLabels}
         hideOrphans={state.filters.hideOrphans}
         hops={state.semantic.hops}
-        semanticNotice={view.semanticNotice}
         emit={emit}
       />
       <div
@@ -79,6 +78,10 @@ export function App({
           filters={state.filters}
           forces={state.forces}
           selected={selected}
+          hiddenOrphans={view.hiddenOrphans}
+          hiddenByFilters={view.hiddenByFilters}
+          ghostCount={view.ghostCount}
+          sheetOpen={state.sheetOpen}
           objectText={
             state.objectText?.ref === state.selectedRef
               ? state.objectText.text
@@ -93,6 +96,15 @@ export function App({
           selectedRef={state.selectedRef}
           hideEdgeLabels={state.filters.hideEdgeLabels}
           forces={state.forces}
+          empty={
+            // Only once what could fill the canvas has had its say.
+            state.semanticResult !== null &&
+            !state.similarPending &&
+            view.visibleEdges.length === 0 &&
+            view.visibleNodes.length <= 1
+              ? { hidden: view.hiddenOrphans }
+              : null
+          }
           emit={emit}
         />
       </div>

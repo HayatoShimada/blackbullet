@@ -112,20 +112,52 @@ export type SemanticSettings = {
   k: number;
   // Local-graph radius around the root page in hops; 0 = no limit.
   hops: number;
+  // Set once settings have been through `migrateSemanticSettings`; saved
+  // settings without it predate the 0.80 default.
+  version?: number;
 };
 
 export const SEMANTIC_THRESHOLD_MIN = 0.6;
 export const SEMANTIC_THRESHOLD_MAX = 0.95;
 export const SEMANTIC_K_MAX = 10;
+// One press of "more" / "fewer" moves the threshold by this much.
+export const SEMANTIC_STEP = 0.04;
 
-// multilingual-e5 cosines are compressed (most page pairs are >= 0.85),
-// so the default sits near the top of the slider range.
+// multilingual-e5 cosines are compressed (most page pairs are >= 0.85), but a
+// threshold near the top of the range left the graph without similar pages on
+// first open. 0.80 with the three nearest pages per page shows the neighbours
+// of the current page without anyone touching a control.
 export const defaultSemanticSettings: SemanticSettings = {
   show: true,
-  threshold: 0.92,
+  threshold: 0.8,
   k: 3,
   hops: 0,
 };
+
+// The default before 0.80. Settings saved while it was the default hold this
+// value without the person ever having chosen it, so it reads as "unset".
+export const LEGACY_SEMANTIC_THRESHOLD = 0.92;
+export const SEMANTIC_SETTINGS_VERSION = 2;
+
+/**
+ * Merges saved settings over the defaults. Unversioned settings holding the
+ * old default threshold are reset once; the result carries the version, so a
+ * 0.92 chosen afterwards is saved with it and kept.
+ */
+export function migrateSemanticSettings(
+  raw: Partial<SemanticSettings> | undefined,
+): SemanticSettings {
+  const merged = { ...defaultSemanticSettings, ...raw };
+  if (
+    raw &&
+    raw.version === undefined &&
+    raw.threshold === LEGACY_SEMANTIC_THRESHOLD
+  ) {
+    merged.threshold = defaultSemanticSettings.threshold;
+  }
+  merged.version = SEMANTIC_SETTINGS_VERSION;
+  return merged;
+}
 
 export type RootViewModel = {
   root: ExpansionResult;

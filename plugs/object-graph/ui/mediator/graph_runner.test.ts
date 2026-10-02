@@ -127,9 +127,33 @@ describe("graph runner", () => {
     await settle();
     expect(runner.getState().semanticResult).toEqual({
       status: "error",
-      message: "semantic edges failed (boom)",
+      message: "similar pages failed (boom)",
       edges: [],
     });
+  });
+
+  test("the root's similar pages join the graph as ghosts, even if one cannot be read", async () => {
+    const { runner, fetched } = setup({
+      async fetchSemantic() {
+        return {
+          status: "ok",
+          edges: [
+            { from: "A", to: "S1", score: 0.9 },
+            { from: "A", to: "Broken", score: 0.88 },
+          ],
+        };
+      },
+      async fetchExpansion(ref) {
+        if (ref === "Broken") throw new Error("gone");
+        return CHAIN[ref] ?? expansion(ref, ["Far"]);
+      },
+    });
+    runner.emit({ type: "boot" });
+    await settle();
+    await settle();
+    expect(fetched).toEqual([]);
+    expect(refs(runner.getState())).toEqual(["A", "B", "S1"]);
+    expect(runner.getState().nodes.get("S1")?.status).toBe("ghost");
   });
 
   test("clicking a ghost loads it", async () => {

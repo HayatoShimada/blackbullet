@@ -118,7 +118,7 @@ export function createGraphRunner(
             type: "semantic.loaded",
             result: {
               status: "error",
-              message: `semantic edges failed (${errorMessage(e)})`,
+              message: `similar pages failed (${errorMessage(e)})`,
               edges: [],
             },
           });
@@ -138,6 +138,18 @@ export function createGraphRunner(
             type: "expansion.loaded",
             results: [await deps.fetchExpansion(effect.ref)],
           });
+        });
+      case "loadSimilar":
+        return guarded("loading similar pages", async () => {
+          // One page that cannot be read must not cost the others.
+          const settled = await Promise.allSettled(
+            effect.refs.map(deps.fetchExpansion),
+          );
+          const results = settled.flatMap((r) =>
+            r.status === "fulfilled" ? [r.value] : [],
+          );
+          // Always answered, even with nothing: the canvas waits for it.
+          emit({ type: "similar.loaded", results });
         });
       case "expandRings": {
         if (rings) rings.cancelled = true;

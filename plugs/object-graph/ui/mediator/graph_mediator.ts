@@ -19,6 +19,7 @@ import type {
   RootViewModel,
   SemanticSettings,
 } from "../../src/model.ts";
+import { SEMANTIC_K_MAX, SEMANTIC_THRESHOLD_MIN } from "../../src/model.ts";
 import {
   buildSemanticEdges,
   type SemanticGraphResult,
@@ -48,6 +49,10 @@ export type GraphState = {
   allExpanded: boolean;
   /** Transient views must not overwrite the local view's saved filters. */
   persistFilters: boolean;
+  /** Phone layout: the filters sheet is pulled up (collapsed otherwise). */
+  sheetOpen: boolean;
+  /** Similar pages are on their way in: the canvas must not call itself empty. */
+  similarPending: boolean;
 };
 
 export type GraphEvent =
@@ -57,6 +62,8 @@ export type GraphEvent =
   /** The answer to a `describe`: dropped if the selection has moved on. */
   | { type: "object.described"; ref: string; text: string }
   | { type: "node.click"; ref: string }
+  /** Selection only (the node list's arrow keys): no expanding, no opening. */
+  | { type: "node.select"; ref: string }
   /** A double click: go to the node (or open its URL). */
   | { type: "node.open"; ref: string; kind: ObjectKind }
   /** A double click on an edge: go to where the relation was written. */
@@ -67,6 +74,8 @@ export type GraphEvent =
   /** Delete / Backspace: removes whatever is selected. */
   | { type: "selection.remove" }
   | { type: "expansion.loaded"; results: ExpansionResult[] }
+  /** The current page's similar pages, which are not links and so not yet nodes. */
+  | { type: "similar.loaded"; results: ExpansionResult[] }
   | { type: "expandAll.request" }
   | { type: "focus.request" }
   | { type: "focus.loaded"; result: ExpansionResult }
@@ -74,6 +83,8 @@ export type GraphEvent =
   | { type: "filters.patch"; patch: Partial<Filters> }
   | { type: "forces.patch"; patch: Partial<ForceSettings> }
   | { type: "semantic.patch"; patch: Partial<SemanticSettings> }
+  /** The phone's filters sheet was pulled up or put away. */
+  | { type: "sheet.set"; open: boolean }
   | { type: "panel.close" };
 
 export type GraphEffect =
@@ -83,6 +94,8 @@ export type GraphEffect =
   | { type: "describe"; ref: string; display: Record<string, unknown> }
   /** Load one node's relations, answered by `expansion.loaded`. */
   | { type: "expand"; ref: string }
+  /** Fetch pages that are only similar to the root, answered by `similar.loaded`. */
+  | { type: "loadSimilar"; refs: string[] }
   /** Load the rings a hop radius needs, answered by `expansion.loaded`. */
   | {
       type: "expandRings";
@@ -130,6 +143,8 @@ export function initialState(vm: RootViewModel): GraphState {
     rootNeighborRefs: vm.root.neighbors.map((n) => n.ref),
     allExpanded: vm.initialAllExpanded === true,
     persistFilters: vm.persistFilters !== false,
+    sheetOpen: false,
+    similarPending: false,
   };
 }
 
@@ -223,11 +238,39 @@ export function describeObject(node: {
 }
 
 /**
+ * Pages the sidecar finds similar to the root that are not nodes yet. A page
+ * with no links would otherwise open on a lone node while its similar pages
+ * sit unseen, so they join the graph as ghosts (a click expands them like any
+ * other). The same threshold and `k` that draw the edges choose them.
+ */
+export function similarCandidates(state: GraphState): string[] {
+  const result = state.semanticResult;
+  if (!state.semantic.show || result?.status !== "ok") return [];
+  const threshold = Math.max(SEMANTIC_THRESHOLD_MIN, state.semantic.threshold);
+  const k = Math.min(SEMANTIC_K_MAX, state.semantic.k);
+  // The root's own k nearest (not "within the top k of either end", which would
+  // let every leaf count the root as its nearest and ask for all of them).
+  const best = new Map<string, number>();
+  for (const e of result.edges) {
+    if (e.from !== state.rootRef && e.to !== state.rootRef) continue;
+    const other = e.from === state.rootRef ? e.to : e.from;
+    if (other === state.rootRef || e.score < threshold) continue;
+    best.set(other, Math.max(best.get(other) ?? 0, e.score));
+  }
+  const out = [...best]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, Math.max(0, k))
+    .map(([ref]) => ref)
+    .filter((ref) => !state.nodes.has(ref));
+  return out;
+}
+
+/**
  * Wraps `step` with the one rule that spans all of it: whenever the selection
  * moves, the old object text is stale, and the new object has to be described.
  */
 export function transition(state: GraphState, event: GraphEvent): Transition {
-  const result = step(state, event);
+  const result = withSimilar(event, step(state, event));
   const before = state.selectedRef;
   const after = result.state.selectedRef;
   if (after === before) return result;
@@ -240,6 +283,19 @@ export function transition(state: GraphState, event: GraphEvent): Transition {
           { type: "describe", ref: node.ref, display: describeObject(node) },
         ]
       : result.effects,
+  };
+}
+
+/** Whatever moved the answer or the settings may have changed who is similar. */
+function withSimilar(event: GraphEvent, t: Transition): Transition {
+  if (event.type !== "semantic.loaded" && event.type !== "semantic.patch") {
+    return t;
+  }
+  const refs = similarCandidates(t.state);
+  if (refs.length === 0) return t;
+  return {
+    state: { ...t.state, similarPending: true },
+    effects: [...t.effects, { type: "loadSimilar", refs }],
   };
 }
 
@@ -279,6 +335,10 @@ function step(state: GraphState, event: GraphEvent): Transition {
         effects: status === "ghost" ? [{ type: "expand", ref: event.ref }] : [],
       };
     }
+    case "node.select":
+      return state.nodes.has(event.ref)
+        ? { state: { ...state, selectedRef: event.ref }, effects: [] }
+        : { state, effects: [] };
     case "node.open":
       return {
         state,
@@ -323,6 +383,20 @@ function step(state: GraphState, event: GraphEvent): Transition {
 
     case "expansion.loaded":
       return { state: applyExpansions(state, event.results), effects: [] };
+
+    case "similar.loaded": {
+      // Only the pages themselves: their own relations load when one is clicked.
+      let nodes: Map<string, NodeState> | null = null;
+      for (const r of event.results) {
+        if (state.nodes.has(r.object.ref)) continue;
+        nodes ??= new Map(state.nodes);
+        nodes.set(r.object.ref, { node: r.object, status: "ghost" });
+      }
+      return {
+        state: { ...state, nodes: nodes ?? state.nodes, similarPending: false },
+        effects: [],
+      };
+    }
 
     case "expandAll.request": {
       const { visibleNodes } = selectView(state);
@@ -400,6 +474,11 @@ function step(state: GraphState, event: GraphEvent): Transition {
       return { state: next, effects };
     }
 
+    case "sheet.set":
+      return event.open === state.sheetOpen
+        ? { state, effects: [] }
+        : { state: { ...state, sheetOpen: event.open }, effects: [] };
+
     case "panel.close":
       return { state, effects: [{ type: "closePanel" }] };
   }
@@ -412,8 +491,11 @@ export type GraphView = {
   allEdges: Edge[];
   semanticEdges: Edge[];
   ghostCount: number;
-  /** Why the semantic overlay is off, when it is. */
-  semanticNotice: string | null;
+  /** Nodes "Hide orphans" is keeping off the canvas (0 when the filter is off). */
+  hiddenOrphans: number;
+  /** Pages the Tags / Status / Area filters keep off the canvas (apart from the
+   * orphan rule, which hiddenOrphans counts). */
+  hiddenByFilters: number;
 };
 
 /** What the panel paints, derived from the state. Pure, so a view can call it
@@ -438,19 +520,44 @@ export function selectView(state: GraphState): GraphView {
     state.rootRef,
     state.semantic.hops,
   );
-  const result = state.semanticResult;
+  // What the orphan rule is hiding: the difference to the same view without it.
+  const hiddenOrphans = state.filters.hideOrphans
+    ? computeVisible(
+        state.nodes.values(),
+        allEdges,
+        { ...state.filters, hideOrphans: false },
+        state.rootRef,
+        state.semantic.hops,
+      ).visibleNodes.length - visibleNodes.length
+    : 0;
+  // The pages those filters remove: the difference to the same view with them
+  // cleared. Both sides ignore the orphan rule so no page is counted twice.
+  const open: Filters = { ...state.filters, hideOrphans: false };
+  const hiddenByFilters =
+    computeVisible(
+      state.nodes.values(),
+      allEdges,
+      { ...open, hiddenTags: [], hiddenStatuses: [], hiddenAreas: [] },
+      state.rootRef,
+      state.semantic.hops,
+    ).visibleNodes.length -
+    computeVisible(
+      state.nodes.values(),
+      allEdges,
+      open,
+      state.rootRef,
+      state.semantic.hops,
+    ).visibleNodes.length;
   return {
     visibleNodes,
     visibleEdges,
     allEdges,
     semanticEdges,
+    hiddenOrphans,
+    hiddenByFilters,
     ghostCount: visibleNodes.reduce(
       (n, ns) => n + (ns.status === "ghost" ? 1 : 0),
       0,
     ),
-    semanticNotice:
-      result && result.status !== "ok"
-        ? `Semantic edges off: ${result.message}`
-        : null,
   };
 }

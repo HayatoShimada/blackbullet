@@ -383,25 +383,56 @@ describe("selectView", () => {
     expect(selectView(initialState(vm())).ghostCount).toBe(2);
   });
 
-  test("an unconfigured sidecar says so, an answer from it stays quiet", () => {
-    const base = initialState(vm());
-    const off = transition(base, {
-      type: "semantic.loaded",
-      result: {
-        status: "unconfigured",
-        message: "Memo sidecar is not configured — set memoSidecar in CONFIG",
-        edges: [],
-      },
-    }).state;
-    expect(selectView(off).semanticNotice).toBe(
-      "Semantic edges off: Memo sidecar is not configured — set memoSidecar in CONFIG",
+  test("counts the nodes Hide orphans keeps off the canvas", () => {
+    const base = initialState(
+      vm({ filters: { ...defaultFilters, hideOrphans: true } }),
     );
-    const ok = transition(base, {
-      type: "semantic.loaded",
-      result: { status: "ok", edges: [] },
+    // B and C hang off A, so nothing is hidden; hide the label that joins them
+    // and both lose their only edge.
+    expect(selectView(base).hiddenOrphans).toBe(0);
+    const cut = transition(base, {
+      type: "filters.patch",
+      patch: { hiddenLabels: ["mention"] },
     }).state;
-    expect(selectView(ok).semanticNotice).toBeNull();
-    expect(selectView(base).semanticNotice).toBeNull();
+    expect(selectView(cut).visibleNodes.map((n) => n.node.ref)).toEqual(["A"]);
+    expect(selectView(cut).hiddenOrphans).toBe(2);
+    const shown = transition(cut, {
+      type: "filters.patch",
+      patch: { hideOrphans: false },
+    }).state;
+    expect(selectView(shown).hiddenOrphans).toBe(0);
+    expect(selectView(shown).visibleNodes).toHaveLength(3);
+  });
+
+  test("counts the pages the tag filters keep off the canvas", () => {
+    const tagged = initialState(
+      vm({
+        root: {
+          object: node("A"),
+          neighbors: [node("B", { tags: ["x"] }), node("C", { tags: ["y"] })],
+          edges: [edge("A", "B"), edge("A", "C")],
+        },
+      }),
+    );
+    expect(selectView(tagged).hiddenByFilters).toBe(0);
+    const cut = transition(tagged, {
+      type: "filters.patch",
+      patch: { hiddenTags: ["x"] },
+    }).state;
+    expect(selectView(cut).visibleNodes).toHaveLength(2);
+    expect(selectView(cut).hiddenByFilters).toBe(1);
+    // The orphan rule is its own count: a page it drops is not counted twice.
+    const orphaned = transition(cut, {
+      type: "filters.patch",
+      patch: { hideOrphans: true, hiddenLabels: ["mention"] },
+    }).state;
+    expect(selectView(orphaned).hiddenByFilters).toBe(1);
+    expect(selectView(orphaned).hiddenOrphans).toBe(1);
+    const cleared = transition(cut, {
+      type: "filters.patch",
+      patch: { hiddenTags: [] },
+    }).state;
+    expect(selectView(cleared).hiddenByFilters).toBe(0);
   });
 
   test("semantic edges join the graph only between nodes that are in it", () => {
@@ -495,5 +526,136 @@ describe("describing the selected object", () => {
         attributes: { tag: "x" },
       }),
     ).toEqual({ tag: "x" });
+  });
+});
+
+describe("similar pages as nodes", () => {
+  const ok = (edges: { from: string; to: string; score: number }[]) =>
+    ({ type: "semantic.loaded", result: { status: "ok", edges } }) as const;
+
+  test("the root's similar pages that are not nodes yet are asked for", () => {
+    const { effects } = run([
+      ok([
+        { from: "A", to: "S1", score: 0.9 },
+        { from: "S2", to: "A", score: 0.85 },
+        { from: "A", to: "B", score: 0.95 }, // already a node
+        { from: "A", to: "Far", score: 0.7 }, // under the default threshold
+        { from: "B", to: "S3", score: 0.99 }, // not the root's
+      ]),
+    ]);
+    expect(effects).toEqual([{ type: "loadSimilar", refs: ["S1", "S2"] }]);
+  });
+
+  test("only the nearest k are asked for", () => {
+    const edges = ["P", "Q", "R", "S", "T"].map((to, i) => ({
+      from: "A",
+      to,
+      score: 0.99 - i * 0.01,
+    }));
+    const { effects } = run([ok(edges)]);
+    expect(effects).toEqual([{ type: "loadSimilar", refs: ["P", "Q", "R"] }]);
+  });
+
+  test("nothing is asked for while similar pages are off or unavailable", () => {
+    const off = initialState(
+      vm({ semantic: { ...defaultSemanticSettings, show: false } }),
+    );
+    expect(
+      run([ok([{ from: "A", to: "S1", score: 0.9 }])], off).effects,
+    ).toEqual([]);
+    expect(
+      run([
+        {
+          type: "semantic.loaded",
+          result: { status: "unconfigured", message: "x", edges: [] },
+        },
+      ]).effects,
+    ).toEqual([]);
+  });
+
+  test("turning similar pages on, or asking for more, asks for what is new", () => {
+    const loaded = run([
+      ok([
+        { from: "A", to: "S1", score: 0.9 },
+        { from: "A", to: "S2", score: 0.7 },
+      ]),
+    ]).state;
+    const more = run(
+      [{ type: "semantic.patch", patch: { threshold: 0.66 } }],
+      loaded,
+    );
+    expect(more.effects).toContainEqual({
+      type: "loadSimilar",
+      refs: ["S1", "S2"],
+    });
+  });
+
+  test("they arrive as ghosts and never replace a node already there", () => {
+    const { state } = run([
+      {
+        type: "similar.loaded",
+        results: [
+          {
+            object: node("S1"),
+            neighbors: [node("X")],
+            edges: [edge("S1", "X")],
+          },
+          expansion("B", []),
+        ],
+      },
+    ]);
+    expect(state.nodes.get("S1")?.status).toBe("ghost");
+    expect(state.nodes.get("B")?.status).toBe("ghost");
+    expect(state.nodes.has("X")).toBe(false);
+    expect(state.edges.some((e) => e.source === "S1")).toBe(false);
+  });
+
+  test("with the edges shown they are connected, with them off they are orphans", () => {
+    const connected = run([
+      ok([{ from: "A", to: "S1", score: 0.9 }]),
+      { type: "similar.loaded", results: [expansion("S1", [], [])] },
+    ]).state;
+    const withHide = {
+      ...connected,
+      filters: { ...connected.filters, hideOrphans: true },
+    };
+    expect(selectView(withHide).visibleNodes.map((n) => n.node.ref)).toContain(
+      "S1",
+    );
+    const off = transition(withHide, {
+      type: "semantic.patch",
+      patch: { show: false },
+    }).state;
+    expect(selectView(off).visibleNodes.map((n) => n.node.ref)).not.toContain(
+      "S1",
+    );
+    expect(selectView(off).hiddenOrphans).toBe(1);
+  });
+});
+
+describe("selection and the sheet", () => {
+  test("node.select moves the selection without expanding a ghost", () => {
+    const { state, effects } = run([{ type: "node.select", ref: "B" }]);
+    expect(state.selectedRef).toBe("B");
+    expect(effects).toEqual([
+      { type: "describe", ref: "B", display: { tag: "page" } },
+    ]);
+  });
+
+  test("node.select ignores a node that is not in the graph", () => {
+    expect(run([{ type: "node.select", ref: "Nope" }]).state.selectedRef).toBe(
+      "A",
+    );
+  });
+
+  test("the filters sheet is closed to start with and toggles by event", () => {
+    expect(initialState(vm()).sheetOpen).toBe(false);
+    expect(run([{ type: "sheet.set", open: true }]).state.sheetOpen).toBe(true);
+    expect(
+      run([
+        { type: "sheet.set", open: true },
+        { type: "sheet.set", open: false },
+      ]).state.sheetOpen,
+    ).toBe(false);
   });
 });

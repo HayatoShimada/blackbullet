@@ -1,4 +1,4 @@
-import { Checkbox, Input } from "@silverbulletmd/silverbullet/ui";
+import { Button, Checkbox, Input } from "@silverbulletmd/silverbullet/ui";
 import { useMemo, useState } from "preact/hooks";
 import {
   defaultForceSettings,
@@ -9,6 +9,7 @@ import {
   type GraphUniverse,
   type ObjectNode,
   SEMANTIC_K_MAX,
+  SEMANTIC_STEP,
   SEMANTIC_THRESHOLD_MAX,
   SEMANTIC_THRESHOLD_MIN,
   type SemanticSettings,
@@ -20,6 +21,8 @@ import {
 } from "../../src/semantic.ts";
 import { colorForTag } from "../colors.ts";
 import type { GraphEvent } from "../mediator/graph_mediator.ts";
+import { NodeList } from "./node_list.tsx";
+import { ViewControls } from "./view_controls.tsx";
 
 type Props = {
   // Currently-visible nodes (used to compute counts for present-only filter UX).
@@ -39,6 +42,14 @@ type Props = {
   semanticCount: number;
   // Selected node; rendered as an object-detail section below the filters.
   selected: ObjectNode | null;
+  // Pages "Hide orphans" keeps off the canvas, and the shape-of-graph
+  // controls the phone's sheet carries instead of the header.
+  hiddenOrphans: number;
+  // Pages the Tags / Status / Area filters keep off the canvas.
+  hiddenByFilters: number;
+  ghostCount: number;
+  // The phone's filters sheet: pulled up or put away.
+  sheetOpen: boolean;
   // The selected node as text, once the Mediator has had it rendered.
   objectText: string;
   emit: (event: GraphEvent) => void;
@@ -50,42 +61,244 @@ const MAX_VISIBLE = 50;
 type Counted = { key: string; count: number };
 
 export function Sidebar(props: Props) {
+  const { sheetOpen, emit } = props;
   return (
-    <aside class="gv-sidebar">
-      <SemanticSection {...props} />
-      <TagsSection {...props} />
-      <FrontmatterSection
-        title="Status"
-        keys={props.universe.statuses}
-        valuesOf={(n) => [nodeStatus(n)]}
-        hidden={props.filters.hiddenStatuses ?? []}
-        onHiddenChange={(hiddenStatuses) =>
-          props.emit({ type: "filters.patch", patch: { hiddenStatuses } })
-        }
-        allNodes={props.allNodes}
-      />
-      <FrontmatterSection
-        title="Area"
-        keys={props.universe.areas}
-        valuesOf={nodeAreas}
-        hidden={props.filters.hiddenAreas ?? []}
-        onHiddenChange={(hiddenAreas) =>
-          props.emit({ type: "filters.patch", patch: { hiddenAreas } })
-        }
-        allNodes={props.allNodes}
-      />
-      <LabelsSection {...props} />
-      <ForcesSection forces={props.forces} emit={props.emit} />
-      <ObjectSection
-        selected={props.selected}
-        text={props.objectText}
-        emit={props.emit}
-      />
+    // On a phone this is a bottom sheet (CSS); on a wide panel a side column.
+    <aside
+      class={`gv-sidebar gv-sheet${sheetOpen ? " gv-sheet-open" : ""}`}
+      aria-label="Filters"
+    >
+      <button
+        type="button"
+        class="gv-sheet-handle"
+        aria-expanded={sheetOpen}
+        aria-controls="gv-sheet-body"
+        onClick={() => emit({ type: "sheet.set", open: !sheetOpen })}
+      >
+        <span class="gv-sheet-grip" aria-hidden="true" />
+        <span class="gv-sheet-title">Filters</span>
+        <span class="gv-sheet-summary">
+          {props.nodes.length} {props.nodes.length === 1 ? "page" : "pages"}
+          {props.hiddenByFilters + props.hiddenOrphans > 0 &&
+            ` · ${props.hiddenByFilters + props.hiddenOrphans} hidden`}
+        </span>
+      </button>
+      <div class="gv-sheet-body" id="gv-sheet-body">
+        <div class="gv-sheet-actions">
+          <ViewControls
+            ghostCount={props.ghostCount}
+            hideEdgeLabels={props.filters.hideEdgeLabels}
+            hideOrphans={props.filters.hideOrphans}
+            hops={props.semantic.hops}
+            emit={emit}
+          />
+        </div>
+        <HiddenByFilters
+          count={props.hiddenByFilters}
+          onShow={() =>
+            emit({
+              type: "filters.patch",
+              patch: { hiddenTags: [], hiddenStatuses: [], hiddenAreas: [] },
+            })
+          }
+        />
+        <HiddenOrphans
+          count={props.hiddenOrphans}
+          onShow={() =>
+            emit({ type: "filters.patch", patch: { hideOrphans: false } })
+          }
+        />
+        <SimilarSection {...props} />
+        <LegendSection />
+        <TagsSection {...props} />
+        <FrontmatterSection
+          title="Status"
+          keys={props.universe.statuses}
+          valuesOf={(n) => [nodeStatus(n)]}
+          hidden={props.filters.hiddenStatuses ?? []}
+          onHiddenChange={(hiddenStatuses) =>
+            emit({ type: "filters.patch", patch: { hiddenStatuses } })
+          }
+          allNodes={props.allNodes}
+        />
+        <FrontmatterSection
+          title="Area"
+          keys={props.universe.areas}
+          valuesOf={nodeAreas}
+          hidden={props.filters.hiddenAreas ?? []}
+          onHiddenChange={(hiddenAreas) =>
+            emit({ type: "filters.patch", patch: { hiddenAreas } })
+          }
+          allNodes={props.allNodes}
+        />
+        <LabelsSection {...props} />
+        <ForcesSection forces={props.forces} emit={emit} />
+        <NodesSection
+          nodes={props.nodes}
+          selectedRef={props.selected?.ref ?? null}
+          emit={emit}
+        />
+        <ObjectSection
+          selected={props.selected}
+          text={props.objectText}
+          emit={emit}
+        />
+      </div>
     </aside>
   );
 }
 
-function SemanticSection({
+// The line that says the Tags / Status / Area filters are hiding pages, with
+// the way back.
+function HiddenByFilters({
+  count,
+  onShow,
+}: {
+  count: number;
+  onShow: () => void;
+}) {
+  if (count <= 0) return null;
+  return (
+    <div class="gv-hidden-line" role="status">
+      <span>{count} hidden by filters</span>
+      <button type="button" class="gv-more gv-link-button" onClick={onShow}>
+        Show all
+      </button>
+    </div>
+  );
+}
+
+// The line that says what "Hide orphans" is doing, with the way back.
+function HiddenOrphans({
+  count,
+  onShow,
+}: {
+  count: number;
+  onShow: () => void;
+}) {
+  if (count <= 0) return null;
+  return (
+    <div class="gv-hidden-line" role="status">
+      <span>
+        {count} {count === 1 ? "page" : "pages"} hidden (no connections)
+      </span>
+      <button type="button" class="gv-more gv-link-button" onClick={onShow}>
+        Show
+      </button>
+    </div>
+  );
+}
+
+function NodesSection({
+  nodes,
+  selectedRef,
+  emit,
+}: {
+  nodes: ObjectNode[];
+  selectedRef: string | null;
+  emit: (event: GraphEvent) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div class="gv-section">
+      <SectionHeader
+        title={`Nodes · ${nodes.length}`}
+        open={open}
+        onToggle={() => setOpen(!open)}
+      />
+      {open && (
+        <div class="gv-section-body">
+          <NodeList nodes={nodes} selectedRef={selectedRef} emit={emit} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegendSection() {
+  const [open, setOpen] = useState(true);
+  return (
+    <div class="gv-section">
+      <SectionHeader
+        title="Legend"
+        open={open}
+        onToggle={() => setOpen(!open)}
+      />
+      {open && (
+        <ul class="gv-section-body gv-legend">
+          <li class="gv-legend-row">
+            <span class="gv-legend-line gv-legend-link" aria-hidden="true" />
+            Link
+          </li>
+          <li class="gv-legend-row">
+            <span class="gv-legend-line gv-legend-mention" aria-hidden="true" />
+            Mention
+          </li>
+          <li class="gv-legend-row">
+            <span class="gv-legend-line gv-legend-similar" aria-hidden="true" />
+            Similar page
+          </li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A section's title row: a button, so the keyboard folds it like a click does. */
+function SectionHeader({
+  title,
+  open,
+  onToggle,
+  actions,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  actions?: preact.ComponentChildren;
+}) {
+  return (
+    <header class="gv-section-header">
+      <button
+        type="button"
+        class="gv-section-toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span
+          class={`gv-twisty ${open ? "open" : "closed"}`}
+          aria-hidden="true"
+        >
+          ▸
+        </span>
+        {title}
+      </button>
+      {actions && <span class="gv-section-actions">{actions}</span>}
+    </header>
+  );
+}
+
+/** One press of "more" moves the threshold down a step and lets one more
+ * neighbour per page in; "fewer" is the way back. */
+function stepSimilar(
+  semantic: SemanticSettings,
+  direction: 1 | -1,
+): Partial<SemanticSettings> {
+  const threshold = Math.round(
+    Math.min(
+      SEMANTIC_THRESHOLD_MAX,
+      Math.max(
+        SEMANTIC_THRESHOLD_MIN,
+        semantic.threshold - direction * SEMANTIC_STEP,
+      ),
+    ) * 100,
+  );
+  return {
+    threshold: threshold / 100,
+    k: Math.min(SEMANTIC_K_MAX, Math.max(1, semantic.k + direction)),
+  };
+}
+
+function SimilarSection({
   semantic,
   semanticResult,
   semanticCount,
@@ -95,17 +308,23 @@ function SemanticSection({
   const update = (patch: Partial<SemanticSettings>) =>
     emit({ type: "semantic.patch", patch });
   const ok = semanticResult?.status === "ok";
+  const canMore =
+    semantic.threshold > SEMANTIC_THRESHOLD_MIN + 1e-9 ||
+    semantic.k < SEMANTIC_K_MAX;
+  const canFewer =
+    semantic.threshold < SEMANTIC_THRESHOLD_MAX - 1e-9 || semantic.k > 1;
   return (
     <div class="gv-section">
-      <header class="gv-section-header" onClick={() => setOpen(!open)}>
-        <span class="gv-section-title">
-          <span class={`gv-twisty ${open ? "open" : "closed"}`}>▸</span>
-          Semantic edges
-        </span>
-        <span class="gv-section-actions" onClick={(e) => e.stopPropagation()}>
-          <a
+      <SectionHeader
+        title="Similar pages"
+        open={open}
+        onToggle={() => setOpen(!open)}
+        actions={
+          <button
+            type="button"
+            class="gv-link-button"
             onClick={() =>
-              // Everything but the hop radius, which lives in the header.
+              // Everything but the hop radius, which lives with the view controls.
               update({
                 show: defaultSemanticSettings.show,
                 threshold: defaultSemanticSettings.threshold,
@@ -114,9 +333,9 @@ function SemanticSection({
             }
           >
             reset
-          </a>
-        </span>
-      </header>
+          </button>
+        }
+      />
       {open && (
         <div class="gv-section-body gv-forces-body">
           <label class="gv-row">
@@ -127,57 +346,46 @@ function SemanticSection({
                 update({ show: (e.currentTarget as HTMLInputElement).checked })
               }
             />
-            <span class="gv-semantic-swatch" />
+            <span class="gv-semantic-swatch" aria-hidden="true" />
             Show similar pages
             {ok && <span class="gv-count">{semanticCount}</span>}
           </label>
           {semanticResult === null && (
-            <div class="gv-semantic-note">Loading from sidecar…</div>
+            <div class="gv-semantic-note">Loading…</div>
           )}
-          {semanticResult && !ok && (
-            <div class="gv-semantic-note">{semanticResult.message}</div>
+          {semanticResult?.status === "unconfigured" && (
+            <div class="gv-semantic-note" role="status">
+              <span class="gv-note-icon" aria-hidden="true">
+                ⓘ
+              </span>
+              Similar pages need Search by meaning
+            </div>
+          )}
+          {semanticResult?.status === "error" && (
+            <div class="gv-semantic-note" role="status">
+              <span class="gv-note-icon" aria-hidden="true">
+                ⓘ
+              </span>
+              {semanticResult.message}
+            </div>
           )}
           {ok && (
-            <>
-              <label class="gv-force-row">
-                <div class="gv-force-label">
-                  <span>Similarity ≥</span>
-                  <span class="gv-force-value">
-                    {semantic.threshold.toFixed(2)}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={SEMANTIC_THRESHOLD_MIN}
-                  max={SEMANTIC_THRESHOLD_MAX}
-                  step={0.01}
-                  value={semantic.threshold}
-                  disabled={!semantic.show}
-                  onInput={(e) =>
-                    update({
-                      threshold: Number((e.target as HTMLInputElement).value),
-                    })
-                  }
-                />
-              </label>
-              <label class="gv-force-row">
-                <div class="gv-force-label">
-                  <span>Neighbors per page (k)</span>
-                  <span class="gv-force-value">{semantic.k}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={SEMANTIC_K_MAX}
-                  step={1}
-                  value={semantic.k}
-                  disabled={!semantic.show}
-                  onInput={(e) =>
-                    update({ k: Number((e.target as HTMLInputElement).value) })
-                  }
-                />
-              </label>
-            </>
+            <div class="gv-more-fewer" role="group" aria-label="Similar pages">
+              <Button
+                disabled={!semantic.show || !canFewer}
+                title="Fewer similar pages"
+                onClick={() => update(stepSimilar(semantic, -1))}
+              >
+                Fewer
+              </Button>
+              <Button
+                disabled={!semantic.show || !canMore}
+                title="More similar pages"
+                onClick={() => update(stepSimilar(semantic, 1))}
+              >
+                More
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -227,15 +435,20 @@ function ForcesSection({
   ];
   return (
     <div class="gv-section">
-      <header class="gv-section-header" onClick={() => setOpen(!open)}>
-        <span class="gv-section-title">
-          <span class={`gv-twisty ${open ? "open" : "closed"}`}>▸</span>
-          Forces
-        </span>
-        <span class="gv-section-actions" onClick={(e) => e.stopPropagation()}>
-          <a onClick={() => update(defaultForceSettings)}>reset</a>
-        </span>
-      </header>
+      <SectionHeader
+        title="Forces"
+        open={open}
+        onToggle={() => setOpen(!open)}
+        actions={
+          <button
+            type="button"
+            class="gv-link-button"
+            onClick={() => update(defaultForceSettings)}
+          >
+            reset
+          </button>
+        }
+      />
       {open && (
         <div class="gv-section-body gv-forces-body">
           {sliders.map((s) => (
@@ -323,17 +536,22 @@ function Section({
 
   return (
     <div class="gv-section">
-      <header class="gv-section-header" onClick={() => setOpen(!open)}>
-        <span class="gv-section-title">
-          <span class={`gv-twisty ${open ? "open" : "closed"}`}>▸</span>
-          {title}
-        </span>
-        <span class="gv-section-actions" onClick={(e) => e.stopPropagation()}>
-          <a onClick={onAll}>all</a>
-          {" · "}
-          <a onClick={onNone}>none</a>
-        </span>
-      </header>
+      <SectionHeader
+        title={title}
+        open={open}
+        onToggle={() => setOpen(!open)}
+        actions={
+          <>
+            <button type="button" class="gv-link-button" onClick={onAll}>
+              all
+            </button>
+            {" · "}
+            <button type="button" class="gv-link-button" onClick={onNone}>
+              none
+            </button>
+          </>
+        }
+      />
       {open && (
         <div class="gv-section-body">
           {rows.length > LONG_LIST_THRESHOLD && (
@@ -341,6 +559,7 @@ function Section({
               type="text"
               class="gv-section-search"
               placeholder="Filter…"
+              aria-label={`Filter ${title}`}
               value={query}
               onInput={(e) =>
                 setQuery((e.currentTarget as HTMLInputElement).value)
@@ -358,9 +577,13 @@ function Section({
             </label>
           ))}
           {overflow > 0 && (
-            <a class="gv-more" onClick={() => setShowAll(true)}>
+            <button
+              type="button"
+              class="gv-more gv-link-button"
+              onClick={() => setShowAll(true)}
+            >
               show {overflow} more
-            </a>
+            </button>
           )}
         </div>
       )}

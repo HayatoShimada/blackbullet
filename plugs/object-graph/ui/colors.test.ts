@@ -6,18 +6,27 @@ describe("colorForTag", () => {
     expect(colorForTag(null)).toBe(UNTAGGED_COLOR_VAR);
   });
 
-  it("is deterministic — same tag yields the same color", () => {
+  it("is deterministic: same tag yields the same color", () => {
     expect(colorForTag("driver")).toBe(colorForTag("driver"));
     expect(colorForTag("research")).toBe(colorForTag("research"));
   });
 
-  it("produces different colors for distinct tags (typically)", () => {
+  it("gives the well-known tags their own token, project and area apart", () => {
+    expect(colorForTag("project")).toBe("var(--gv-tag-project)");
+    expect(colorForTag("area")).toBe("var(--gv-tag-area)");
+    expect(colorForTag("Journal")).toBe("var(--gv-tag-journal)");
+    expect(colorForTag("project")).not.toBe(colorForTag("area"));
+  });
+
+  it("produces different colors for distinct free-form tags (typically)", () => {
     // Hash collisions are possible in principle; the F1 demo tags do not collide.
     expect(colorForTag("driver")).not.toBe(colorForTag("team"));
     expect(colorForTag("driver")).not.toBe(colorForTag("person"));
   });
 
-  it("returns hsl() strings", () => {
-    expect(colorForTag("anything")).toMatch(/^hsl\(\d+ \d+% \d+%\)$/);
+  it("returns an hsl() expression with scheme tokens for other tags", () => {
+    expect(colorForTag("anything")).toMatch(
+      /^hsl\(\d+ var\(--gv-tag-s\) var\(--gv-tag-l\)\)$/,
+    );
   });
 });

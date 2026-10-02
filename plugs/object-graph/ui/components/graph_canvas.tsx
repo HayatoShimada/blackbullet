@@ -1,21 +1,36 @@
 import * as d3 from "d3-force";
 import ForceGraphImpl from "force-graph";
 import { Component } from "preact";
+import { Button } from "@silverbulletmd/silverbullet/ui";
 import type { Edge, ForceSettings, ObjectNode } from "../../src/model.ts";
 import { STRUCTURAL_KINDS } from "../../src/model.ts";
 import { SEMANTIC_KIND } from "../../src/semantic.ts";
+import { type CanvasTheme, readCanvasTheme } from "../canvas_theme.ts";
+import { fitCamera, MAX_AUTO_ZOOM, MIN_AUTO_ZOOM } from "../camera_fit.ts";
 import { colorForTag } from "../colors.ts";
 import type { GraphEvent } from "../mediator/graph_mediator.ts";
 
 const CLICK_DELAY_MS = 220;
-// Upper bound for the auto-fit camera scale. Prevents zoomToFit from
-// magnifying a single isolated node to fill the entire canvas.
-const MAX_AUTO_ZOOM = 4;
-
 // Fit after simulation settles to avoid framing an incomplete layout.
 // A from-scratch layout needs more settling than an incremental expansion.
 const FIRST_FIT_COOLDOWN_TICKS = 140;
 const REFIT_COOLDOWN_TICKS = 60;
+
+// Where the camera frames the current page: the band under the canvas is kept
+// clear for the controls (and, on the phone, the filters sheet), and nothing
+// is framed closer to an edge than FIT_PADDING.
+const SAFE_BOTTOM = 64;
+const FIT_PADDING = 48;
+// A label under the lowest node, in screen pixels.
+const LABEL_ROOM = 20;
+// How far above the middle (screen pixels) a lone page is framed when the
+// canvas shows a note under it; the note starts just below the middle.
+const EMPTY_NOTE_LIFT = 64;
+// Ticks the force simulation runs before the first paint when motion is
+// reduced: enough to settle, so the graph appears at rest.
+const SETTLE_TICKS = 300;
+// How long an idle canvas stays awake when motion is reduced (see wake()).
+const IDLE_PAUSE_MS = 400;
 
 type NodeStatus = "expanded" | "ghost";
 
@@ -25,6 +40,8 @@ type Props = {
   selectedRef: string | null;
   hideEdgeLabels: boolean;
   forces: ForceSettings;
+  /** Set when the page has nothing to draw but itself: the canvas says why. */
+  empty: { hidden: number } | null;
   emit: (event: GraphEvent) => void;
 };
 
@@ -67,20 +84,6 @@ const ForceGraph = ForceGraphImpl as unknown as () => (
   element: HTMLElement,
 ) => ForceGraphInstance;
 
-type Theme = {
-  font: string;
-  bg: string;
-  nodeDim: string;
-  label: string;
-  labelDim: string;
-  labelHalo: string;
-  link: string;
-  linkDim: string;
-  linkHot: string;
-  linkSemantic: string;
-  accent: string;
-};
-
 type State = {
   edgeHover: { edge: MergedEdge; x: number; y: number } | null;
   ghostHover: { title: string; x: number; y: number } | null;
@@ -92,25 +95,6 @@ type ComputedGraph = {
   adjacency: Map<string, Set<string>>;
   radii: Map<string, number>;
 };
-
-function readTheme(): Theme {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (n: string, fallback: string) =>
-    cs.getPropertyValue(n).trim() || fallback;
-  return {
-    bg: v("--gv-bg", "#ffffff"),
-    font: cs.fontFamily,
-    nodeDim: v("--gv-node-dim", "#9e4705"),
-    label: v("--gv-label", "#333"),
-    labelDim: v("--gv-label-dim", "#676767"),
-    labelHalo: v("--gv-label-halo", "rgba(255,255,255,0.78)"),
-    link: v("--gv-link", "#c8c8c8"),
-    linkDim: v("--gv-link-dim", "#e6e6e6"),
-    linkHot: v("--gv-link-hot", "#464cfc"),
-    linkSemantic: v("--gv-link-semantic", "#0f9d8a"),
-    accent: v("--gv-accent", "#650007"),
-  };
-}
 
 function getId(end: string | FGNode): string {
   return typeof end === "string" ? end : end.id;
@@ -127,8 +111,13 @@ function displayName(title: string): string {
   return i === -1 ? title : title.slice(i + 1);
 }
 
+// What an edge kind is called to a person (product design §1).
+function displayLabel(label: string): string {
+  return label === SEMANTIC_KIND ? "similar" : label;
+}
+
 // Label visibility thresholds expressed in zoom (graph→screen) scale.
-const NODE_LABEL_MIN_SCALE = 0.6;
+const NODE_LABEL_MIN_SCALE = 0.4;
 const EDGE_LABEL_MIN_SCALE = 1.8;
 
 function computeGraph(
@@ -202,7 +191,7 @@ function computeGraph(
   }
   const fgLinks: FGLink[] = [...merged.values()].map((acc) => {
     const { labels, ...edge } = acc;
-    edge.label = [...labels].join(", ");
+    edge.label = [...labels].map(displayLabel).join(", ");
     return { source: edge.source, target: edge.target, edge };
   });
   const rmap = new Map<string, number>();
@@ -226,7 +215,7 @@ export class GraphCanvas extends Component<Props, State> {
   private hoveredId: string | null = null;
   private neighbors: Set<string> = new Set();
   private adjacency: Map<string, Set<string>> = new Map();
-  private theme: Theme = readTheme();
+  private theme: CanvasTheme = readCanvasTheme();
   private radiusMap: Map<string, number> = new Map();
 
   // Mouse position relative to the canvas container; drives the edge tooltip.
@@ -253,6 +242,23 @@ export class GraphCanvas extends Component<Props, State> {
   // Listeners/observers we own and must tear down.
   private resizeObserver: ResizeObserver | null = null;
   private mql: MediaQueryList | null = null;
+  private themeObserver: MutationObserver | null = null;
+  private themeTimer: number | null = null;
+
+  // Reduced motion: the layout is settled before it is painted, the camera
+  // jumps instead of gliding, and the render loop sleeps when nothing moves.
+  private motionQuery: MediaQueryList | null = null;
+  private reduceMotion = false;
+  private idleTimer: number | null = null;
+  // The layout engine is ticking (a feed, a force change or a drag started it;
+  // onEngineStop ends it): the loop must not sleep through that.
+  private engineRunning = false;
+
+  // Whether the person has moved the camera since it was last framed. While
+  // they have not, a change of the canvas's size (the phone's sheet opening, a
+  // window resized, the sidebar dragged) frames the graph again.
+  private cameraTouched = false;
+  private refitTimer: number | null = null;
 
   constructor(props: Props) {
     super(props);
@@ -262,6 +268,9 @@ export class GraphCanvas extends Component<Props, State> {
     // add/removeEventListener pairs.
     this.onMouseMove = this.onMouseMove.bind(this);
     this.onThemeChange = this.onThemeChange.bind(this);
+    this.onMotionChange = this.onMotionChange.bind(this);
+    this.wake = this.wake.bind(this);
+    this.markTouched = this.markTouched.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
     this.zoomIn = this.zoomIn.bind(this);
     this.zoomOut = this.zoomOut.bind(this);
@@ -279,19 +288,71 @@ export class GraphCanvas extends Component<Props, State> {
   }
 
   private onThemeChange() {
-    this.theme = readTheme();
+    this.theme = readCanvasTheme();
     this.rerender();
+  }
+
+  private awaitTheme(attempt = 0) {
+    if (this.theme.ready || attempt > 100) return;
+    this.themeTimer = window.setTimeout(() => {
+      this.themeTimer = null;
+      this.theme = readCanvasTheme();
+      if (this.theme.ready) this.rerender();
+      else this.awaitTheme(attempt + 1);
+    }, 50);
+  }
+
+  private onMotionChange() {
+    this.reduceMotion = this.motionQuery?.matches ?? false;
+    if (!this.reduceMotion) this.wakeFully();
+  }
+
+  // Milliseconds for a camera move: none when motion is reduced.
+  private ms(ms: number): number {
+    return this.reduceMotion ? 0 : ms;
+  }
+
+  // With reduced motion the render loop is parked once everything has settled
+  // (a loop that paints identical frames is motion a person asked not to
+  // have, and it costs battery). Anything that can change the picture wakes it.
+  private wake() {
+    const fg = this.fg;
+    if (!fg || !this.reduceMotion) return;
+    fg.resumeAnimation();
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    this.idleTimer = window.setTimeout(() => {
+      this.idleTimer = null;
+      if (this.reduceMotion && !this.engineRunning) {
+        this.fg?.pauseAnimation();
+      }
+    }, IDLE_PAUSE_MS);
+  }
+
+  private markTouched() {
+    this.cameraTouched = true;
+  }
+
+  private wakeFully() {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    this.fg?.resumeAnimation();
   }
 
   private onKeyDown(e: KeyboardEvent) {
     const tgt = e.target as HTMLElement | null;
+    // A text field, a select or the node list keeps its own arrow keys.
     if (
       tgt &&
       (tgt.tagName === "INPUT" ||
         tgt.tagName === "TEXTAREA" ||
-        (tgt as HTMLElement).isContentEditable)
+        tgt.tagName === "SELECT" ||
+        tgt.isContentEditable ||
+        tgt.closest?.('[role="listbox"]'))
     )
       return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     switch (e.key) {
       case "ArrowUp":
@@ -355,12 +416,26 @@ export class GraphCanvas extends Component<Props, State> {
       f.chargeStrength,
     );
     this.configureLinkForce();
-    // Re-heat softly so the new force field has a chance to settle.
-    fg.d3ReheatSimulation();
+    if (this.reduceMotion) {
+      // Settle the new force field before painting rather than animating to
+      // it: feeding the same data again runs the warm-up ticks synchronously.
+      fg.warmupTicks(SETTLE_TICKS).cooldownTicks(0);
+      fg.graphData(fg.graphData());
+    } else {
+      // Re-heat softly so the new force field has a chance to settle.
+      fg.d3ReheatSimulation();
+    }
+    this.engineRunning = true;
+    this.wake();
   }
 
   componentDidMount() {
     if (!this.containerRef) return;
+    // The shared stylesheet is a <link> and may still be loading (a canvas that
+    // reads its colours and font too early paints in the browser's defaults):
+    // read again, and keep reading until the tokens are there.
+    this.theme = readCanvasTheme();
+    this.awaitTheme();
     const fg = ForceGraph()(this.containerRef);
     this.fg = fg;
 
@@ -418,6 +493,7 @@ export class GraphCanvas extends Component<Props, State> {
       })
       .onLinkClick((link: FGLink) => this.handleLinkClick(link))
       .onNodeDrag((node: FGNode) => {
+        this.engineRunning = true;
         // Pin node where it's dragged.
         node.fx = node.x;
         node.fy = node.y;
@@ -427,6 +503,8 @@ export class GraphCanvas extends Component<Props, State> {
         node.fy = node.y;
       })
       .onEngineStop(() => {
+        this.engineRunning = false;
+        this.wake(); // (re)arms the idle pause now that the layout is at rest
         // After a data-driven feed re-heats the simulation and it settles,
         // re-fit the camera so newly added/removed nodes stay in view.
         // Gated by pendingFit so drag-induced settles don't move the camera.
@@ -463,10 +541,25 @@ export class GraphCanvas extends Component<Props, State> {
     // length, plus the radial center pull above.
     this.configureLinkForce();
 
+    let lastW = 0;
+    let lastH = 0;
     const resize = () => {
       if (!this.containerRef) return;
-      fg.width(this.containerRef.clientWidth);
-      fg.height(this.containerRef.clientHeight);
+      const w = this.containerRef.clientWidth;
+      const h = this.containerRef.clientHeight;
+      fg.width(w);
+      fg.height(h);
+      const changed = Math.abs(w - lastW) > 1 || Math.abs(h - lastH) > 1;
+      const first = lastW === 0 && lastH === 0;
+      lastW = w;
+      lastH = h;
+      if (!changed || first || this.cameraTouched) return;
+      // Settle first: a resize arrives as a stream of sizes.
+      if (this.refitTimer !== null) clearTimeout(this.refitTimer);
+      this.refitTimer = window.setTimeout(() => {
+        this.refitTimer = null;
+        if (!this.cameraTouched && !this.pendingFit) this.recenter();
+      }, 120);
     };
     resize();
     this.resizeObserver = new ResizeObserver(resize);
@@ -476,6 +569,25 @@ export class GraphCanvas extends Component<Props, State> {
 
     this.mql = window.matchMedia("(prefers-color-scheme: dark)");
     this.mql.addEventListener?.("change", this.onThemeChange);
+    // The host may switch the explicit theme (data-theme) without the system
+    // preference changing.
+    this.themeObserver = new MutationObserver(this.onThemeChange);
+    this.themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "class"],
+    });
+
+    this.motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.reduceMotion = this.motionQuery.matches;
+    this.motionQuery.addEventListener?.("change", this.onMotionChange);
+    for (const type of ["pointerdown", "pointermove", "wheel", "touchstart"]) {
+      this.containerRef.addEventListener(type, this.wake, { passive: true });
+    }
+    for (const type of ["pointerdown", "wheel"]) {
+      this.containerRef.addEventListener(type, this.markTouched, {
+        passive: true,
+      });
+    }
 
     window.addEventListener("keydown", this.onKeyDown);
 
@@ -497,12 +609,14 @@ export class GraphCanvas extends Component<Props, State> {
       // Edge-label visibility flipped: force a repaint via no-op accessor swap.
       const fg = this.fg;
       if (fg) fg.linkCanvasObject(fg.linkCanvasObject());
+      this.wake();
     }
 
     if (prevProps.selectedRef !== this.props.selectedRef) {
       // Selected-node ring change: force a repaint.
       const fg = this.fg;
       if (fg) fg.nodeCanvasObject(fg.nodeCanvasObject());
+      this.wake();
     }
 
     if (prevProps.forces !== this.props.forces) {
@@ -520,6 +634,26 @@ export class GraphCanvas extends Component<Props, State> {
     this.resizeObserver = null;
     this.mql?.removeEventListener?.("change", this.onThemeChange);
     this.mql = null;
+    if (this.themeTimer !== null) clearTimeout(this.themeTimer);
+    this.themeObserver?.disconnect();
+    this.themeObserver = null;
+    this.motionQuery?.removeEventListener?.("change", this.onMotionChange);
+    this.motionQuery = null;
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    if (this.refitTimer !== null) clearTimeout(this.refitTimer);
+    if (this.containerRef) {
+      for (const type of [
+        "pointerdown",
+        "pointermove",
+        "wheel",
+        "touchstart",
+      ]) {
+        this.containerRef.removeEventListener(type, this.wake);
+      }
+      for (const type of ["pointerdown", "wheel"]) {
+        this.containerRef.removeEventListener(type, this.markTouched);
+      }
+    }
     window.removeEventListener("keydown", this.onKeyDown);
     if (this.fg) {
       this.fg.pauseAnimation();
@@ -534,6 +668,7 @@ export class GraphCanvas extends Component<Props, State> {
     const fg = this.fg;
     if (!fg) return;
     fg.nodeCanvasObject(fg.nodeCanvasObject());
+    this.wake();
   }
 
   // Feed nodes/links into force-graph, preserving positions and softly
@@ -593,10 +728,18 @@ export class GraphCanvas extends Component<Props, State> {
     // engine's multi-second default. recenter() handles the single-node and
     // MAX_AUTO_ZOOM cases.
     this.pendingFit = true;
-    fg.cooldownTicks(
-      this.fedOnce ? REFIT_COOLDOWN_TICKS : FIRST_FIT_COOLDOWN_TICKS,
-    );
+    if (this.reduceMotion) {
+      // Settle before the first paint: the engine runs its ticks now, stops
+      // after the next one, and onEngineStop frames the camera.
+      fg.warmupTicks(SETTLE_TICKS).cooldownTicks(0);
+    } else {
+      fg.warmupTicks(0).cooldownTicks(
+        this.fedOnce ? REFIT_COOLDOWN_TICKS : FIRST_FIT_COOLDOWN_TICKS,
+      );
+    }
     this.fedOnce = true;
+    this.engineRunning = true;
+    this.wake();
   }
 
   private cancelClickTimer() {
@@ -667,17 +810,24 @@ export class GraphCanvas extends Component<Props, State> {
     const y = node.y ?? 0;
     const highlighted = this.isHighlighted(node.id);
     const isSelected = node.id === this.props.selectedRef;
+    const ghost = node.status === "ghost";
 
     ctx.save();
-    let alpha = node.status === "ghost" ? 0.45 : 1;
-    if (!highlighted) alpha *= 0.35;
-    ctx.globalAlpha = alpha;
+    // Ghosts and nodes dimmed by a hover are fainter than the rest but never
+    // so faint that their outline or label is lost (labels paint at full
+    // opacity below).
+    // Only the fill is faint: the outline of a ghost or a missing page stays
+    // at full strength so the mark itself keeps 3:1 against the page.
+    const hoverFade = highlighted ? 1 : 0.4;
+    const fillAlpha = (ghost ? 0.55 : 1) * hoverFade;
+    ctx.globalAlpha = fillAlpha;
 
     if (node.dangling) {
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = t.bg || "#fff";
+      ctx.fillStyle = t.bg;
       ctx.fill();
+      ctx.globalAlpha = hoverFade;
       ctx.setLineDash([3 / scale, 2 / scale]);
       ctx.lineWidth = 1.5 / scale;
       ctx.strokeStyle = t.nodeDim;
@@ -686,11 +836,27 @@ export class GraphCanvas extends Component<Props, State> {
     } else {
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = node.color;
+      // The fill is a theme colour per tag, resolved from the stylesheet, so
+      // an untagged node is grey in both schemes (a var() would be ignored).
+      const hue = t.resolve(node.color) || t.link;
+      ctx.fillStyle = hue;
       ctx.fill();
+      if (ghost) {
+        // A translucent fill inside a full-strength ring of the same hue.
+        ctx.globalAlpha = hoverFade;
+        ctx.lineWidth = 1.5 / scale;
+        ctx.strokeStyle = hue;
+      } else {
+        // A 1px outline in the page colour keeps every node legible against
+        // its neighbours and the edges that cross it.
+        ctx.lineWidth = 1 / scale;
+        ctx.strokeStyle = t.nodeStroke;
+      }
+      ctx.stroke();
     }
 
     if (isSelected) {
+      ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.arc(x, y, radius + 2 / scale, 0, Math.PI * 2);
       ctx.lineWidth = 2 / scale;
@@ -700,10 +866,13 @@ export class GraphCanvas extends Component<Props, State> {
 
     // Label rendered BELOW the node, scaled to constant screen pixels.
     // Hide when zoomed way out OR when this node is dimmed by hover.
+    // The current page is always named, however far out the camera is.
     const showLabel =
-      scale >= NODE_LABEL_MIN_SCALE && (highlighted || this.hoveredId === null);
+      (isSelected || scale >= NODE_LABEL_MIN_SCALE) &&
+      (highlighted || this.hoveredId === null);
     if (showLabel) {
-      const fontPx = isSelected ? 13 : 11;
+      ctx.globalAlpha = 1;
+      const fontPx = isSelected ? 13 : 12;
       const fontSize = fontPx / scale;
       ctx.font = `${isSelected ? "600 " : ""}${fontSize}px ${t.font}`;
       ctx.textAlign = "center";
@@ -711,11 +880,12 @@ export class GraphCanvas extends Component<Props, State> {
       const name = displayName(node.title);
       const label = node.prefix ? `${node.prefix}${name}` : name;
       const gap = 4 / scale;
-      // Halo behind the label for legibility over edges.
+      // A halo in the page colour keeps the label readable over edges.
+      ctx.lineJoin = "round";
       ctx.lineWidth = 3 / scale;
-      ctx.strokeStyle = t.labelHalo;
+      ctx.strokeStyle = t.bg;
       ctx.strokeText(label, x, y + radius + gap);
-      ctx.fillStyle = node.dangling ? t.nodeDim : t.label;
+      ctx.fillStyle = node.dangling ? t.nodeDim : ghost ? t.labelDim : t.label;
       ctx.fillText(label, x, y + radius + gap);
     }
     ctx.restore();
@@ -749,39 +919,34 @@ export class GraphCanvas extends Component<Props, State> {
     const bx = tx - tR * ux;
     const by = ty - tR * uy;
 
+    // Three kinds, three strokes (the sidebar's legend shows the same):
+    // a link is solid, a mention dotted, a similar page dashed.
     const kind: string = link.edge.kind;
-    const semantic = kind === SEMANTIC_KIND;
-    const dimmed = STRUCTURAL_KINDS.has(kind);
+    const similar = kind === SEMANTIC_KIND;
+    const mention = STRUCTURAL_KINDS.has(kind);
     const hov = this.hoveredId;
     const touches = this.linkTouchesHover(link);
 
-    let strokeStyle: string;
-    let alpha = 1;
-    if (hov) {
-      if (touches) {
-        strokeStyle = semantic ? t.linkSemantic : t.linkHot;
-      } else {
-        strokeStyle = t.linkDim;
-        alpha = 0.5;
-      }
-    } else {
-      strokeStyle = semantic ? t.linkSemantic : dimmed ? t.linkDim : t.link;
-    }
-    // Semantic edges are an overlay: dashed and fainter than explicit links.
-    if (semantic) alpha *= touches ? 0.9 : 0.55;
+    let strokeStyle = similar
+      ? t.linkSimilar
+      : mention
+        ? t.linkMention
+        : t.link;
+    if (hov) strokeStyle = touches ? t.linkHot : t.linkDim;
 
     ctx.save();
-    ctx.globalAlpha = alpha;
     ctx.strokeStyle = strokeStyle;
-    ctx.lineWidth = (touches ? 1.8 : 1.2) / scale;
-    if (semantic) ctx.setLineDash([6 / scale, 4 / scale]);
-    else if (dimmed) ctx.setLineDash([3 / scale, 3 / scale]);
+    ctx.lineWidth = (touches ? 2 : 1.25) / scale;
+    ctx.lineCap = mention ? "round" : "butt";
+    if (similar) ctx.setLineDash([4 / scale, 3 / scale]);
+    else if (mention) ctx.setLineDash([0.01 / scale, 3 / scale]);
     else ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(ax, ay);
     ctx.lineTo(bx, by);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.lineCap = "butt";
 
     // Arrowheads — skip on undirected co-mention collapses.
     if (!link.edge.undirected) {
@@ -822,14 +987,15 @@ export class GraphCanvas extends Component<Props, State> {
       if (angle < -Math.PI / 2) angle += Math.PI;
       ctx.translate(mx, my);
       ctx.rotate(angle);
-      const fontSize = 10 / scale;
+      const fontSize = 12 / scale;
       ctx.font = `${fontSize}px ${t.font}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
+      ctx.lineJoin = "round";
       ctx.lineWidth = 3 / scale;
-      ctx.strokeStyle = t.labelHalo;
+      ctx.strokeStyle = t.bg;
       ctx.strokeText(label, 0, -2 / scale);
-      ctx.fillStyle = dimmed ? t.labelDim : t.label;
+      ctx.fillStyle = mention || similar ? t.labelDim : t.label;
       ctx.fillText(label, 0, -2 / scale);
     }
     ctx.restore();
@@ -838,13 +1004,17 @@ export class GraphCanvas extends Component<Props, State> {
   private zoomIn() {
     const fg = this.fg;
     if (!fg) return;
-    fg.zoom(fg.zoom() * 1.4, 250);
+    this.wake();
+    this.cameraTouched = true;
+    fg.zoom(fg.zoom() * 1.4, this.ms(250));
   }
 
   private zoomOut() {
     const fg = this.fg;
     if (!fg) return;
-    fg.zoom(fg.zoom() / 1.4, 250);
+    this.wake();
+    this.cameraTouched = true;
+    fg.zoom(fg.zoom() / 1.4, this.ms(250));
   }
 
   // dx/dy in {-1, 0, 1} — step scales inversely with zoom so the visual
@@ -852,26 +1022,124 @@ export class GraphCanvas extends Component<Props, State> {
   private pan(dx: number, dy: number) {
     const fg = this.fg;
     if (!fg) return;
+    this.wake();
+    this.cameraTouched = true;
     const step = 80 / fg.zoom();
     const c = fg.centerAt();
     if (!c) return;
-    fg.centerAt(c.x + dx * step, c.y + dy * step, 250);
+    fg.centerAt(c.x + dx * step, c.y + dy * step, this.ms(250));
   }
 
+  // Frame the graph: every node and its label inside the canvas, as close as
+  // fits, in the part of it the controls do not cover; then, if the current
+  // page still lands under a control, lift the camera until it clears it.
   private recenter() {
     const fg = this.fg;
     if (!fg) return;
-    if (this.computed.nodes.length <= 1) {
-      fg.centerAt(0, 0, 400);
-      fg.zoom(2, 400);
+    this.wake();
+    this.cameraTouched = false;
+    const nodes = this.computed.nodes;
+    if (nodes.length <= 1) {
+      // A lone page is framed above the middle when the canvas has a note to
+      // show (it sits just under the middle), so the two never overlap.
+      const lone = nodes[0];
+      const lx = lone?.x ?? 0;
+      const ly = lone?.y ?? 0;
+      const lift = this.props.empty ? EMPTY_NOTE_LIFT / 2 : 0;
+      fg.centerAt(lx, ly + lift, this.ms(400));
+      fg.zoom(MAX_AUTO_ZOOM, this.ms(400));
       return;
     }
-    fg.zoomToFit(400, 40);
-    if (fg.zoom() > MAX_AUTO_ZOOM) fg.zoom(MAX_AUTO_ZOOM, 400);
+    const w = this.containerRef?.clientWidth ?? 0;
+    const h = this.containerRef?.clientHeight ?? 0;
+    const placed = nodes.filter(
+      (n) => n.x !== undefined && n.y !== undefined,
+    ) as (FGNode & { x: number; y: number })[];
+    if (placed.length === 0 || !w || !h) {
+      // Nothing to measure: centre on what is placed and keep the zoom inside
+      // the auto-zoom range. (zoomToFit would leave the camera mid-animation,
+      // so a zoom read right after it is stale.)
+      const cx = placed.length
+        ? placed.reduce((a, n) => a + n.x, 0) / placed.length
+        : 0;
+      const cy = placed.length
+        ? placed.reduce((a, n) => a + n.y, 0) / placed.length
+        : 0;
+      fg.centerAt(cx, cy, this.ms(400));
+      fg.zoom(
+        Math.min(MAX_AUTO_ZOOM, Math.max(MIN_AUTO_ZOOM, fg.zoom())),
+        this.ms(400),
+      );
+      return;
+    }
+    // Where the controls are, in canvas pixels (the pad and the zoom stack
+    // sit in the bottom corners, 16px in).
+    const box = this.containerRef?.getBoundingClientRect();
+    const controls: {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+    }[] = [];
+    for (const el of this.containerRef?.parentElement?.querySelectorAll<HTMLElement>(
+      ".graph-pan, .graph-zoom",
+    ) ?? []) {
+      if (!box || el.offsetHeight === 0) continue;
+      const r = el.getBoundingClientRect();
+      controls.push({
+        left: r.left - box.left,
+        top: r.top - box.top,
+        right: r.right - box.left,
+        bottom: r.bottom - box.top,
+      });
+    }
+    const controlsTop = controls.length
+      ? Math.min(...controls.map((c) => c.top))
+      : h - SAFE_BOTTOM;
+    // The band kept clear under the graph: at least SAFE_BOTTOM, and the
+    // controls' own height when they are taller.
+    const bottomEdge = Math.min(h - SAFE_BOTTOM, controlsTop - 8);
+    const topEdge = FIT_PADDING - 8;
+    const fit = fitCamera({
+      nodes: placed.map((n) => ({
+        id: n.id,
+        x: n.x,
+        y: n.y,
+        labelHalf: Math.min(80, 3.4 * displayName(n.title).length + 4),
+      })),
+      width: w,
+      height: h,
+      topEdge,
+      bottomEdge,
+      labelRoom: LABEL_ROOM,
+      focusId: this.props.selectedRef,
+    });
+    if (!fit) return;
+    const { scale, x: camX } = fit;
+    let camY = fit.y;
+
+    // The current page must not sit under a control.
+    const current = placed.find((n) => n.id === this.props.selectedRef);
+    if (current) {
+      const r = (this.radiusMap.get(current.id) ?? 12) + 10;
+      const sx = w / 2 + (current.x - camX) * scale;
+      for (const c of controls) {
+        const sy = h / 2 + (current.y - camY) * scale;
+        const hit =
+          sx + r > c.left &&
+          sx - r < c.right &&
+          sy + r > c.top &&
+          sy - r < c.bottom;
+        if (hit) camY += (sy - (c.top - r - 8)) / scale;
+      }
+    }
+    fg.centerAt(camX, camY, this.ms(400));
+    fg.zoom(scale, this.ms(400));
   }
 
   render() {
     const { edgeHover, ghostHover } = this.state;
+    const { empty } = this.props;
     const isEmpty = this.computed.nodes.length === 0;
     return (
       <div class="gv-canvas-wrap">
@@ -880,65 +1148,126 @@ export class GraphCanvas extends Component<Props, State> {
             this.containerRef = el;
           }}
           class="graph-canvas"
+          role="img"
+          aria-label="Graph of pages and the lines between them. The Nodes list in the filters is the way to browse it with a keyboard."
         />
-        {isEmpty && <div class="gv-empty">Graph is empty</div>}
+        {isEmpty && (
+          <div class="gv-empty" role="status">
+            <p>There are no pages in the graph.</p>
+          </div>
+        )}
+        {!isEmpty && empty && (
+          <EmptyNote hidden={empty.hidden} emit={this.props.emit} />
+        )}
         {edgeHover && <EdgeTooltip {...edgeHover} />}
         {ghostHover && !edgeHover && <GhostTooltip {...ghostHover} />}
-        <div class="graph-controls">
-          <div class="graph-pan">
-            <button
-              type="button"
-              class="graph-pan-up"
-              title="Pan up"
-              onClick={() => this.pan(0, -1)}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="graph-pan-left"
-              title="Pan left"
-              onClick={() => this.pan(-1, 0)}
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              class="graph-pan-center"
-              title="Fit to view"
-              onClick={this.recenter}
-            >
-              ⊙
-            </button>
-            <button
-              type="button"
-              class="graph-pan-right"
-              title="Pan right"
-              onClick={() => this.pan(1, 0)}
-            >
-              →
-            </button>
-            <button
-              type="button"
-              class="graph-pan-down"
-              title="Pan down"
-              onClick={() => this.pan(0, 1)}
-            >
-              ↓
-            </button>
-          </div>
-          <div class="graph-zoom">
-            <button type="button" title="Zoom in" onClick={this.zoomIn}>
-              +
-            </button>
-            <button type="button" title="Zoom out" onClick={this.zoomOut}>
-              −
-            </button>
-          </div>
+        <div class="graph-pan" role="group" aria-label="Pan">
+          <button
+            type="button"
+            class="graph-pan-up"
+            title="Pan up"
+            aria-label="Pan up"
+            onClick={() => this.pan(0, -1)}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            class="graph-pan-left"
+            title="Pan left"
+            aria-label="Pan left"
+            onClick={() => this.pan(-1, 0)}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            class="graph-pan-center"
+            title="Center on current page"
+            aria-label="Center on current page"
+            onClick={this.recenter}
+          >
+            ⊙
+          </button>
+          <button
+            type="button"
+            class="graph-pan-right"
+            title="Pan right"
+            aria-label="Pan right"
+            onClick={() => this.pan(1, 0)}
+          >
+            →
+          </button>
+          <button
+            type="button"
+            class="graph-pan-down"
+            title="Pan down"
+            aria-label="Pan down"
+            onClick={() => this.pan(0, 1)}
+          >
+            ↓
+          </button>
+        </div>
+        <div class="graph-zoom" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={this.zoomIn}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={this.zoomOut}
+          >
+            −
+          </button>
+          {/* The phone has no pan pad: the centre button moves here. */}
+          <button
+            type="button"
+            class="graph-fit"
+            title="Center on current page"
+            aria-label="Center on current page"
+            onClick={this.recenter}
+          >
+            ⊙
+          </button>
         </div>
       </div>
     );
   }
+}
+
+// What the canvas says when the page has nothing around it (product design §5):
+// why, and the one thing that might help.
+function EmptyNote({
+  hidden,
+  emit,
+}: {
+  hidden: number;
+  emit: (event: GraphEvent) => void;
+}) {
+  return (
+    <div class="gv-empty" role="status">
+      <p>
+        This page has no links or similar pages yet.
+        {hidden > 0 &&
+          ` ${hidden} ${hidden === 1 ? "page is" : "pages are"} hidden because ${hidden === 1 ? "it is" : "they are"} not connected.`}
+      </p>
+      {hidden > 0 && (
+        <Button
+          onClick={() =>
+            emit({ type: "filters.patch", patch: { hideOrphans: false } })
+          }
+        >
+          Show them
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function GhostTooltip({
@@ -985,7 +1314,7 @@ function EdgeTooltip({
     >
       <div class="gv-edge-tooltip-label">
         {edge.label}
-        {edge.score !== undefined && ` (similarity ${edge.score.toFixed(3)})`}
+        {edge.score !== undefined && ` · ${edge.score.toFixed(2)}`}
       </div>
       {snippets.length === 0
         ? // Pure semantic edges have no source text; the score says it all.

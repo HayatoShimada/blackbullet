@@ -1,62 +1,65 @@
-// Visual language aligned with SilverBullet's configuration-manager plug
-// — color tokens, section header style, button style, and border radii
-// match `silverbullet/plugs/configuration-manager/ui/configuration.scss`.
-// Dark mode is driven by both `prefers-color-scheme` (for iframes that
-// don't see the parent's data-theme) AND `html[data-theme="dark"]` (for
-// when SilverBullet propagates its explicit theme into the iframe).
+// The graph panel's stylesheet. Chrome (surfaces, ink, lines, accent, radii,
+// shadows, motion) comes from the shared `--sb-*` tokens in components.css, so
+// the graph reads as the same material as the page around it; only the graph's
+// own colours (edge strokes, tag hues) are defined here, as a measured pair per
+// colour scheme (dev-docs/design-system.md, 2.3).
+//
+// Dark mode is driven by both `prefers-color-scheme` (for iframes that don't
+// see the parent's data-theme) AND `html[data-theme="dark"]` (for when the app
+// propagates its explicit theme into the iframe).
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
   font-family: var(--ui-font);
-  font-size: 14px;
+  font-size: var(--sb-text-md, 14px);
 
-  // Chrome colors (background, text, borders, sections, hover, accent) come
-  // from the shared panel-surface palette in components.css. Only the
-  // graph-specific node/edge palette below is defined locally.
+  // The canvas reads these through getComputedStyle (canvas_theme.ts): it
+  // cannot resolve var() itself, so every colour it paints is a token here.
+  --gv-bg: var(--sb-bg);
+  --gv-node-stroke: var(--sb-bg);
+  --gv-node-dim: #9e4705;       // a page that does not exist yet (rust)
+  --gv-accent: var(--sb-accent);  // ring on the current page
 
-  // Graph palette — node-color tokens are object-graph specific.
-  --gv-node: #111;
-  --gv-node-current: #1e63d8;
-  --gv-node-dim: #9e4705;       // missing-link rust
-  --gv-label: #333;
-  --gv-label-dim: #777;
-  --gv-link: #c8c8c8;
-  --gv-link-dim: #e6e6e6;
-  --gv-link-hot: #464cfc;
-  --gv-link-semantic: #0f9d8a;
-  --gv-accent: #650007;         // SB meta-color — current-page ring
-  --gv-label-halo: rgba(255, 255, 255, 0.78);
+  --gv-label: var(--sb-ink);
+  --gv-label-dim: #5f6973;      // 5.6:1 on the page colour
 
-  --gv-tag-bg: #4070d0;
-  --gv-tag-fg: #ffffff;
-  --gv-tag-border: #2a5099;
+  // Edges: a link is solid, a mention dotted, a similar page dashed.
+  --gv-link: #87919c;           // 3.2:1
+  --gv-link-dim: color-mix(in srgb, var(--gv-link) 50%, transparent);
+  --gv-link-hot: var(--sb-accent);
+  --gv-link-mention: #8a62d6;   // 4.4:1
+  --gv-link-similar: #0f8a78;   // 4.3:1
 
-  --gv-untagged: #9e9e9e;
+  // Node hues. Project is blue and area green: they are no longer both green.
+  --gv-tag-project: #3b6fd6;
+  --gv-tag-area: #1f8f57;
+  --gv-tag-goal: #b8771a;
+  --gv-tag-journal: #7c5cd6;
+  --gv-tag-resource: #b8469a;
+  // Any other tag: a hue from its name at this saturation and lightness.
+  --gv-tag-s: 55%;
+  --gv-tag-l: 40%;
+  --gv-untagged: #8a929c;       // 3.15:1 as a fill, outlined by --gv-node-stroke
 }
 
-// Dark tokens — same values configuration-manager uses, applied for either
-// the explicit theme attribute or the user's system preference.
 @mixin gv-dark-tokens {
   color-scheme: dark;
 
-  --gv-node: #fff;
-  --gv-node-current: #6e9bff;
   --gv-node-dim: #c97c4a;
-  --gv-label: #d8d8d8;
-  --gv-label-dim: #888;
-  --gv-link: #555;
-  --gv-link-dim: #333;
-  --gv-link-hot: #6e74ff;
-  --gv-link-semantic: #3fc8b3;
-  --gv-accent: #d6222e;
-  --gv-label-halo: rgba(30, 30, 30, 0.78);
+  --gv-label-dim: #a0a8b2;      // 7.6:1
 
-  --gv-tag-bg: #5b85e8;
-  --gv-tag-fg: #ffffff;
-  --gv-tag-border: #3868c8;
+  --gv-link: #707a86;           // 4.2:1
+  --gv-link-mention: #ad97f0;   // 7.4:1
+  --gv-link-similar: #3fc8b3;   // 8.8:1
 
-  --gv-untagged: #6e6e6e;
+  --gv-tag-project: #6f9cf0;
+  --gv-tag-area: #4fc380;
+  --gv-tag-goal: #e0a44a;
+  --gv-tag-journal: #ad97f0;
+  --gv-tag-resource: #e07ac4;
+  --gv-tag-l: 68%;
+  --gv-untagged: #9aa2ac;       // 7.1:1
 }
 
 html[data-theme="dark"] { @include gv-dark-tokens; }
@@ -64,15 +67,19 @@ html[data-theme="dark"] { @include gv-dark-tokens; }
   html:not([data-theme="light"]) { @include gv-dark-tokens; }
 }
 
-html, body { height: 100%; background: var(--ui-surface-background-color); color: var(--ui-surface-color); }
+html, body {
+  height: 100%;
+  background: var(--sb-bg);
+  color: var(--sb-ink);
+}
 
 #graph-root {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: var(--ui-surface-background-color);
-  color: var(--ui-surface-color);
+  background: var(--sb-bg);
+  color: var(--sb-ink);
   // No border/radius: the host modal panel already frames the iframe.
   overflow: hidden;
   outline: none;
@@ -98,108 +105,386 @@ html, body { height: 100%; background: var(--ui-surface-background-color); color
   inset: 0;
 }
 
-// Floating controls overlay (bottom-right of the canvas stage).
-// Pan pad on the left, zoom in/out stacked on the right.
-.graph-controls {
+// ----------------------------------------------------------------------------
+// Camera controls. Pan pad bottom-left, zoom bottom-right: the corners, never
+// the middle where the current page is framed (graph_canvas.tsx keeps a 64px
+// band under it clear).
+
+.graph-pan,
+.graph-zoom {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 8px;
+  bottom: 16px;
   z-index: 2;
-  pointer-events: none; // children opt in
 
   button {
-    pointer-events: auto;
-    background: var(--ui-surface-background-color);
-    color: var(--ui-surface-color);
-    border: 1px solid var(--ui-surface-border-color);
-    border-radius: 6px;
-    cursor: pointer;
-    width: 28px;
-    height: 28px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    width: var(--sb-control, 32px);
+    height: var(--sb-control, 32px);
+    padding: 0;
+    background: var(--sb-bg);
+    color: var(--sb-ink);
+    border: 1px solid var(--sb-line-strong);
+    border-radius: var(--sb-radius-1, 4px);
+    box-shadow: var(--sb-shadow-1);
+    font-size: 16px;
     line-height: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    transition: background-color var(--sb-dur-1, 80ms) var(--sb-ease-out, ease-out);
 
-    &:hover { background: var(--ui-surface-hover-background-color); }
-    &:active { background: var(--ui-surface-section-background-color); }
+    &:hover { background: color-mix(in srgb, var(--sb-ink) 8%, var(--sb-bg)); }
+    &:active { background: color-mix(in srgb, var(--sb-ink) 14%, var(--sb-bg)); }
+    &:focus-visible {
+      outline: 2px solid var(--sb-focus);
+      outline-offset: 2px;
+    }
   }
 }
 
+.graph-pan {
+  left: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, var(--sb-control, 32px));
+  grid-template-rows: repeat(3, var(--sb-control, 32px));
+  gap: 4px;
+
+  .graph-pan-up     { grid-column: 2; grid-row: 1; }
+  .graph-pan-left   { grid-column: 1; grid-row: 2; }
+  .graph-pan-center { grid-column: 2; grid-row: 2; }
+  .graph-pan-right  { grid-column: 3; grid-row: 2; }
+  .graph-pan-down   { grid-column: 2; grid-row: 3; }
+}
+
 .graph-zoom {
+  right: 16px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 
-  button {
-    flex: 1 1 0;
-    height: auto;  // let flex stretch determine the height
-  }
+  // The phone has no pan pad (a finger pans); its centre button lives here.
+  .graph-fit { display: none; }
 }
 
-// 3x3 directional pad — middle row has ←, center, →; top/bottom rows
-// have just the up/down arrow in the middle column.
-.graph-pan {
-  display: grid;
-  grid-template-columns: repeat(3, 28px);
-  grid-template-rows: repeat(3, 28px);
-  gap: 4px;
-
-  .graph-pan-up    { grid-column: 2; grid-row: 1; }
-  .graph-pan-left  { grid-column: 1; grid-row: 2; }
-  .graph-pan-center{ grid-column: 2; grid-row: 2; }
-  .graph-pan-right { grid-column: 3; grid-row: 2; }
-  .graph-pan-down  { grid-column: 2; grid-row: 3; }
-}
+// ----------------------------------------------------------------------------
+// Layout
 
 .gv-app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--ui-surface-background-color);
-  color: var(--ui-surface-color);
+  background: var(--sb-bg);
+  color: var(--sb-ink);
 }
+
 .gv-body {
   display: grid;
-  grid-template-columns: var(--gv-sidebar-width, 230px) 5px minmax(0, 1fr);
+  grid-template-columns: var(--gv-sidebar-width, 240px) 5px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
+
 .gv-resizer {
   cursor: col-resize;
   background: transparent;
-  border-left: 1px solid var(--ui-surface-border-color);
+  border-left: 1px solid var(--sb-line);
   user-select: none;
-  transition: background 120ms ease;
+  transition: background-color var(--sb-dur-1, 80ms) var(--sb-ease-out, ease-out);
 }
 .gv-resizer:hover,
 .gv-resizer.dragging {
-  background: var(--ui-accent-color, rgba(70, 76, 252, 0.25));
+  background: color-mix(in srgb, var(--sb-accent) 25%, transparent);
 }
+
 .gv-canvas-wrap {
   position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--sb-bg);
 }
 .gv-canvas-wrap .graph-canvas {
   position: absolute;
   inset: 0;
 }
 
-/* Object section inside the sidebar (selected node attributes). */
+// Header: the page's colour with a hairline, like the top bar of the app.
+// Title | controls | close on one row; two rows when the panel is narrower; on
+// a phone the controls move into the filters sheet and only title and Close
+// remain, Close always on screen.
+.gv-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+  min-height: 48px;
+  padding: 8px 16px;
+  background: var(--sb-bg);
+  border-bottom: 1px solid var(--sb-line);
+  flex-shrink: 0;
+}
+.gv-header-title {
+  font-size: var(--sb-text-md, 14px);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-header-controls {
+  justify-self: end;
+  min-width: 0;
+}
+.gv-close-button {
+  grid-column: 3;
+  font-size: 20px;
+  line-height: 1;
+}
+
+@media (max-width: 860px) {
+  .gv-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .gv-header-controls {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .gv-close-button { grid-column: 2; grid-row: 1; }
+}
+
+// The view controls: radius, labels, orphans, expand, focus.
+.gv-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.gv-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--sb-control, 32px);
+  font-size: var(--sb-text-md, 14px);
+  color: var(--sb-ink);
+  user-select: none;
+  cursor: pointer;
+}
+.gv-hops-select { min-width: 64px; }
+
+// ----------------------------------------------------------------------------
+// Sidebar (the filters). The dock's colour: one step darker than the page.
+
+.gv-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  background: var(--sb-bg-panel);
+  border-right: 1px solid var(--sb-line);
+  font-size: var(--sb-text-md, 14px);
+}
+.gv-sheet-body { display: block; }
+.gv-sheet-handle,
+.gv-sheet-actions { display: none; }
+
+.gv-section { padding: 12px 14px 6px; }
+.gv-section + .gv-section { padding-top: 14px; }
+.gv-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--sb-line);
+  font-size: var(--sb-text-md, 14px);
+  font-weight: 600;
+  color: var(--sb-ink-2);
+}
+.gv-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-height: 28px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--sb-radius-1, 4px);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+
+  &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+}
+.gv-twisty {
+  display: inline-block;
+  transition: transform var(--sb-dur-2, 160ms) var(--sb-ease-out, ease-out);
+  margin-right: 6px;
+  font-size: 10px;
+  color: var(--sb-ink-2);
+}
+.gv-twisty.open { transform: rotate(90deg); }
+.gv-section-actions {
+  font-size: var(--sb-text-sm, 12.5px);
+  font-weight: 400;
+  white-space: nowrap;
+}
+// A text-looking action: "all", "none", "reset", "Show", "show 12 more".
+.gv-link-button {
+  padding: 0 2px;
+  min-height: 24px;
+  background: none;
+  border: 0;
+  border-radius: var(--sb-radius-1, 4px);
+  color: var(--sb-ink-2);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover { color: var(--sb-ink); text-decoration: underline; }
+  &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+}
+.gv-section-body { padding: 0; }
+.gv-forces-body { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.gv-force-row { display: flex; flex-direction: column; gap: 2px; font-size: var(--sb-text-sm, 12.5px); }
+.gv-force-row input[type="range"] { width: 100%; accent-color: var(--sb-accent); }
+.gv-force-label { display: flex; justify-content: space-between; color: var(--sb-ink-2); }
+.gv-force-value { font-variant-numeric: tabular-nums; }
+
+.gv-semantic-note {
+  display: flex;
+  gap: 6px;
+  font-size: var(--sb-text-sm, 12.5px);
+  line-height: 1.4;
+  color: var(--sb-ink-2);
+}
+.gv-note-icon { flex: none; }
+.gv-semantic-swatch {
+  display: inline-block;
+  width: 16px;
+  border-top: 2px dashed var(--gv-link-similar);
+  margin: 0 2px;
+}
+.gv-more-fewer {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+// "N pages hidden (no connections)  Show" / "N pages hidden by filters  Show all"
+.gv-hidden-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin: 12px 14px 0;
+  padding: 6px 10px;
+  background: var(--sb-bg-2);
+  border-radius: var(--sb-radius-1, 4px);
+  font-size: var(--sb-text-sm, 12.5px);
+  color: var(--sb-ink-2);
+}
+.gv-hidden-line .gv-more { display: inline; margin: 0; }
+
+// Search field uses the shared `.sb-input`; keep only layout here.
+.gv-section-search {
+  width: 100%;
+  margin: 4px 0 8px;
+}
+.gv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 0;
+  font-size: var(--sb-text-md, 14px);
+  cursor: pointer;
+}
+.gv-count {
+  margin-left: auto;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  font-variant-numeric: tabular-nums;
+}
+.gv-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  // The same 1px outline the canvas gives a node.
+  box-shadow: 0 0 0 1px var(--sb-line);
+}
+.gv-tag-row { display: inline-flex; align-items: center; gap: 6px; }
+.gv-more {
+  display: block;
+  margin-top: 6px;
+  color: var(--sb-accent);
+  font-size: var(--sb-text-sm, 12.5px);
+
+  &:hover { color: var(--sb-accent); }
+}
+
+// Legend: the three kinds of line.
+.gv-legend { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.gv-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.gv-legend-line {
+  display: inline-block;
+  flex: none;
+  width: 24px;
+  height: 0;
+  border-top: 2px solid var(--gv-link);
+}
+.gv-legend-mention { border-top: 2px dotted var(--gv-link-mention); }
+.gv-legend-similar { border-top: 2px dashed var(--gv-link-similar); }
+
+// Nodes: the keyboard and screen-reader path through the graph.
+.gv-node-list {
+  list-style: none;
+  max-height: min(40vh, 280px);
+  overflow: auto;
+  border-radius: var(--sb-radius-1, 4px);
+
+  &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+}
+.gv-node-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--sb-control, 32px);
+  padding: 0 8px;
+  border-radius: var(--sb-radius-1, 4px);
+  cursor: pointer;
+
+  &:hover { background: var(--sb-overlay-8); }
+  &[aria-selected="true"] {
+    background: var(--sb-accent-soft);
+    box-shadow: inset 3px 0 0 var(--sb-accent);
+  }
+}
+.gv-node-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gv-node-kind { flex: none; }
+
+// Object section inside the sidebar (selected node attributes).
 .gv-object-section {
   margin-top: auto;
-  padding: 6px 14px 10px;
-  border-top: 1px solid var(--ui-surface-border-color);
-  background: var(--ui-surface-background-color);
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--sb-line);
+  background: var(--sb-bg-panel);
 }
 .gv-object-section .gv-object-header {
   display: flex;
@@ -208,10 +493,10 @@ html, body { height: 100%; background: var(--ui-surface-background-color); color
   gap: 8px;
   padding-bottom: 4px;
   margin-bottom: 4px;
-  border-bottom: 1px solid var(--ui-surface-border-color);
-  font-size: 13px;
+  border-bottom: 1px solid var(--sb-line);
+  font-size: var(--sb-text-md, 14px);
   font-weight: 600;
-  color: var(--ui-surface-color);
+  color: var(--sb-ink);
 }
 .gv-object-section .gv-object-title {
   display: inline-flex;
@@ -224,263 +509,230 @@ html, body { height: 100%; background: var(--ui-surface-background-color); color
 }
 .gv-object-section .gv-object-title-link {
   cursor: pointer;
-  color: var(--ui-accent-color);
+  color: var(--sb-link);
   text-decoration: none;
 }
 .gv-object-section .gv-object-title-link:hover { text-decoration: underline; }
 .gv-object-section .gv-object-body {
   margin: 0;
-  font-family: var(--ui-font);
-  font-size: 11px;
+  font-family: var(--sb-font-mono);
+  font-size: var(--sb-text-xs, 11px);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--ui-surface-color);
+  color: var(--sb-ink);
 }
 
-/* Header — sized roughly like configuration-manager's #cfg-header. */
-.gv-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--ui-surface-border-color);
-  flex-shrink: 0;
-}
-.gv-header-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gv-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
+// ----------------------------------------------------------------------------
+// Tooltips: elevation by shadow, edge by hairline.
 
-.gv-header-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--ui-surface-color);
-  user-select: none;
-  cursor: pointer;
-}
-
-.gv-header-notice {
-  font-size: 12px;
-  color: var(--ui-surface-subtle-color);
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gv-hops-select {
-  font: inherit;
-  padding: 1px 4px;
-  color: var(--ui-surface-color);
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 4px;
-}
-
-// Close button uses the `.sb-button-icon` component; keep only positioning and
-// the larger glyph size for the `×`.
-.gv-close-button {
-  margin-left: auto;
-  font-size: 18px;
-  line-height: 1;
-}
-
-/* Ghost-node hover tooltip */
-.gv-ghost-tooltip {
-  position: absolute;
-  z-index: 20;
-  max-width: 280px;
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  padding: 5px 8px;
-  font-family: var(--ui-font);
-  font-size: 12px;
-  color: var(--ui-surface-color);
-  pointer-events: none;
-  line-height: 1.35;
-}
-
-/* Edge hover tooltip */
+.gv-ghost-tooltip,
 .gv-edge-tooltip {
   position: absolute;
   z-index: 20;
-  max-width: 360px;
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  padding: 6px 8px;
+  background: var(--sb-bg);
+  border: 1px solid var(--sb-line);
+  border-radius: var(--sb-radius-2, 8px);
+  box-shadow: var(--sb-shadow-2);
+  padding: 6px 10px;
   font-family: var(--ui-font);
-  font-size: 12px;
-  color: var(--ui-surface-color);
+  font-size: var(--sb-text-sm, 12.5px);
+  color: var(--sb-ink);
   pointer-events: none;
   line-height: 1.4;
 }
+.gv-ghost-tooltip { max-width: 280px; }
+.gv-edge-tooltip { max-width: 360px; }
 .gv-edge-tooltip-label {
   font-weight: 600;
   margin-bottom: 4px;
 }
 .gv-edge-tooltip-snippet {
-  font-family: var(--ui-font);
-  font-size: 11px;
-  color: var(--ui-surface-color);
+  font-size: var(--sb-text-sm, 12.5px);
+  color: var(--sb-ink);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 8em;
   overflow: hidden;
 }
 .gv-edge-tooltip-empty {
-  color: var(--ui-surface-subtle-color);
+  color: var(--sb-ink-2);
   font-style: italic;
 }
 
-/* Sidebar */
-.gv-sidebar {
-  border-right: 1px solid var(--ui-surface-border-color);
-  overflow: auto;
-  font-size: 13px;
-}
-// Filter sections — title underline matches configuration-manager's
-// .lib-section-header / .cfg-category-title pattern.
-.gv-section { padding: 12px 14px 6px; }
-.gv-section + .gv-section { padding-top: 14px; }
-.gv-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 6px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--ui-surface-border-color);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ui-surface-subtle-color);
-  cursor: pointer;
-  user-select: none;
-}
-.gv-section-title { display: inline-flex; align-items: center; }
-.gv-twisty {
-  display: inline-block;
-  transition: transform 0.12s;
-  margin-right: 6px;
-  font-size: 10px;
-  color: var(--ui-surface-subtle-color);
-}
-.gv-twisty.open { transform: rotate(90deg); }
-.gv-section-actions {
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
-.gv-section-actions a {
-  cursor: pointer;
-  color: var(--ui-surface-subtle-color);
-  text-decoration: none;
-}
-.gv-section-actions a:hover { color: var(--ui-surface-color); text-decoration: underline; }
-.gv-section-body { padding: 0; }
-.gv-forces-body { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
-.gv-force-row { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.gv-force-row input[type="range"] { width: 100%; }
-.gv-semantic-note { font-size: 12px; color: var(--ui-surface-subtle-color); }
-.gv-semantic-swatch {
-  display: inline-block;
-  width: 16px;
-  border-top: 2px dashed var(--gv-link-semantic);
-  margin: 0 6px 0 2px;
-}
-.gv-force-label { display: flex; justify-content: space-between; color: var(--ui-surface-subtle-color); }
-.gv-force-value { font-variant-numeric: tabular-nums; }
-// Search field uses the shared `.sb-input`; keep only layout here.
-.gv-section-search {
-  width: 100%;
-  margin: 4px 0 8px;
-}
-.gv-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 0;
-  font-size: 13px;
-}
-.gv-count { margin-left: auto; color: var(--ui-surface-subtle-color); font-size: 12px; }
-.gv-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-.gv-tag-row { display: inline-flex; align-items: center; gap: 6px; }
-.gv-more {
-  display: block;
-  margin-top: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--ui-accent-color);
-}
-.gv-more:hover { text-decoration: underline; }
+// ----------------------------------------------------------------------------
+// The canvas says why it has nothing to draw. The page, when there is one, is
+// framed above the middle (recenter() lifts a lone page by EMPTY_NOTE_LIFT in
+// graph_canvas.tsx), so the note sits just under the middle.
 
-/* Object view */
-.gv-object-view {
-  border-left: 1px solid var(--ui-surface-border-color);
-  background: var(--ui-surface-background-color);
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-}
-.gv-object-view-empty {
-  align-items: center;
-  justify-content: center;
-  color: var(--ui-surface-subtle-color);
-  font-size: 12px;
-  padding: 18px;
-}
-.gv-object-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--ui-surface-border-color);
-}
-.gv-object-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-.gv-object-body {
-  margin: 0;
-  padding: 10px 12px;
-  font-family: var(--ui-font);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  color: var(--ui-surface-color);
-}
-
-/* Empty graph overlay */
 .gv-empty {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: calc(50% + 12px);
+  z-index: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  color: var(--ui-surface-subtle-color);
-  font-size: 13px;
+  gap: 12px;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-md, 14px);
+  line-height: 1.45;
+  pointer-events: none;
+
+  p { max-width: 360px; }
+  .sb-button { pointer-events: auto; }
+}
+
+// ----------------------------------------------------------------------------
+// Touch: 44px targets, 16px fields.
+
+@media (pointer: coarse) {
+  .graph-pan {
+    grid-template-columns: repeat(3, var(--sb-control-touch, 44px));
+    grid-template-rows: repeat(3, var(--sb-control-touch, 44px));
+  }
+  .graph-pan button,
+  .graph-zoom button {
+    width: var(--sb-control-touch, 44px);
+    height: var(--sb-control-touch, 44px);
+  }
+  .gv-control,
+  .gv-row,
+  .gv-legend-row,
+  .gv-node-option { min-height: var(--sb-control-touch, 44px); }
+  .gv-section-toggle { min-height: var(--sb-control-touch, 44px); }
+  .gv-link-button {
+    min-height: var(--sb-control-touch, 44px);
+    min-width: var(--sb-control-touch, 44px);
+    padding: 0 8px;
+  }
+  .gv-object-section .gv-object-title-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--sb-control-touch, 44px);
+  }
+  // The shared .sb-checkbox is 16px; its label row carries the 44px target.
+  .gv-control .sb-checkbox,
+  .gv-row .sb-checkbox { width: 20px; height: 20px; }
+  .gv-close-button {
+    width: var(--sb-control-touch, 44px);
+    height: var(--sb-control-touch, 44px);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Phone: the filters become a bottom sheet, the canvas takes the width, Close
+// and the sheet's handle are always reachable.
+
+// The breakpoint is the panel's own width (the modal's iframe), not the device:
+// a narrow desktop window gets the sheet layout too.
+@media (max-width: 640px) {
+  .gv-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .gv-header-controls { display: none; }
+  .gv-close-button { grid-column: 2; grid-row: 1; }
+
+  // The canvas and the sheet stack: the sheet is a bottom sheet in look and
+  // reach, but it takes its height from the column instead of floating over
+  // the canvas, so the graph is framed in the part that stays visible.
+  .gv-body {
+    display: flex;
+    flex-direction: column;
+  }
+  .gv-canvas-wrap { flex: 1 1 auto; order: 1; }
+  .gv-resizer { display: none; }
+
+  .gv-sidebar.gv-sheet {
+    order: 2;
+    position: relative;
+    z-index: 30;
+    flex: none;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    overflow: hidden;
+    background: var(--sb-bg-panel);
+    border-right: 0;
+    border-top: 1px solid var(--sb-line);
+    border-radius: var(--sb-radius-3, 12px) var(--sb-radius-3, 12px) 0 0;
+    box-shadow: var(--sb-shadow-3);
+    transition: height var(--sb-dur-3, 240ms) var(--sb-ease-out, ease-out);
+  }
+  .gv-sidebar.gv-sheet-open { height: min(60vh, 360px); }
+  // While the sheet is open the zoom row would only cover the graph; pinch
+  // zooms.
+  .gv-body:has(.gv-sheet-open) .graph-zoom { display: none; }
+
+  .gv-sheet-handle {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    height: 56px;
+    padding: 12px 16px 0;
+    background: none;
+    border: 0;
+    color: var(--sb-ink);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: -2px; }
+  }
+  .gv-sheet-grip {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--sb-line-strong);
+  }
+  .gv-sheet-summary {
+    font-weight: 400;
+    font-size: var(--sb-text-sm, 12.5px);
+    color: var(--sb-ink-2);
+  }
+
+  // Collapsed: nothing in the body is reachable (no tab stops, no readers).
+  .gv-sheet-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    visibility: hidden;
+  }
+  .gv-sheet-open .gv-sheet-body { visibility: visible; }
+
+  // Expand all / Focus and the rest of the view controls open the sheet.
+  .gv-sheet-actions {
+    display: block;
+    padding: 4px 14px 8px;
+    border-bottom: 1px solid var(--sb-line);
+  }
+
+  .gv-node-list { max-height: none; }
+
+  // No pan pad on the phone (a finger pans); the centre button joins the zoom.
+  // Zoom lies along the bottom edge (one 44px row) so the band under the
+  // framed graph stays as shallow as on a desktop.
+  .graph-pan { display: none; }
+  .graph-zoom {
+    flex-direction: row;
+    .graph-fit { display: inline-flex; }
+  }
+}
+
+// Motion: none when it is asked for. (The canvas settles its layout before
+// painting; see graph_canvas.tsx.)
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }

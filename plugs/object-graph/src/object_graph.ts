@@ -9,10 +9,10 @@ import { buildGraphHtml } from "./graph_html.ts";
 import {
   defaultFilters,
   defaultForceSettings,
-  defaultSemanticSettings,
   type ExpansionResult,
   type Filters,
   type ForceSettings,
+  migrateSemanticSettings,
   type RootViewModel,
   type SemanticSettings,
 } from "./model.ts";
@@ -41,7 +41,7 @@ async function loadSemantic(): Promise<SemanticSettings> {
   const raw = (await datastore.get(SEMANTIC_KEY)) as
     | Partial<SemanticSettings>
     | undefined;
-  return { ...defaultSemanticSettings, ...raw };
+  return migrateSemanticSettings(raw);
 }
 
 export async function showGraph() {
