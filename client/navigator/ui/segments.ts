@@ -39,9 +39,57 @@ export function applySegment(
   index: number,
   segments?: SegmentMeta[],
   masks?: SegmentMasks,
+  revealed: readonly string[] = [],
 ): Row[] {
   const active = segments?.[index];
-  if (!active?.hasWhere) return rows;
+  const hidden = (active?.hiddenNames ?? []).filter(
+    (entry) => !revealed.includes(entry),
+  );
+  const shown =
+    hidden.length === 0
+      ? rows
+      : rows.filter((row) => !isHiddenName(String(row.obj.name), hidden));
+  if (!active?.hasWhere) return shown;
   if (!masks) return [];
-  return rows.filter((row) => masks.get(row)?.[index] === true);
+  return shown.filter((row) => masks.get(row)?.[index] === true);
+}
+
+function isHiddenName(name: string, hidden: readonly string[]): boolean {
+  return hidden.some((entry) =>
+    entry.endsWith("/") ? name.startsWith(entry) : name === entry,
+  );
+}
+
+/** The `hiddenNames` the phrase has started to type, which bring them back. */
+export function revealedNames(
+  segment: SegmentMeta | undefined,
+  phrase: string,
+): string[] {
+  const typed = phrase.trimStart().toLowerCase();
+  if (typed === "") return [];
+  return (segment?.hiddenNames ?? []).filter((entry) =>
+    typed.startsWith(entry.toLowerCase()),
+  );
+}
+
+/**
+ * What an empty space tree says when its segment cannot hold a new page:
+ * undefined on All and Pages (a "+" makes a page there), a plain sentence on
+ * Documents and Meta, where a page made "here" would not appear.
+ */
+export function emptySegmentText(
+  label: string | undefined,
+): string | undefined {
+  switch (label) {
+    case undefined:
+    case "All":
+    case "Pages":
+      return undefined;
+    case "Documents":
+      return "No documents yet.";
+    case "Meta":
+      return "No meta pages yet.";
+    default:
+      return `No ${label.toLowerCase()} yet.`;
+  }
 }

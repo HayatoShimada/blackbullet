@@ -1207,3 +1207,45 @@ test("computed table columns need no attribute and default to an empty label", a
   const rows = await luaHandle(spec, "rows", {});
   expect(rows[0].cells).toEqual([6, 3]);
 });
+
+test("a row the spec calls passive carries the flag; the others do not", async () => {
+  const spec = luaSpec(`{
+    name = "v",
+    source = function() return { { name = "3 notes", note = true }, { name = "a" } } end,
+    presentation = { row = { passive = function(obj) return obj.note == true end } },
+    ${ON_SELECT},
+  }`);
+
+  const rows = (await luaHandle(spec, "rows", {})) as any[];
+
+  expect(rows.map((r) => [r.primary, r.passive])).toEqual([
+    ["3 notes", true],
+    ["a", undefined],
+  ]);
+});
+
+test("passive can also name an attribute of the object", async () => {
+  const spec = luaSpec(`{
+    name = "v",
+    source = function() return { { name = "none", passive = true }, { name = "a" } } end,
+    presentation = { row = { passive = "passive" } },
+    ${ON_SELECT},
+  }`);
+
+  const rows = (await luaHandle(spec, "rows", {})) as any[];
+
+  expect(rows.map((r) => r.passive)).toEqual([true, undefined]);
+});
+
+test("an action can be marked danger, which the row menu draws last and red", () => {
+  const meta = wireMeta(
+    luaSpec(`{
+      ${SOURCE}, ${ON_SELECT},
+      actions = {
+        { label = "Rename", run = function() end },
+        { label = "Remove", danger = true, run = function() end },
+      },
+    }`),
+  );
+  expect(meta.actions!.map((a) => a.danger)).toEqual([undefined, true]);
+});

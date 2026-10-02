@@ -85,6 +85,13 @@ export function DockMenu({
     setPos({ top, left });
   }, [open]);
 
+  // Placed, then focused (a hidden menu cannot take focus): the first item is
+  // where the keyboard lands, as in every other menu.
+  const placed = open && pos !== undefined;
+  useEffect(() => {
+    if (placed) menuRef.current?.querySelector("button")?.focus();
+  }, [placed]);
+
   // A fixed menu would otherwise sit still while the page moved under it.
   useEffect(() => {
     if (!open) return;
@@ -102,17 +109,37 @@ export function DockMenu({
       <button
         type="button"
         className="sb-dock-button"
-        title={`Shown as: ${LABELS[current]}. Change placement`}
+        title={`Move panel · now ${LABELS[current]}`}
         aria-label={`Shown as: ${LABELS[current]}. Change placement`}
+        aria-haspopup="menu"
         onClick={() => setOpen(!open)}
       >
         {dockIcon(current)}
       </button>
       {open && (
         <div
-          className="sb-dock-menu"
+          className="sb-dock-menu sb-popover"
           role="menu"
           ref={menuRef}
+          onKeyDown={(e) => {
+            const items = [
+              ...(menuRef.current?.querySelectorAll("button") ?? []),
+            ];
+            const at = items.indexOf(
+              document.activeElement as HTMLButtonElement,
+            );
+            if (e.key === "Escape" || e.key === "Tab") {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
+              ref.current?.querySelector("button")?.focus();
+            } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              e.stopPropagation();
+              const step = e.key === "ArrowDown" ? 1 : -1;
+              items[(at + step + items.length) % items.length]?.focus();
+            }
+          }}
           // Hidden for the single frame between mounting (which is what makes
           // it measurable) and being placed, so it never flashes at 0,0.
           style={
@@ -126,7 +153,7 @@ export function DockMenu({
               type="button"
               role="menuitem"
               key={dock}
-              className={`sb-dock-menu-item${dock === current ? " sb-dock-menu-current" : ""}`}
+              className={`sb-dock-menu-item sb-popover-item${dock === current ? " sb-dock-menu-current" : ""}`}
               onClick={() => {
                 setOpen(false);
                 if (dock !== current) void moveDock(name, dock);

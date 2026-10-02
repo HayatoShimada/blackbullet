@@ -2,6 +2,7 @@ import type { MovePlan } from "../../../../plug-api/ui/tree_model.ts";
 import type { Placement, PriorityChange, ReorderPlan } from "./reorder.ts";
 import {
   initialState,
+  type OpenMenu,
   transition,
   type TreeEffect,
   type TreeEvent,
@@ -25,6 +26,12 @@ export type TreeRunnerDeps = {
   /** Absent where the host has no picker yet (Move to… is not offered). */
   openMovePicker?(path: string): void;
   setPinned?(path: string, pinned: boolean): Promise<void>;
+  /** Draws a menu, or hides it. Absent where the host has none. */
+  showMenu?(menu: OpenMenu | undefined): void | Promise<void>;
+  /** Does what the menu item `item` stands for. */
+  runMenuItem?(menu: OpenMenu, item: string): void | Promise<void>;
+  /** Asks for a page name in `folder` and opens the new page. */
+  newPage?(folder: string): void | Promise<void>;
   /** Plans the priorities that put a page at `placement` among its siblings. */
   planReorder(path: string, placement: Placement): Promise<ReorderPlan>;
   /** Writes one page's `tree.priority` (0 clears it). */
@@ -47,10 +54,10 @@ const REORDER_REFUSED: Record<
   Extract<ReorderPlan, { ok: false }>["reason"],
   string
 > = {
-  "not-movable": "This has no page of its own, so it can't be ordered",
+  "not-movable": "This has no page of its own, so it can't be ordered.",
   "no-room":
-    "There is no room to put it there: a folder without a page is in the way",
-  "unknown-target": "Can't put it there",
+    "There is no room to put it there. A folder without a page is in the way.",
+  "unknown-target": "Can't put it there.",
 };
 
 function errorMessage(e: unknown): string {
@@ -128,7 +135,10 @@ export function createTreeRunner(deps: TreeRunnerDeps): TreeRunner {
         if (plan.kind === "none") {
           emit({ type: "move.noop" });
         } else if (plan.kind === "collision") {
-          await deps.flash(`${plan.newName} already exists`, "error");
+          await deps.flash(
+            `${plan.newName} already exists. Rename one of them first.`,
+            "error",
+          );
           emit({ type: "move.noop" });
         } else {
           await renameVia(plan.obj, effect.path, plan.newName, effect.folder);
@@ -162,14 +172,31 @@ export function createTreeRunner(deps: TreeRunnerDeps): TreeRunner {
         return;
       case "openMovePicker":
         if (deps.openMovePicker) deps.openMovePicker(effect.path);
-        else await deps.flash("Move to… is not available here", "error");
+        else await deps.flash("Move to… is not available here.", "error");
         return;
       case "setPinned":
         try {
           if (!deps.setPinned) throw new Error("pinning is not available here");
           await deps.setPinned(effect.path, effect.pinned);
         } catch (e) {
-          await deps.flash(`Pin failed: ${errorMessage(e)}`, "error");
+          await deps.flash(`Could not pin it. ${errorMessage(e)}`, "error");
+        }
+        return;
+      case "showMenu":
+        await deps.showMenu?.(effect.menu);
+        return;
+      case "runMenuItem":
+        try {
+          await deps.runMenuItem?.(effect.menu, effect.item);
+        } catch (e) {
+          await deps.flash(errorMessage(e), "error");
+        }
+        return;
+      case "newPage":
+        try {
+          await deps.newPage?.(effect.folder);
+        } catch (e) {
+          await deps.flash(errorMessage(e), "error");
         }
         return;
       case "offerUndo":

@@ -107,7 +107,9 @@ describe("tree runner", () => {
     runner.emit({ type: "drag.start", path: "A" });
     runner.emit({ type: "drag.drop", folder: "C" });
     await settle();
-    expect(log).toEqual(["flash[error] C/A already exists"]);
+    expect(log).toEqual([
+      "flash[error] C/A already exists. Rename one of them first.",
+    ]);
     expect(runner.getState()).toEqual({ kind: "idle" });
   });
 
@@ -126,7 +128,7 @@ describe("tree runner", () => {
     runner.emit({ type: "drag.start", path: "A" });
     runner.emit({ type: "drag.drop", folder: "C" });
     await settle();
-    expect(log).toEqual(["flash[error] Move failed: disk full"]);
+    expect(log).toEqual(["flash[error] Could not move it. disk full"]);
     expect(runner.getState()).toEqual({ kind: "idle" });
   });
 
@@ -168,7 +170,7 @@ describe("tree runner", () => {
     failNext.error = new Error("read-only");
     runner.emit({ type: "pin.request", path: "A", pinned: true });
     await settle();
-    expect(log).toEqual(["flash[error] Pin failed: read-only"]);
+    expect(log).toEqual(["flash[error] Could not pin it. read-only"]);
   });
 });
 
@@ -207,7 +209,7 @@ describe("reorder", () => {
     runner.emit({ type: "move.undo" });
     await settle();
     expect(log.slice(0, 2)).toEqual(["priority A 0", "priority B 1"]);
-    expect(log).toContain("flash[info] Order restored");
+    expect(log).toContain("flash[info] Order restored.");
   });
 
   it("a failure part-way puts back what was already written", async () => {
@@ -219,7 +221,7 @@ describe("reorder", () => {
     // The write that landed is put back; the one that failed never was.
     expect(log).toContain("priority A 2");
     expect(log).toContain("priority A 0");
-    expect(log.at(-1)).toBe("flash[error] Move failed: disk full");
+    expect(log.at(-1)).toBe("flash[error] Could not move it. disk full");
     expect(runner.getState()).toEqual({ kind: "idle" });
   });
 
@@ -231,7 +233,7 @@ describe("reorder", () => {
     runner.emit({ type: "reorder.drop", path: "A", placement: { after: "B" } });
     await settle();
     expect(log).toEqual([
-      "flash[error] There is no room to put it there: a folder without a page is in the way",
+      "flash[error] There is no room to put it there. A folder without a page is in the way.",
     ]);
     expect(runner.getState()).toEqual({ kind: "idle" });
   });
@@ -258,12 +260,66 @@ describe("an effect that throws", () => {
       placement: { before: "B" },
     });
     await settle();
-    expect(log).toEqual(["flash[error] Move failed: config unavailable"]);
+    expect(log).toEqual(["flash[error] Could not move it. config unavailable"]);
     expect(runner.getState()).toEqual({ kind: "idle" });
     fail = false;
     runner.emit({ type: "drag.start", path: "A" });
     runner.emit({ type: "drag.drop", folder: "C" });
     await settle();
     expect(log.some((l) => l.startsWith("move A"))).toBe(true);
+  });
+});
+
+describe("menus and new pages", () => {
+  function menuSetup() {
+    const log: string[] = [];
+    const runner = createTreeRunner({
+      separator: "/",
+      plan: () => ({ kind: "none" }),
+      async move() {},
+      flash: (m, level) => void log.push(`flash[${level}] ${m}`),
+      planReorder: async () => ({ ok: true, changes: [], order: [] }),
+      async setPriority() {},
+      offerUndo() {},
+      afterMove() {},
+      showMenu: (menu) =>
+        void log.push(`menu ${menu ? JSON.stringify(menu) : "hidden"}`),
+      runMenuItem: async (menu, item) => {
+        if (item === "boom") throw new Error("it broke");
+        log.push(`run ${menu.kind} ${item}`);
+      },
+      newPage: (folder) => void log.push(`newPage ${folder}`),
+      setTimer: () => 0,
+      clearTimer() {},
+    });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    return { runner, log, settle };
+  }
+
+  it("draws the menu, and hides it when an item is picked before running it", async () => {
+    const { runner, log, settle } = menuSetup();
+    runner.emit({ type: "menu.open", menu: { kind: "new" } });
+    runner.emit({ type: "menu.pick", item: "page" });
+    await settle();
+    expect(log).toEqual(['menu {"kind":"new"}', "menu hidden", "run new page"]);
+  });
+
+  it("a menu item that throws is a notice, not a stuck machine", async () => {
+    const { runner, log, settle } = menuSetup();
+    runner.emit({ type: "menu.open", menu: { kind: "row", target: "A" } });
+    runner.emit({ type: "menu.pick", item: "boom" });
+    await settle();
+    expect(log.at(-1)).toBe("flash[error] it broke");
+    runner.emit({ type: "menu.open", menu: { kind: "new" } });
+    await settle();
+    expect(runner.getState().kind).toBe("idle");
+    expect(log.at(-1)).toBe('menu {"kind":"new"}');
+  });
+
+  it("asks for a page in the folder it was given", async () => {
+    const { runner, log, settle } = menuSetup();
+    runner.emit({ type: "page.new", folder: "Projects" });
+    await settle();
+    expect(log).toEqual(["newPage Projects"]);
   });
 });

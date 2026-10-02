@@ -18,6 +18,10 @@ import type {
 import { parsePageMetaLastModified } from "../../lib/page_meta.ts";
 import type { Decoration } from "../types.ts";
 import { type BuiltinView, baseMeta, INDEX_REFRESH_EVENTS } from "./types.ts";
+import { createTarget, folderOf } from "./create_target.ts";
+import { listLabel, quickNoteParts } from "../page_title.ts";
+import { openNewPage } from "./new_page.ts";
+import { selectedTreeFolder } from "../ui/mediator/tree_host.ts";
 
 /** A page or document from the index (or its pre-index file-listing
  * fallback), or a synthesized aspiring-page row (see `aspiringRows`) -- both
@@ -177,6 +181,9 @@ function hashtagChips(obj: PageObj): Decoration[] {
 
 function pickerDescription(obj: PageObj): string | undefined {
   const parts: string[] = [];
+  // A quick note is "Quick note · 11:17"; the day it was taken is the dim part.
+  const note = quickNoteParts(obj.name);
+  if (note) parts.push(`${note.date} · :${note.seconds}`);
   const aliases: string[] = [];
   if (obj.displayName) aliases.push(obj.displayName);
   if (Array.isArray(obj.aliases)) aliases.push(...obj.aliases);
@@ -201,7 +208,8 @@ export const pagePicker: BuiltinView<PageObj> = {
   meta: baseMeta({
     title: "Pages",
     label: "Open",
-    helpText: "Press Shift-Enter to create a new page with this exact name.",
+    // Shown by the panel only while there is something to create, and says where.
+    createInFolder: true,
     supportedDocks: ["modal", "lhs", "rhs", "bhs"],
     hasCreate: true,
     createIcon: "file-text",
@@ -214,6 +222,8 @@ export const pagePicker: BuiltinView<PageObj> = {
     // an emoji prefix shouldn't have to be found by typing the emoji.
     filterFields: {
       name: { weight: 1.0, segments: true },
+      // "Home" and "Quick note · 11:17" are what the row says, so they find it.
+      primary: 0.6,
       description: 0.5,
     },
   }),
@@ -221,7 +231,10 @@ export const pagePicker: BuiltinView<PageObj> = {
     {
       label: "Pages",
       icon: "file-text",
-      placeholder: "Page",
+      placeholder: "Open a page…",
+      dockPlaceholder: "Open…",
+      // Code and settings are one segment away, or a typed prefix.
+      hiddenNames: ["Library/", "Templates/", "Trash/", "CONFIG"],
       default: true,
       where: (obj) =>
         obj.tag === "page" && !isMetaPage(obj) && !isHiddenPage(obj),
@@ -229,28 +242,35 @@ export const pagePicker: BuiltinView<PageObj> = {
     {
       label: "Meta",
       icon: "settings",
-      placeholder: "Meta page",
-      helpText:
-        "Press Shift-Enter to create a new meta page with this exact name.",
+      placeholder: "Open a meta page…",
+      dockPlaceholder: "Open…",
       prefix: "^",
       where: (obj) => isMetaPage(obj) && !isHiddenPage(obj),
     },
     {
       label: "Documents",
       icon: "file",
-      placeholder: "Document",
-      helpText:
-        "Press Shift-Enter to create a new document with this exact name.",
+      placeholder: "Open a document…",
+      dockPlaceholder: "Open…",
       where: (obj) => obj.tag === "document",
     },
     // The one segment that keeps hidden pages.
-    { label: "All", icon: "layers", placeholder: "Page or document" },
+    {
+      label: "All",
+      icon: "layers",
+      placeholder: "Open a page or document…",
+      dockPlaceholder: "Open…",
+    },
   ],
   row: {
-    primary: (obj) =>
-      obj.pageDecoration?.prefix
-        ? `${obj.pageDecoration.prefix}${obj.name}`
-        : obj.name,
+    primary: (obj) => {
+      const label =
+        obj.tag === "page" && !obj.isAspiring ? listLabel(obj.name) : undefined;
+      const name = label ?? obj.name;
+      return obj.pageDecoration?.prefix
+        ? `${obj.pageDecoration.prefix}${name}`
+        : name;
+    },
     description: pickerDescription,
     decorations: (obj) => {
       if (obj.isAspiring) {
@@ -286,12 +306,22 @@ export const pagePicker: BuiltinView<PageObj> = {
   // restore.
   onSelect: (obj) => editor.open(obj.ref ?? obj.name),
   onCreate: async (phrase) => {
-    if (isValidName(phrase)) {
-      const path = parseToRef(phrase)!.path;
-      if (!isMarkdownPath(path) && !(await space.fileExists(path))) {
-        await space.writeDocument(path, new Uint8Array());
+    const name = createTarget(
+      phrase,
+      selectedTreeFolder() ?? folderOf((await editor.getCurrentPage()) ?? ""),
+    );
+    if (isValidName(name)) {
+      const path = parseToRef(name)!.path;
+      if (!isMarkdownPath(path)) {
+        if (!(await space.fileExists(path))) {
+          await space.writeDocument(path, new Uint8Array());
+        }
+        await editor.navigate(name);
+        return;
       }
     }
-    await editor.navigate(phrase);
+    // A new page is shown in the tree at once and opens with the caret on
+    // line 1; an existing name just opens.
+    await openNewPage(name);
   },
 };

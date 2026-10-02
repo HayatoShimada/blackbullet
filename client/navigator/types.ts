@@ -1,10 +1,27 @@
 import type {
-  ActionMeta,
+  ActionMeta as BaseActionMeta,
   Decoration,
-  Row,
+  Row as BaseRow,
 } from "../../plug-api/ui/tree_types.ts";
 
-export type { ActionMeta, Decoration, Row };
+export type { Decoration };
+
+/** An action as the row menu draws it: `danger` puts it last, in red. */
+export type ActionMeta = BaseActionMeta & { danger?: boolean };
+
+/**
+ * A row of a navigator view. `passive` makes it a sentence or a count rather
+ * than something to act on: no hover, no selection, no Enter.
+ */
+export type Row = BaseRow & {
+  passive?: boolean;
+  /**
+   * Shown only while the phrase is empty (`"empty"`: a group title, a copy
+   * under Recent) or only once something is typed (`"typed"`: a command that
+   * is found by name, never browsed into).
+   */
+  when?: "empty" | "typed";
+};
 
 export type FilterFields = Record<
   string,
@@ -30,7 +47,14 @@ export type SegmentMeta = {
   default?: boolean;
   prefix?: string;
   placeholder?: string;
+  /** What the input says in a dock, where there is room for little. */
+  dockPlaceholder?: string;
   helpText?: string;
+  /**
+   * Names this segment leaves out until the phrase starts with them: a
+   * trailing `/` is a folder, anything else is one page's name.
+   */
+  hiddenNames?: string[];
 };
 
 export type DropdownMeta = {
@@ -116,6 +140,8 @@ export type ViewMeta = {
   hasRowIcon: boolean;
   prefixViews?: Record<string, string>;
   createIcon?: string;
+  /** Create row and hint name the folder the new page goes in. */
+  createInFolder?: boolean;
   pathCompletion: boolean;
   hashtagFilter: boolean;
   ephemeral?: boolean;

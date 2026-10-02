@@ -10,6 +10,26 @@ import { Icon } from "../../../../plug-api/ui/icon.tsx";
 import { RowActions } from "../../../../plug-api/ui/row_actions.tsx";
 import type { RowState } from "../engine.ts";
 import type { ActionMeta, Decoration, Row } from "../../types.ts";
+import type { Anchor } from "../mediator/tree_mediator.ts";
+import { MoreIcon } from "./chrome_icons.tsx";
+
+/** How many of `actions` apply to a row in this state, in this mode. */
+export function visibleActionCount(
+  actions: ActionMeta[] | undefined,
+  state: RowState | undefined,
+  readOnly: boolean,
+): number {
+  return (actions ?? []).filter(
+    (action, index) =>
+      !(readOnly && action.requireMode === "rw") &&
+      (!action.hasWhen || state?.actions?.[index] === true),
+  ).length;
+}
+
+export function anchorOf(element: Element): Anchor {
+  const { left, top, right, bottom } = element.getBoundingClientRect();
+  return { left, top, right, bottom };
+}
 
 export function Chip({ decoration }: { decoration: Decoration }) {
   return (
@@ -91,6 +111,7 @@ export function RowItem({
   phrase,
   onClick,
   onAction,
+  onMenu,
   elRef,
 }: {
   row: Row;
@@ -109,13 +130,17 @@ export function RowItem({
   phrase?: string;
   onClick?: () => void;
   onAction: (index: number) => void;
+  /** With several actions to offer, one `⋯` asks for their menu instead. */
+  onMenu?: (anchor: Anchor) => void;
   elRef?: Ref<HTMLDivElement>;
 }) {
   const decorations = row.decorations ?? [];
   // Unconditional: a hook call behind `selected ||` would change the hook
   // order the moment the selection moved onto this row.
   const hovered = useHovered(hover, row);
-  const showActions = selected || hovered;
+  const passive = row.passive === true;
+  const showActions = !passive && (selected || hovered);
+  const menuRow = !!onMenu && visibleActionCount(actions, state, readOnly) > 1;
   const left = decorations.filter((d) => d.position === "left");
   const right = decorations.filter((d) => d.position !== "left");
   return (
@@ -125,12 +150,15 @@ export function RowItem({
         "sb-nav-row" +
         (selected ? " sb-nav-selected" : "") +
         (!onClick ? " sb-nav-passive" : "") +
+        (passive ? " sb-nav-row-passive" : "") +
         (row.cssClass ? ` ${row.cssClass}` : "")
       }
       data-index={index}
-      onClick={onClick}
+      aria-disabled={passive ? true : undefined}
+      onClick={passive ? undefined : onClick}
     >
       {hasIcon &&
+        !passive &&
         (state?.icon ? (
           <Icon node={state.icon} class="sb-nav-icon" />
         ) : (
@@ -150,7 +178,26 @@ export function RowItem({
         description={row.description}
       />
       {right.length > 0 && <TrailingChips decorations={right} />}
-      {actions && showActions && (
+      {actions && showActions && menuRow && (
+        <span className="sb-row-actions">
+          <button
+            type="button"
+            className="sb-row-action sb-row-more"
+            tabIndex={-1}
+            title="Actions"
+            aria-label={`Actions for ${row.primary}`}
+            aria-haspopup="menu"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMenu?.(anchorOf(e.currentTarget));
+            }}
+          >
+            <MoreIcon />
+          </button>
+        </span>
+      )}
+      {actions && showActions && !menuRow && (
         <RowActions
           actions={actions}
           icons={actionIcons}

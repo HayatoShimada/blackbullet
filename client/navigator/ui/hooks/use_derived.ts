@@ -12,7 +12,9 @@ import type { NavigatorEngine, RankedRow } from "../engine.ts";
 import { type RankCacheEntry, rankIncrementally } from "../incremental_rank.ts";
 import type { ActiveView } from "../panel.ts";
 import { matchesTags, splitHashtags } from "../phrase.ts";
-import { applySegment } from "../segments.ts";
+import { createTarget } from "../../views/create_target.ts";
+import { applySegment, revealedNames } from "../segments.ts";
+import { leadingPassive, settleSelectable } from "../selection.ts";
 
 /** Rendered rows when the view doesn't set `presentation.limit`. */
 const DEFAULT_LIMIT = 200;
@@ -46,6 +48,12 @@ export type DerivedView = {
   listItems: (RankedRow | undefined)[];
   /** The ranked row at a list index; undefined when that index is the create row. */
   rowAtIndex: (index: number) => RankedRow | undefined;
+  /**
+   * The nearest row that can be selected, from `index` going `direction`
+   * (and the other way when nothing is left that way). Passive rows -- counts
+   * and sentences -- are never selected.
+   */
+  settleIndex: (index: number, direction: 1 | -1) => number;
   canCreate: boolean;
   createIndex: number;
   createSelected: boolean;
@@ -78,6 +86,7 @@ export function useDerived({
   selectedPath,
   expanded,
   readOnly,
+  createFolder,
 }: {
   engine: NavigatorEngine;
   view?: ActiveView;
@@ -89,6 +98,9 @@ export function useDerived({
   selectedPath?: string;
   expanded: Set<string>;
   readOnly: boolean;
+  /** Where a typed name is created (`createInFolder` views): it counts as
+   * existing when the page *there* does. */
+  createFolder?: string;
 }): DerivedView {
   // Source mode: the source already answered this phrase and segment, in the
   // order it wants them shown -- ranking them again here would overrule it.
@@ -115,6 +127,14 @@ export function useDerived({
   // already apply segments, but dropdown filtering is always the panel’s job.
   const dropdownIndex = dropdownIndexFor(view?.dropdownOptions, dropdownValue);
 
+  // Typing `Library/` brings back what the segment keeps out of the way. A
+  // string so the rows below recompute only when the set actually changes.
+  const revealedKey = revealedNames(
+    view?.meta.segments?.[segmentIndex],
+    phrase,
+  ).join("\u0000");
+
+  const emptyPhrase = rankPhrase.trim() === "";
   const filteredRows = useMemo(() => {
     if (!view) return [];
     const rows = applyDropdown(
@@ -125,14 +145,31 @@ export function useDerived({
             segmentIndex,
             view.meta.segments,
             view.segmentMasks,
+            revealedKey ? revealedKey.split("\u0000") : [],
           ),
       dropdownIndex,
       view.dropdownMasks,
     );
-    if (sourceMode || !tagKey) return rows;
+    // Some rows are for the empty phrase only (group titles, the Recent
+    // copies) and some for a typed one (found by name, never browsed into).
+    const timed = rows.some((row) => row.when !== undefined)
+      ? rows.filter(
+          (row) =>
+            row.when === undefined || (row.when === "empty") === emptyPhrase,
+        )
+      : rows;
+    if (sourceMode || !tagKey) return timed;
     const wanted = tagKey.split("\u0000");
-    return rows.filter((row) => matchesTags(row, wanted));
-  }, [view, sourceMode, segmentIndex, dropdownIndex, tagKey]);
+    return timed.filter((row) => matchesTags(row, wanted));
+  }, [
+    view,
+    sourceMode,
+    segmentIndex,
+    dropdownIndex,
+    tagKey,
+    revealedKey,
+    emptyPhrase,
+  ]);
 
   const rankCacheRef = useRef<RankCacheEntry>();
   const ranked = useMemo(() => {
@@ -157,16 +194,25 @@ export function useDerived({
   // Use the ranking phrase for creation so hashtag filters stay out of the name.
   const trimmedPhrase = rankPhrase.trim();
   // Same trigger as FilterList's `allowNew`: a non-empty phrase that no row
-  // already carries verbatim. Scanning `view.rows` (not `ranked`) keeps this
+  // already carries (ignoring case: "tasks" opens Tasks, it does not offer a
+  // second page). Scanning `view.rows` (not `ranked`) keeps this
   // honest when the fuzzy ranker drops an exact match off the visible list.
   const canCreate =
     !!view?.meta.hasCreate &&
     !readOnly &&
     trimmedPhrase.length > 0 &&
-    !view.rows.some((r) => r.primary === trimmedPhrase);
+    !view.rows.some((r) => {
+      const primary = r.primary.toLowerCase();
+      return (
+        primary === trimmedPhrase.toLowerCase() ||
+        (!!view.meta.createInFolder &&
+          primary === createTarget(trimmedPhrase, createFolder).toLowerCase())
+      );
+    });
 
   const lastIndex = visible.length - 1 + (canCreate ? 1 : 0);
-  const activeIndex = Math.min(selectedIndex, Math.max(0, lastIndex));
+  // Passive rows lead a list (a count, a sentence); they take no selection.
+  const passiveLead = leadingPassive(visible);
   /**
    * Where the create row sits among the list's rows: **second**, right under
    * the best match, which is where `FilterList` spliced it and what makes
@@ -177,9 +223,9 @@ export function useDerived({
   const createIndex =
     !canCreate || view?.meta.mode === "tree"
       ? -1
-      : visible.length === 0
-        ? 0
-        : 1;
+      : visible.length <= passiveLead
+        ? visible.length
+        : passiveLead + 1;
   const rowAtIndex = (index: number) =>
     index === createIndex
       ? undefined
@@ -190,6 +236,13 @@ export function useDerived({
     out.splice(createIndex, 0, undefined);
     return out;
   }, [visible, createIndex]);
+  const isPassiveAt = (index: number) => {
+    const item = listItems[index];
+    return item !== undefined && item.row.passive === true;
+  };
+  const settleIndex = (index: number, direction: 1 | -1): number =>
+    settleSelectable(isPassiveAt, lastIndex, index, direction);
+  const activeIndex = settleIndex(selectedIndex, 1);
   const error = bootError ?? view?.error;
   // Keep existing rows under source errors; a bad phrase must not clear the screen.
   const fatalError = !!error && ranked.length === 0;
@@ -277,6 +330,7 @@ export function useDerived({
     visible,
     listItems,
     rowAtIndex,
+    settleIndex,
     canCreate,
     createIndex,
     createSelected,

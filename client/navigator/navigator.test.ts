@@ -311,7 +311,7 @@ test("Revision: Create snapshot commits now and refreshes the open views", async
   await commands.get("Revision: Create snapshot").run();
 
   expect(space.createRevisionSnapshot).toHaveBeenCalled();
-  expect(editor.flashNotification).toHaveBeenCalledWith("Snapshot created");
+  expect(editor.flashNotification).toHaveBeenCalledWith("Snapshot created.");
   expect(events.dispatchEvent).toHaveBeenCalledWith("revisions:snapshot", {});
 });
 
@@ -321,7 +321,7 @@ test("Revision: Create snapshot says so when there was nothing to commit", async
 
   await commands.get("Revision: Create snapshot").run();
 
-  expect(editor.flashNotification).toHaveBeenCalledWith("Nothing to snapshot");
+  expect(editor.flashNotification).toHaveBeenCalledWith("Nothing to snapshot.");
 });
 
 // An unmanaged space (or one whose sync remote doesn't manage revisions) is

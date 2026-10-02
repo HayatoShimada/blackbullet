@@ -127,6 +127,8 @@ export function usePanelEvents({
         ),
       );
       setSelectedPath(path);
+      // The page's own row is not a choice of where to make something.
+      if (refs.revealedPath) refs.revealedPath.current = path;
       requestAnimationFrame(() => {
         revealInClosest(
           document.querySelector(

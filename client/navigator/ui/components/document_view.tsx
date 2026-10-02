@@ -328,6 +328,9 @@ export function DocumentRowsBody({
         />
       ) : (
         shown.map(({ row, primaryNode, descriptionNode }, index) => {
+          // a passive row (a count, a sentence) is not something to act on:
+          // no focus, no activation
+          const selectable = !!onSelect && row.passive !== true;
           const activate = () => onSelect?.(row.obj);
           const state = rowState?.byRow?.get(row);
           const decorations = row.decorations ?? [];
@@ -336,20 +339,22 @@ export function DocumentRowsBody({
               key={`${index}:${row.primary}`}
               className={
                 "sb-nav-row sb-page-widget-row" +
-                (onSelect ? "" : " sb-nav-passive") +
+                (selectable ? "" : " sb-nav-passive") +
                 (row.cssClass ? ` ${row.cssClass}` : "")
               }
-              role={onSelect && !meta.actions?.length ? "button" : undefined}
-              tabIndex={onSelect ? 0 : undefined}
+              role={selectable && !meta.actions?.length ? "button" : undefined}
+              tabIndex={selectable ? 0 : undefined}
               onClick={
-                onSelect
+                selectable
                   ? (event) => {
                       if (isRowActivation(event.target)) activate();
                     }
                   : undefined
               }
               onKeyDown={
-                onSelect ? (event) => activateOnKey(event, activate) : undefined
+                selectable
+                  ? (event) => activateOnKey(event, activate)
+                  : undefined
               }
             >
               {meta.hasRowIcon &&

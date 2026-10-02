@@ -27,6 +27,9 @@ export type CommandDeps = {
   set: PanelSetters;
   /** The debounced source re-run -- see `runAction`. */
   refresh: () => void;
+  readOnly?: boolean;
+  /** The tree's own selection, if it has one. */
+  selectedPath?: string;
 };
 
 export type Commands = ReturnType<typeof createCommands>;
@@ -48,6 +51,8 @@ export function createCommands({
   refs,
   set,
   refresh,
+  readOnly,
+  selectedPath,
 }: CommandDeps) {
   const {
     input: inputRef,
@@ -78,12 +83,17 @@ export function createCommands({
     activeTreeNode,
   } = derived;
   const tree = createTreeCommands({
+    slot,
     view,
     engine,
     derived,
     refs,
     set,
     refresh,
+    readOnly,
+    selectedPath,
+    runAction: (index, obj) => runAction(index, obj),
+    afterNew: () => (mobile ? dismiss() : undefined),
   });
 
   async function close(opts?: HideOpts) {
@@ -263,7 +273,8 @@ export function createCommands({
     }
     if (view.meta.hasSelect === false) return;
     const entry = rowAtIndex(index);
-    if (!entry) return;
+    // A count or a sentence: nothing to open.
+    if (!entry || entry.row.passive) return;
     const kept = await engine.select(
       view.name,
       entry.row.obj,
@@ -320,8 +331,47 @@ export function createCommands({
     void selectTreeNode(node);
   }
 
+  /** Opens the menu of the row the keyboard is on; false when it has none. */
+  function openActiveRowMenu(): boolean {
+    if (
+      !isTreeMode ||
+      !activeTreeNode ||
+      (view?.meta.actions?.length ?? 0) < 2
+    ) {
+      return false;
+    }
+    const row = document.querySelector(
+      `.sb-nav-root-${slot} [data-path="${CSS.escape(activeTreeNode.path)}"]`,
+    );
+    const box = row?.getBoundingClientRect();
+    tree.openRowMenu(
+      activeTreeNode.path,
+      box
+        ? { left: box.left, top: box.top, right: box.right, bottom: box.bottom }
+        : undefined,
+    );
+    return true;
+  }
+
+  /** The phone drawer's one-tap doors: the drawer gets out of the way first. */
+  async function runEntryPoint(which: "search" | "journal") {
+    await dismiss();
+    if (which === "journal") {
+      await editor.invokeCommand("Journal: Today");
+      return;
+    }
+    // Search was "Memo: Search" before it was named for what it does.
+    try {
+      await editor.invokeCommand("Search: Notes");
+    } catch {
+      await editor.invokeCommand("Memo: Search");
+    }
+  }
+
   return {
     ...tree,
+    openActiveRowMenu,
+    runEntryPoint,
     close,
     runCreate,
     selectedObj,

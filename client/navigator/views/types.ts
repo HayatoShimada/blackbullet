@@ -24,6 +24,10 @@ export type RowSpec<T = ObjectValue<Record<string, any>>> = {
   icon?: (obj: T) => string | undefined;
   /** Tree mode: see `Row.priority`. */
   priority?: (obj: T) => number | undefined;
+  /** A count or a sentence, not something to act on: see `Row.passive`. */
+  passive?: (obj: T) => boolean;
+  /** See `Row.when`. */
+  when?: (obj: T) => "empty" | "typed" | undefined;
 };
 
 export type Segment<T = ObjectValue<Record<string, any>>> = {
@@ -31,7 +35,11 @@ export type Segment<T = ObjectValue<Record<string, any>>> = {
   icon?: string;
   prefix?: string;
   placeholder?: string;
+  /** What the input says in a dock, where there is room for little. */
+  dockPlaceholder?: string;
   helpText?: string;
+  /** See `SegmentMeta.hiddenNames`. */
+  hiddenNames?: string[];
   default?: boolean;
   where?: (obj: T) => boolean;
 };
@@ -40,6 +48,8 @@ export type ActionSpec<T = ObjectValue<Record<string, any>>> = {
   icon?: string;
   label: string;
   requireMode?: "rw";
+  /** Irreversible or leaving: drawn last in a menu, in red. */
+  danger?: boolean;
   when?: (obj: T) => boolean;
   run: (obj: T) => Promise<any> | any;
 };

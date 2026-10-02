@@ -33,6 +33,29 @@ export function emitToTree(event: TreeEvent): boolean {
   return true;
 }
 
+// Where a tree has its selection, by slot, for what is created "here" from
+// outside it (the New command, the page picker). Only a panel showing the
+// space tree publishes one; a closing panel withdraws it.
+const selectedFolders = new Map<string, () => string | undefined>();
+
+export function publishSelectedFolder(
+  slot: string,
+  source: (() => string | undefined) | undefined,
+): void {
+  if (source) selectedFolders.set(slot, source);
+  else selectedFolders.delete(slot);
+}
+
+/** The folder of the space tree's selected row; `""` is the root, undefined
+ * when no tree is showing a selection. */
+export function selectedTreeFolder(): string | undefined {
+  for (const source of selectedFolders.values()) {
+    const folder = source();
+    if (folder !== undefined) return folder;
+  }
+  return undefined;
+}
+
 export function createTreeHost(): TreeHost {
   let latest: TreeHostDeps | undefined;
   const deps = (): TreeHostDeps => {
@@ -49,6 +72,9 @@ export function createTreeHost(): TreeHost {
     move: (obj, newName) => deps().move(obj, newName),
     flash: (message, level) => deps().flash(message, level),
     openMovePicker: (path) => deps().openMovePicker?.(path),
+    showMenu: (menu) => deps().showMenu?.(menu),
+    runMenuItem: (menu, item) => deps().runMenuItem?.(menu, item),
+    newPage: (folder) => deps().newPage?.(folder),
     setPinned: (path, pinned) => {
       const fn = deps().setPinned;
       if (!fn) throw new Error("pinning is not available here");

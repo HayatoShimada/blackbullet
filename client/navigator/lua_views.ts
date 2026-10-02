@@ -251,6 +251,7 @@ function actionMeta(spec: ViewSpec): ActionMeta[] | undefined {
       label,
       hasWhen: when !== undefined && when !== null,
       requireMode: toJS(requireMode),
+      danger: toJS(field(action, "danger")) === true ? true : undefined,
     });
   }
   if (out.length === 0) return undefined;
@@ -808,7 +809,7 @@ async function runHandler(what: string, fn: () => Promise<any>): Promise<any> {
     return await fn();
   } catch (e: any) {
     await editor.flashNotification(
-      `navigator ${what}: ${e?.message ?? e}`,
+      `That did not work (${what}). ${e?.message ?? e}`,
       "error",
     );
     return undefined;
@@ -898,6 +899,12 @@ async function buildRows(
       ),
       decorations: await resolveDecorations(sf, field(row, "decorations"), obj),
       cssClass: await resolveField(sf, field(row, "cssClass"), obj),
+      // A count or a sentence, not something to act on: `passive = "field"`
+      // names a truthy attribute, `passive = function(obj) ... end` decides.
+      passive:
+        (await resolveField(sf, field(row, "passive"), obj)) === true
+          ? true
+          : undefined,
     });
   }
   return rows;
@@ -1130,7 +1137,7 @@ export async function luaHandle(
       // The panel already hides these, but the click and a mode change could have crossed in flight, and this hook is reachable without the panel at all.
       if (field(action, "requireMode") === "rw" && (await readOnlyMode())) {
         await editor.flashNotification(
-          `navigator: ${field(action, "label")} is unavailable in read-only mode`,
+          `${field(action, "label")} is unavailable in read-only mode.`,
           "error",
         );
         return undefined;

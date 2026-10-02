@@ -45,7 +45,7 @@ export type KeyContext = {
  */
 export function handleKeyDown(e: KeyboardEvent, ctx: KeyContext) {
   const { view, phrase, derived, cmd, set } = ctx;
-  const { setPhrase, setSelectedIndex } = set;
+  const { setSelectedIndex } = set;
   if (e.isComposing) return;
   if (view?.meta.mode === "table" && e.key === "Tab") return;
   if (tryKeymap(e, ctx)) return;
@@ -102,9 +102,15 @@ export function handleKeyDown(e: KeyboardEvent, ctx: KeyContext) {
     treeKeyDown(e, ctx);
     return;
   }
-  const { activeIndex, lastIndex } = derived;
+  const { activeIndex, lastIndex, settleIndex } = derived;
+  // Passive rows are stepped over, in the direction of travel.
   const setIndex = (n: number) =>
-    setSelectedIndex(Math.max(0, Math.min(lastIndex, n)));
+    setSelectedIndex(
+      settleIndex(
+        Math.max(0, Math.min(lastIndex, n)),
+        n < activeIndex ? -1 : 1,
+      ),
+    );
 
   if (e.key === "Enter") {
     e.preventDefault();
@@ -212,8 +218,8 @@ function updateInteraction(e: KeyboardEvent, ctx: KeyContext) {
 }
 
 function treeKeyDown(e: KeyboardEvent, ctx: KeyContext) {
-  const { view, phrase, derived, cmd, set } = ctx;
-  const { setPhrase, setSelectedPath } = set;
+  const { view, derived, cmd, set } = ctx;
+  const { setSelectedPath } = set;
   const {
     treeVisible,
     treeLastIndex,
@@ -224,6 +230,14 @@ function treeKeyDown(e: KeyboardEvent, ctx: KeyContext) {
     createSelectedInTree,
   } = derived;
   if (!view) return;
+  // The keyboard's way to a row's `⋯`: the context-menu key, or Shift-F10.
+  if (
+    (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) &&
+    cmd.openActiveRowMenu()
+  ) {
+    e.preventDefault();
+    return;
+  }
   const setTreePath = (n: number) => {
     if (treeLastIndex < 0) return;
     const index = Math.max(0, Math.min(treeLastIndex, n));

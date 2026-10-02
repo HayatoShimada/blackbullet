@@ -5,6 +5,7 @@ import { revealInClosest } from "../../../../plug-api/ui/scroll.ts";
 import type { RankedRow, RowStates } from "../engine.ts";
 import type { ActionMeta } from "../../types.ts";
 import { RowItem } from "./row_item.tsx";
+import type { Anchor } from "../mediator/tree_mediator.ts";
 
 export function ListView({
   rows,
@@ -20,6 +21,7 @@ export function ListView({
   createRow,
   onSelect,
   onAction,
+  onMenu,
 }: {
   /** An `undefined` entry is the create row's slot -- see `createRow`. */
   rows: (RankedRow | undefined)[];
@@ -41,6 +43,8 @@ export function ListView({
   createRow?: (selected: boolean) => ComponentChildren;
   onSelect?: (index: number) => void;
   onAction: (index: number, actionIndex: number) => void;
+  /** `⋯` on row `index`: its menu of actions. */
+  onMenu?: (index: number, anchor: Anchor) => void;
 }) {
   const selectedRef = useRef<HTMLDivElement>(null);
   // Which row's actions are mounted besides the selected one's. Outside the
@@ -98,6 +102,7 @@ export function ListView({
             elRef={i === selectedIndex ? selectedRef : undefined}
             onClick={onSelect ? () => onSelect(i) : undefined}
             onAction={(actionIndex) => onAction(i, actionIndex)}
+            onMenu={onMenu ? (anchor) => onMenu(i, anchor) : undefined}
           />
         ),
       )}

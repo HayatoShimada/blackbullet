@@ -29,10 +29,31 @@ import { useDerived } from "../hooks/use_derived.ts";
 import { usePanelEvents } from "../hooks/use_panel_events.ts";
 import { useSourceQuery } from "../hooks/use_source_query.ts";
 import { handleKeyDown } from "../keyboard.ts";
-import type { ActiveView, PanelSetters, SharedRefs } from "../panel.ts";
+import type {
+  ActiveView,
+  MenuView,
+  PanelSetters,
+  SharedRefs,
+} from "../panel.ts";
 import { resolvePrefix } from "../prefix.ts";
+import { emptySegmentText } from "../segments.ts";
 import { markSlotReady, type NavActivation } from "../slots.ts";
-import { CloseIcon } from "./chrome_icons.tsx";
+import {
+  CloseIcon,
+  JournalIcon,
+  moreIconNode,
+  PlusIcon,
+  SearchIcon,
+} from "./chrome_icons.tsx";
+import { EmptyTree } from "./empty_tree.tsx";
+import { PopoverMenu } from "./popover_menu.tsx";
+import { anchorOf } from "./row_item.tsx";
+import type { ActionMeta } from "../../types.ts";
+import {
+  publishSelectedFolder,
+  selectedTreeFolder,
+} from "../mediator/tree_host.ts";
+import { folderOf } from "../../views/create_target.ts";
 import { ContentBody, CopyMarkdownButton } from "./content_view.tsx";
 import { CreateRow } from "./create_row.tsx";
 import { DockMenu } from "./dock_menu.tsx";
@@ -44,6 +65,19 @@ import {
 import { ListView } from "./list_view.tsx";
 import { fileDragData } from "../file_drag_export.ts";
 import type { TreeHost } from "../mediator/tree_host.ts";
+
+const COARSE_POINTER =
+  globalThis.matchMedia?.("(pointer: coarse)").matches ?? false;
+
+/** One `⋯` stands for every action of a row: its menu lists them. */
+const MORE_ACTIONS: ActionMeta[] = [
+  { label: "Actions", hasWhen: false, requireMode: "rw" },
+];
+
+/** Where a typed name is made: the tree's selected folder, else the page's. */
+function createFolderFor(currentName: string): string | undefined {
+  return selectedTreeFolder() ?? (folderOf(currentName) || undefined);
+}
 
 /**
  * The panel itself: the input state a view is browsed with, wired to the
@@ -75,9 +109,12 @@ export function NavRoot({
   const [selectedPath, setSelectedPath] = useState<string | undefined>(
     undefined,
   );
+  // The menu the tree Mediator wants drawn (a row's `⋯`, or New).
+  const [menu, setMenu] = useState<MenuView | undefined>(undefined);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const createRef = useRef<HTMLDivElement>(null);
   const interaction = useRef<"typing" | "navigating">("typing");
   // Kept current every render so the handlers registered once per slot can
@@ -95,6 +132,7 @@ export function NavRoot({
   const handledToken = useRef<number | undefined>(undefined);
   const readySignaledToken = useRef<number | undefined>(undefined);
   const treeHost = useRef<TreeHost | undefined>(undefined);
+  const revealedPath = useRef<string | undefined>(undefined);
 
   const refs: SharedRefs = {
     view: viewRef,
@@ -110,6 +148,7 @@ export function NavRoot({
     handledToken,
     readySignaledToken,
     treeHost,
+    revealedPath,
   };
   const set: PanelSetters = {
     setView,
@@ -120,6 +159,7 @@ export function NavRoot({
     setSelectedIndex,
     setSelectedPath,
     setExpanded,
+    setMenu,
   };
 
   const publish = useCallback(() => {
@@ -183,6 +223,7 @@ export function NavRoot({
     selectedPath,
     expanded,
     readOnly,
+    createFolder: createFolderFor(currentName),
   });
 
   // A phrase edit, a segment switch or a dropdown pick is a deliberate change
@@ -224,7 +265,17 @@ export function NavRoot({
     refs,
     set,
     refresh: () => refresh.current(),
+    readOnly,
+    selectedPath,
   });
+
+  // The panel leaving takes its selection and its menu with it.
+  useEffect(
+    () => () => {
+      publishSelectedFolder(slot, undefined);
+    },
+    [slot],
+  );
 
   const {
     segments,
@@ -249,11 +300,42 @@ export function NavRoot({
   } = derived;
 
   const isDock = slot !== "modal";
+  const activeSegment = segments?.[segmentIndex];
+  // A dock has room for one word: "Open…" says what the box is for.
   const placeholder =
-    segments?.[segmentIndex]?.placeholder ?? view?.meta.placeholder ?? "Filter";
+    (isDock ? activeSegment?.dockPlaceholder : undefined) ??
+    activeSegment?.placeholder ??
+    view?.meta.placeholder ??
+    "Filter…";
   const noFilter = !!view?.meta.noFilter;
-  const helpText = segments?.[segmentIndex]?.helpText ?? view?.meta.helpText;
+  // "Open" before "Open a page…" would read "Open Open a page…": the
+  // placeholder already says it, so the label stays out of the way.
+  const title = view?.meta.label ?? view?.meta.title ?? "";
+  const titleRepeated =
+    !noFilter &&
+    title !== "" &&
+    placeholder.toLowerCase().startsWith(title.toLowerCase());
+  const createFolder = createFolderFor(currentName);
+  // Where a typed name will go is said only while there is something to
+  // create: with an exact match the hint would be about nothing.
+  const helpText = view?.meta.createInFolder
+    ? canCreate
+      ? `Press Shift-Enter to create ${trimmedPhrase}${
+          createFolder ? ` in ${createFolder}/` : ""
+        }`
+      : undefined
+    : (activeSegment?.helpText ?? view?.meta.helpText);
   const spaceTree = view?.name === "std.spaceTree";
+  // A space with nothing in it, not a filter that matched nothing.
+  const emptyTree =
+    spaceTree &&
+    !readOnly &&
+    !treeFiltering &&
+    !!treeDisplay &&
+    treeDisplay.tree.children.length === 0 &&
+    !loading;
+  // A row with several actions has one `⋯`; the menu lists them.
+  const manyActions = (view?.meta.actions?.length ?? 0) > 1;
   const desktopFileDrag = (
     globalThis as typeof globalThis & {
       silverbulletDesktop?: { startSpaceFileDrag(item: unknown): void };
@@ -274,8 +356,11 @@ export function NavRoot({
   // scrollbar either -- the class that reserves it goes with the handle.
   const showResizer = isDock && !mobile;
 
+  const moreIcons = useMemo(() => [moreIconNode()], []);
+
   return (
     <div
+      ref={rootRef}
       className={
         `sb-nav-root sb-nav-root-${slot}` +
         (content !== undefined ? " sb-nav-root-content" : "") +
@@ -294,6 +379,21 @@ export function NavRoot({
           void cmd.close();
         }
       }}
+      onContextMenu={(e) => {
+        if (!manyActions || readOnly) return;
+        const row = (e.target as HTMLElement).closest<HTMLElement>(
+          ".sb-nav-row[data-path]",
+        );
+        if (!row?.dataset.path) return;
+        e.preventDefault();
+        const at = {
+          left: e.clientX,
+          top: e.clientY,
+          right: e.clientX,
+          bottom: e.clientY,
+        };
+        cmd.openRowMenu(row.dataset.path, at);
+      }}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
         if (
@@ -311,10 +411,8 @@ export function NavRoot({
     >
       <div className={`sb-nav-header${noFilter ? " sb-nav-no-filter" : ""}`}>
         <div className="sb-nav-header-row">
-          {view && (
-            <label className="sb-nav-title">
-              {view.meta.label ?? view.meta.title}
-            </label>
+          {view && !titleRepeated && (
+            <label className="sb-nav-title">{title}</label>
           )}
           <input
             ref={inputRef}
@@ -326,7 +424,7 @@ export function NavRoot({
             spellcheck={false}
             placeholder={noFilter ? undefined : placeholder}
             aria-label={
-              noFilter ? (view?.meta.label ?? view?.meta.title) : undefined
+              noFilter ? (view?.meta.label ?? view?.meta.title) : placeholder
             }
             value={phrase}
             onInput={(e) => {
@@ -367,6 +465,20 @@ export function NavRoot({
               })
             }
           />
+          {spaceTree && !readOnly && (
+            // One New, wherever it is asked for: this and Ctrl-Alt-n open the
+            // same list.
+            <button
+              type="button"
+              className="sb-nav-new sb-button-icon"
+              title="New · Ctrl-Alt-n"
+              aria-label="New"
+              aria-haspopup="menu"
+              onClick={(e) => cmd.openNewMenu(anchorOf(e.currentTarget))}
+            >
+              <PlusIcon />
+            </button>
+          )}
           {loading && <LoadingIndicator />}
           {/* The same Copy the page-docked container puts in its own strip,
               and the same one the inline Lua widget button bar has: the
@@ -384,13 +496,44 @@ export function NavRoot({
           <button
             type="button"
             className="sb-nav-close"
-            title="Close"
+            title="Close · Esc"
             aria-label="Close"
             onClick={() => void cmd.close()}
           >
             <CloseIcon />
           </button>
         </div>
+        {spaceTree && (
+          // The phone's three one-tap doors: shown only under a coarse pointer.
+          <div className="sb-nav-entry-points">
+            <button
+              type="button"
+              onClick={() => void cmd.runEntryPoint("search")}
+            >
+              <SearchIcon />
+              <span>Search</span>
+            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                aria-haspopup="menu"
+                onClick={(e) => cmd.openNewMenu(anchorOf(e.currentTarget))}
+              >
+                <PlusIcon />
+                <span>New</span>
+              </button>
+            )}
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => void cmd.runEntryPoint("journal")}
+              >
+                <JournalIcon />
+                <span>Journal</span>
+              </button>
+            )}
+          </div>
+        )}
         {segments && (
           <div
             className={
@@ -414,7 +557,7 @@ export function NavRoot({
               <div className="sb-nav-tree-actions">
                 <button
                   type="button"
-                  title="Collapse all folders"
+                  title="Collapse all"
                   aria-label="Collapse all folders"
                   disabled={treeFiltering || openFolders === 0}
                   onClick={cmd.collapseAllFolders}
@@ -423,7 +566,7 @@ export function NavRoot({
                 </button>
                 <button
                   type="button"
-                  title="Expand all folders"
+                  title="Expand all"
                   aria-label="Expand all folders"
                   disabled={treeFiltering || openFolders === folderPaths.size}
                   onClick={cmd.expandAllFolders}
@@ -487,6 +630,11 @@ export function NavRoot({
               onPainted={setPaintedContent}
             />
           ) : null
+        ) : view && isTreeMode && treeDisplay && emptyTree ? (
+          <EmptyTree
+            onNew={cmd.newPageHere}
+            text={emptySegmentText(activeSegment?.label)}
+          />
         ) : view && isTreeMode && treeDisplay ? (
           <TreeView
             tree={treeDisplay.tree}
@@ -521,8 +669,15 @@ export function NavRoot({
                 ? (payload) => desktopFileDrag(JSON.parse(payload))
                 : undefined
             }
-            actions={view.meta.actions}
-            actionIcons={view.actionIcons}
+            // Under a coarse pointer there is no hover to ask for a row's
+            // `⋯`, so every row carries its own.
+            // A row's own name is the tooltip: the dock is too narrow to
+            // promise the whole of it, and a quick note is drawn as its time.
+            rowTitle={(node) => node.path}
+            namedActions={manyActions}
+            documentActions={manyActions && COARSE_POINTER}
+            actions={manyActions ? MORE_ACTIONS : view.meta.actions}
+            actionIcons={manyActions ? moreIcons : view.actionIcons}
             rowState={view.rowState}
             hasIcon={!!view.meta.hasRowIcon}
             readOnly={readOnly}
@@ -580,9 +735,17 @@ export function NavRoot({
                   }
                 : undefined
             }
-            onAction={(node, index) =>
-              void cmd.runAction(index, nodeObject(node))
-            }
+            onAction={(node, index) => {
+              if (!manyActions) {
+                void cmd.runAction(index, nodeObject(node));
+                return;
+              }
+              // The `⋯`: the Mediator decides what opens, anchored to the button.
+              const button = rootRef.current?.querySelector(
+                `[data-path="${CSS.escape(node.path)}"] .sb-row-action`,
+              );
+              cmd.openRowMenu(node.path, button ? anchorOf(button) : undefined);
+            }}
           />
         ) : view?.meta.mode === "table" ? (
           <TableView
@@ -625,7 +788,7 @@ export function NavRoot({
             rows={listItems}
             selectedIndex={activeIndex}
             showEmpty={!canCreate}
-            emptyText={view.meta.emptyText}
+            emptyText={view.meta.emptyText?.replace("{phrase}", trimmedPhrase)}
             actions={view.meta.actions}
             actionIcons={view.actionIcons}
             rowState={view.rowState}
@@ -655,6 +818,7 @@ export function NavRoot({
               const row = listItems[i]?.row;
               if (row) void cmd.runAction(index, row.obj);
             }}
+            onMenu={(i, anchor) => cmd.openRowMenu(`#${i}`, anchor)}
           />
         ) : null}
         {truncated > 0 && !fatalError && (
@@ -679,6 +843,15 @@ export function NavRoot({
           />
         )}
       </div>
+      {menu && (
+        <PopoverMenu
+          items={menu.items}
+          anchor={menu.menu.anchor}
+          label={menu.label}
+          onPick={cmd.pickMenuItem}
+          onClose={cmd.closeMenu}
+        />
+      )}
       {/* A drawer is the full width of the screen: there is no edge to drag,
           and the handle would only sit over the first column of every row. */}
       {showResizer && (

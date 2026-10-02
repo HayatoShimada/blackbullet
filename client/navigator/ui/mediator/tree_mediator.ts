@@ -17,8 +17,23 @@ export type UndoAction =
   | ({ kind: "move" } & UndoMove)
   | { kind: "reorder"; restore: PriorityChange[] };
 
+/** Where a menu hangs: the button's box, in viewport pixels. */
+export type Anchor = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+/**
+ * What a menu is a menu of. `row`: the actions of one row (`target` is the
+ * tree path, or `#<index>` for a list row). `new`: the one New menu.
+ */
+export type MenuRequest = { kind: "row"; target: string } | { kind: "new" };
+export type OpenMenu = MenuRequest & { anchor?: Anchor };
+
 export type TreeState =
-  | { kind: "idle"; undo?: UndoAction }
+  | { kind: "idle"; undo?: UndoAction; menu?: OpenMenu }
   | { kind: "dragging"; path: string; target?: string }
   | { kind: "picking"; path: string }
   | { kind: "moving"; undoing: boolean };
@@ -41,7 +56,13 @@ export type TreeEvent =
   | { type: "move.failed"; message: string }
   | { type: "move.undo" }
   | { type: "undo.expire" }
-  | { type: "pin.request"; path: string; pinned: boolean };
+  | { type: "pin.request"; path: string; pinned: boolean }
+  /** A `⋯` was pressed (`anchor` absent: opened by key, drawn centred). */
+  | { type: "menu.open"; menu: MenuRequest; anchor?: Anchor }
+  | { type: "menu.close" }
+  | { type: "menu.pick"; item: string }
+  /** The one way a page is made from the tree: a name is asked for in `folder`. */
+  | { type: "page.new"; folder: string };
 
 export type TreeEffect =
   /** Plan against the live tree (collision, own-subtree), then rename. */
@@ -54,6 +75,10 @@ export type TreeEffect =
   | { type: "rename"; from: string; to: string }
   | { type: "openMovePicker"; path: string }
   | { type: "setPinned"; path: string; pinned: boolean }
+  /** Draws the menu (`undefined`: hides it). */
+  | { type: "showMenu"; menu?: OpenMenu }
+  | { type: "runMenuItem"; menu: OpenMenu; item: string }
+  | { type: "newPage"; folder: string }
   | { type: "offerUndo"; action: UndoAction }
   | { type: "notify"; message: string; level: "info" | "error" };
 
@@ -69,6 +94,13 @@ function idle(): TreeState {
 }
 
 export function transition(state: TreeState, event: TreeEvent): Transition {
+  // Asking for a name touches no tree state, so it never waits on a move.
+  if (event.type === "page.new") {
+    return {
+      state,
+      effects: [{ type: "newPage", folder: event.folder }],
+    };
+  }
   switch (state.kind) {
     case "idle":
       return fromIdle(state, event);
@@ -84,7 +116,7 @@ export function transition(state: TreeState, event: TreeEvent): Transition {
           return {
             state: idle(),
             effects: [
-              { type: "notify", message: "Move undone", level: "info" },
+              { type: "notify", message: "Move undone.", level: "info" },
             ],
           };
         }
@@ -103,7 +135,7 @@ export function transition(state: TreeState, event: TreeEvent): Transition {
           return {
             state: idle(),
             effects: [
-              { type: "notify", message: "Order restored", level: "info" },
+              { type: "notify", message: "Order restored.", level: "info" },
             ],
           };
         }
@@ -128,7 +160,7 @@ export function transition(state: TreeState, event: TreeEvent): Transition {
           effects: [
             {
               type: "notify",
-              message: `Move failed: ${event.message}`,
+              message: `Could not move it. ${event.message}`,
               level: "error",
             },
           ],
@@ -171,6 +203,28 @@ function fromIdle(
         state,
         effects: [
           { type: "setPinned", path: event.path, pinned: event.pinned },
+        ],
+      };
+    case "menu.open": {
+      const menu: OpenMenu = { ...event.menu, anchor: event.anchor };
+      return {
+        state: { ...state, menu },
+        effects: [{ type: "showMenu", menu }],
+      };
+    }
+    case "menu.close":
+      if (!state.menu) return stay(state);
+      return {
+        state: { kind: "idle", undo: state.undo },
+        effects: [{ type: "showMenu" }],
+      };
+    case "menu.pick":
+      if (!state.menu) return stay(state);
+      return {
+        state: { kind: "idle", undo: state.undo },
+        effects: [
+          { type: "showMenu" },
+          { type: "runMenuItem", menu: state.menu, item: event.item },
         ],
       };
     default:

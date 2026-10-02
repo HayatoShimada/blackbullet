@@ -74,10 +74,17 @@ vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
 // Imported by builtins.ts only so a handler can reopen a view; unused here,
 // and pulling in the real module would drag the whole panel plug along.
 vi.mock("./navigator.ts", () => ({ open }));
+// Row actions reach the tree through its Mediator; here it is only listened to.
+const emitToTree = vi.fn<(event: unknown) => boolean>(() => true);
+vi.mock("./ui/mediator/tree_host.ts", () => ({
+  emitToTree,
+  selectedTreeFolder: () => undefined,
+}));
 
 const { builtinHandle, builtinMeta, setRevisionsAvailable, validateKeymaps } =
   await import("./builtins.ts");
 const { EXPAND_ROW } = await import("./views/types.ts");
+const { pendingPages } = await import("./views/pending_pages.ts");
 const { closePreview, currentPreview } = await import(
   "./views/revision_preview.ts"
 );
@@ -85,10 +92,12 @@ const { spaceContents } = await import("./views/pages.ts");
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pendingPages.clear();
   space.fileExists.mockResolvedValue(false);
   system.getMode.mockResolvedValue("rw");
   editor.getUiOption.mockResolvedValue(false);
   editor.getCurrentPath.mockResolvedValue("Current.md");
+  editor.getCurrentPage.mockResolvedValue("Current");
   editor.getLastOpenedMap.mockResolvedValue({});
   editor.getViewableExtensions.mockResolvedValue([]);
   editor.getDocumentCapabilities.mockResolvedValue([]);
@@ -113,7 +122,11 @@ test("creating a page does not write a document", async () => {
   await builtinHandle("std.pages", "create", { phrase: "New page" });
 
   expect(space.writeDocument).not.toHaveBeenCalled();
-  expect(editor.navigate).toHaveBeenCalledWith("New page");
+  // Caret on line 1, and the tree is told at once.
+  expect(editor.navigate).toHaveBeenCalledWith("New page@0");
+  expect(events.dispatchEvent).toHaveBeenCalledWith("navigator:pending-pages", {
+    name: "New page",
+  });
 });
 
 test("creating a document does not overwrite one already present", async () => {
@@ -314,6 +327,63 @@ test("the page picker keeps the current page below activity-ordered pages", asyn
   expect(rows.map((row) => row.primary)).toEqual(["Other", "Current"]);
 });
 
+test("the page picker says Home and Quick note · HH:MM, with the day as the dim part", async () => {
+  index.isAvailable.mockResolvedValue(true);
+  index.queryLuaObjects.mockImplementation((tag) =>
+    Promise.resolve(
+      tag === "page"
+        ? [
+            { name: "index", tag: "page" },
+            { name: "Inbox/2026-10-02/11-17-18", tag: "page" },
+            { name: "Projects/Spring Launch", tag: "page" },
+          ]
+        : [],
+    ),
+  );
+  editor.getLastOpenedMap.mockResolvedValue({});
+
+  const rows = (await builtinRows("std.pages")) as any[];
+  const byName = (name: string) => rows.find((r) => r.obj.name === name);
+
+  expect(byName("index").primary).toBe("Home");
+  expect(byName("Inbox/2026-10-02/11-17-18").primary).toBe(
+    "Quick note · 11:17",
+  );
+  expect(byName("Inbox/2026-10-02/11-17-18").description).toBe(
+    "2026-10-02 · :18",
+  );
+  expect(byName("Projects/Spring Launch").primary).toBe(
+    "Projects/Spring Launch",
+  );
+});
+
+test("the tree labels Home and a quick note's time, never the path", async () => {
+  index.isAvailable.mockResolvedValue(true);
+  index.queryLuaObjects.mockImplementation((tag) =>
+    Promise.resolve(
+      tag === "page"
+        ? [
+            { name: "Zeta", tag: "page" },
+            { name: "Inbox/2026-10-02/11-17-18", tag: "page" },
+            { name: "index", tag: "page" },
+          ]
+        : [],
+    ),
+  );
+  const rows = (await builtinRows("std.spaceTree")) as any[];
+  const label = (name: string) => rows.find((r) => r.obj.name === name)?.label;
+  expect(label("index")).toBe("Home");
+  expect(label("Inbox/2026-10-02/11-17-18")).toBe("Quick note · 11:17");
+  expect(label("Zeta")).toBeUndefined();
+  // Home leads, whatever its name sorts as; the seconds tell notes of one
+  // minute apart.
+  expect(rows[0].obj.name).toBe("index");
+  const description = (name: string) =>
+    rows.find((r) => r.obj.name === name)?.description;
+  expect(description("Inbox/2026-10-02/11-17-18")).toBe(":18");
+  expect(description("Zeta")).toBeUndefined();
+});
+
 test("the page picker decorates documents from one batched capability decision", async () => {
   index.isAvailable.mockResolvedValue(true);
   index.queryLuaObjects.mockImplementation((tag) => {
@@ -404,7 +474,7 @@ test("a throwing handler is flashed, not left as a rejection", async () => {
 
   expect(open).toHaveBeenCalledWith("std.pages", { phrase: "#work " });
   expect(editor.flashNotification).toHaveBeenCalledWith(
-    "navigator onSelect: slot is gone",
+    "That did not work (onSelect). slot is gone",
     "error",
   );
   // Not `false`: the handler did not take the panel over, so the modal is
@@ -461,7 +531,7 @@ test("a throwing keymap handler is flashed, not left as a rejection", async () =
   });
 
   expect(editor.flashNotification).toHaveBeenCalledWith(
-    "navigator keymap: no such page",
+    "That did not work (keymap). no such page",
     "error",
   );
   expect(result).toBeUndefined();
@@ -553,22 +623,11 @@ test("std.spaceTree's meta carries hasMove, file actions, and the Space keymap",
   expect(meta.hasMove).toBe(true);
   expect(meta.uploadFiles).toBe(true);
   expect(meta.keys).toEqual([" "]);
+  // The order is the row menu's: edits first, the way out last and in red.
   expect(meta.actions).toEqual([
-    {
-      icon: "plus",
-      label: "New page here",
-      hasWhen: true,
-      requireMode: "rw",
-    },
     {
       icon: "edit-3",
       label: "Rename",
-      hasWhen: false,
-      requireMode: "rw",
-    },
-    {
-      icon: "trash-2",
-      label: "Delete",
       hasWhen: true,
       requireMode: "rw",
     },
@@ -587,6 +646,25 @@ test("std.spaceTree's meta carries hasMove, file actions, and the Space keymap",
     {
       icon: "x-circle",
       label: "Unpin",
+      hasWhen: true,
+      requireMode: "rw",
+    },
+    {
+      icon: "plus",
+      label: "New page here",
+      hasWhen: true,
+      requireMode: "rw",
+    },
+    {
+      icon: "trash-2",
+      label: "Move to trash",
+      hasWhen: true,
+      requireMode: "rw",
+      danger: true,
+    },
+    {
+      icon: "rotate-ccw",
+      label: "Restore",
       hasWhen: true,
       requireMode: "rw",
     },
@@ -623,41 +701,84 @@ test("std.spaceTree's row state: icon per kind, and the action mask", async () =
   // what marks it out as a dual is the row's own styling, not the icon.
   expect(dual.icon).toBe("file-text");
 
-  // "New page here" (index 0) only offers on folders; "Delete" (index 2)
-  // only where there's something to delete -- a bare folder has neither a
-  // page nor a document behind it.
-  // Then "Move to…" (3: anything with a file or a folder), "Pin" (4) and
-  // "Unpin" (5): only a real page can be pinned, and none of these is pinned.
-  expect(folder.actions).toEqual([true, true, false, true, false, false]);
-  expect(page.actions).toEqual([false, true, true, true, true, false]);
-  expect(doc.actions).toEqual([false, true, true, true, false, false]);
-  expect(aspiring.actions).toEqual([false, true, true, false, false, false]);
-  // A page that also heads a folder (a "dual") keeps its own Delete -- the
-  // one case a bare folder-or-page pair doesn't exercise on either side.
-  expect(dual.actions).toEqual([true, true, true, true, true, false]);
+  // Actions, in menu order: Rename (0), Move to… (1: anything with a file or
+  // a folder), Pin (2) and Unpin (3: only a real page can be pinned, and none
+  // of these is pinned), New page here (4: only folders), Move to trash (5:
+  // only where there is a page or document to move -- a bare folder has
+  // neither, and a page that does not exist yet has nothing to trash).
+  expect(folder.actions).toEqual([
+    true,
+    true,
+    false,
+    false,
+    true,
+    false,
+    false,
+  ]);
+  expect(page.actions).toEqual([true, true, true, false, false, true, false]);
+  expect(doc.actions).toEqual([true, true, false, false, false, true, false]);
+  expect(aspiring.actions).toEqual([
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+  ]);
+  // A page that also heads a folder (a "dual") keeps its own Move to trash --
+  // the one case a bare folder-or-page pair doesn't exercise on either side.
+  expect(dual.actions).toEqual([true, true, true, false, true, true, false]);
+  // In Trash/ the only way out is Restore: no rename, move, pin or trashing.
+  const [trashed, trashedDoc, trashFolder] = (await rowState("std.spaceTree", [
+    { tag: "page", name: "Trash/Old", ref: "Trash/Old" },
+    { tag: "document", name: "Trash/a.pdf", ref: "Trash/a.pdf" },
+    { isFolder: true, name: "Trash" },
+  ])) as any[];
+  expect(trashed.actions).toEqual([
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+  ]);
+  expect(trashedDoc.actions).toEqual([
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+  ]);
+  expect(trashFolder.actions).toEqual([
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+  ]);
 });
 
-test("navigator:action New page here prompts, then navigates to the trimmed name", async () => {
-  editor.prompt.mockResolvedValue("  Projects/Gamma  ");
+test("navigator:action New page here asks the tree Mediator, the one way a page is made", async () => {
+  emitToTree.mockClear();
 
-  const result = await runAction(1, { name: "Projects", isFolder: true });
+  const result = await runAction(5, { name: "Projects", isFolder: true });
 
-  expect(editor.prompt).toHaveBeenCalledWith("New page name:", "Projects/");
-  expect(editor.navigate).toHaveBeenCalledWith("Projects/Gamma");
+  expect(emitToTree).toHaveBeenCalledWith({
+    type: "page.new",
+    folder: "Projects",
+  });
+  expect(editor.prompt).not.toHaveBeenCalled();
   expect(result).toBeUndefined();
 });
 
-test("navigator:action New page here does nothing on Escape or an unedited prefill", async () => {
-  editor.prompt.mockResolvedValueOnce(undefined);
-  await runAction(1, { name: "Projects", isFolder: true });
-  editor.prompt.mockResolvedValueOnce("Projects/");
-  await runAction(1, { name: "Projects", isFolder: true });
-
-  expect(editor.navigate).not.toHaveBeenCalled();
-});
-
 test("navigator:action Rename on a page runs the page rename command, no prompt", async () => {
-  await runAction(2, { tag: "page", name: "Projects/Alpha" });
+  await runAction(1, { tag: "page", name: "Projects/Alpha" });
 
   expect(editor.prompt).not.toHaveBeenCalled();
   expect(system.invokeFunction).toHaveBeenCalledWith(
@@ -667,7 +788,7 @@ test("navigator:action Rename on a page runs the page rename command, no prompt"
 });
 
 test("navigator:action Rename on a document runs the document rename command", async () => {
-  await runAction(2, { tag: "document", name: "notes.txt" });
+  await runAction(1, { tag: "document", name: "notes.txt" });
 
   expect(system.invokeFunction).toHaveBeenCalledWith(
     "index.renameDocumentCommand",
@@ -678,7 +799,7 @@ test("navigator:action Rename on a document runs the document rename command", a
 test("navigator:action Rename on a folder prompts, then renames the prefix and (if headed by a page) the page itself", async () => {
   editor.prompt.mockResolvedValue("Archive");
 
-  await runAction(2, { isFolder: true, name: "Projects", ref: "Projects" });
+  await runAction(1, { isFolder: true, name: "Projects", ref: "Projects" });
 
   expect(system.invokeFunction).toHaveBeenCalledWith(
     "index.renamePrefixCommand",
@@ -694,19 +815,24 @@ test("navigator:action Rename on a folder prompts, then renames the prefix and (
   );
 });
 
-test("navigator:action Delete confirms via editor.confirm inside the handler, then deletes", async () => {
-  editor.confirm.mockResolvedValue(true);
-
-  await runAction(3, { tag: "page", name: "Weird", ref: "Weird" });
-
-  expect(editor.confirm).toHaveBeenCalledWith("Delete Weird?");
-  expect(space.deletePage).toHaveBeenCalledWith("Weird");
-});
-
-test("navigator:action Delete does nothing when declined", async () => {
+test("navigator:action Move to trash asks first, and says what comes of it", async () => {
   editor.confirm.mockResolvedValue(false);
 
-  await runAction(3, { tag: "document", name: "notes.txt" }, "notes.txt");
+  await runAction(6, { tag: "page", name: "Weird", ref: "Weird" });
+
+  expect(editor.confirm).toHaveBeenCalledWith(
+    "Move Weird to trash? You can restore it from Trash.",
+    { destructive: true, okLabel: "Move to trash" },
+  );
+  // Declined: nothing written, nothing renamed, nothing deleted.
+  expect(system.invokeFunction).not.toHaveBeenCalled();
+  expect(space.deletePage).not.toHaveBeenCalled();
+});
+
+test("navigator:action Move to trash never deletes a document outright", async () => {
+  editor.confirm.mockResolvedValue(false);
+
+  await runAction(6, { tag: "document", name: "notes.txt" }, "notes.txt");
 
   expect(space.deleteDocument).not.toHaveBeenCalled();
 });
@@ -714,11 +840,11 @@ test("navigator:action Delete does nothing when declined", async () => {
 test("navigator:action requireMode rw is blocked in read-only mode, before the action ever runs", async () => {
   system.getMode.mockResolvedValue("ro");
 
-  const result = await runAction(2, { tag: "page", name: "Alpha" });
+  const result = await runAction(1, { tag: "page", name: "Alpha" });
 
   expect(system.invokeFunction).not.toHaveBeenCalled();
   expect(editor.flashNotification).toHaveBeenCalledWith(
-    "navigator: Rename is unavailable in read-only mode",
+    "Rename is unavailable in read-only mode.",
     "error",
   );
   expect(result).toBeUndefined();

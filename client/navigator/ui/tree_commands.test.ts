@@ -7,6 +7,12 @@ import type { ActiveView, PanelSetters, SharedRefs } from "./panel.ts";
 const writes: { key: string[]; paths: string[] }[] = [];
 const flashes: unknown[][] = [];
 let filterBox: (...args: unknown[]) => unknown = () => undefined;
+// The in-process toast API: `flashWithAction` calls the raw syscall.
+vi.stubGlobal("syscall", (name: string, ...args: unknown[]) => {
+  if (name === "editor.flashNotification") flashes.push(args);
+  return Promise.resolve();
+});
+
 vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
   datastore: {
     set: (key: string[], paths: string[]) => {
@@ -158,7 +164,10 @@ test("dropping a page on a folder renames it and opens the folder", async () => 
   expect(move.mock.calls[0][0]).toBe("std.spaceTree");
   expect(move.mock.calls[0][2]).toBe("Projects/Archive/Today");
   expect(expanded()).toEqual(["Projects/Archive"]);
-  expect(String(flashes.at(-1)?.[0])).toContain("Tree: Undo Move");
+  // "<Verb> · Undo": a toast with a real Undo button, not a hint to a command.
+  expect(flashes.at(-1)?.[0]).toBe("Moved to Projects/Archive/Today");
+  const options = flashes.at(-1)?.[2] as { actions: { name: string }[] };
+  expect(options.actions[0].name).toBe("Undo");
 });
 
 test("a drop onto an existing name changes nothing and says so", async () => {
@@ -168,7 +177,10 @@ test("a drop onto an existing name changes nothing and says so", async () => {
   await settle();
 
   expect(move).not.toHaveBeenCalled();
-  expect(flashes.at(-1)).toEqual(["Projects/Today already exists", "error"]);
+  expect(flashes.at(-1)).toEqual([
+    "Projects/Today already exists. Rename one of them first.",
+    "error",
+  ]);
 });
 
 test("a drop that moves nothing is silent", async () => {
@@ -188,7 +200,7 @@ test("a failed rename is reported and nothing is offered for undo", async () => 
   cmd.moveNode("Journal/Today", "Projects");
   await settle();
 
-  expect(flashes.at(-1)).toEqual(["Move failed: disk full", "error"]);
+  expect(flashes.at(-1)).toEqual(["Could not move it. disk full", "error"]);
 });
 
 test("a Move to… picker that fails is a dismissed picker: the next move still works", async () => {
@@ -205,4 +217,49 @@ test("a Move to… picker that fails is a dismissed picker: the next move still 
   cmd.moveNode("Journal/Today", "Projects");
   await settle();
   expect(move).toHaveBeenCalledTimes(1);
+});
+
+test("only a row the user picked says where something new is made", async () => {
+  const { selectedTreeFolder } = await import("./mediator/tree_host.ts");
+  const tree = buildTree(
+    [
+      { obj: { name: "Projects/Plan" }, primary: "Projects/Plan" },
+      { obj: { name: "Images/a.png" }, primary: "Images/a.png" },
+    ],
+    "/",
+    false,
+  );
+  const make = (selectedPath: string | undefined, revealed?: string) =>
+    createTreeCommands({
+      slot: "lhs",
+      view: {
+        name: "std.spaceTree",
+        meta: { hierarchy: { separator: "/" }, expansionScope: "view" },
+      } as ActiveView,
+      engine: {} as unknown as NavigatorEngine,
+      derived: {
+        treeFiltering: false,
+        treeDisplay: { tree, visible: [], effectiveExpanded: new Set() },
+      } as unknown as DerivedView,
+      refs: {
+        input: { current: null },
+        treeHost: { current: undefined },
+        expandedDirty: { current: false },
+        revealedPath: { current: revealed },
+      } as unknown as SharedRefs,
+      set: {} as PanelSetters,
+      refresh: () => {},
+      selectedPath,
+    });
+
+  make("Images");
+  expect(selectedTreeFolder()).toBe("Images");
+  // The row the editor's page revealed is not a pick.
+  make("Projects/Plan", "Projects/Plan");
+  expect(selectedTreeFolder()).toBeUndefined();
+  // A row this tree does not have (another segment) is not one either.
+  make("Gone/Row");
+  expect(selectedTreeFolder()).toBeUndefined();
+  make(undefined);
+  expect(selectedTreeFolder()).toBeUndefined();
 });

@@ -74,6 +74,7 @@ function makeCtx(
       isTreeMode: false,
       activeIndex: 0,
       lastIndex: 3,
+      settleIndex: (index: number) => index,
     } as unknown as DerivedView,
     cmd: makeCmd(trace, selectable),
     set: {

@@ -140,7 +140,7 @@ describe("move outcome", () => {
     const next = transition(moving, { type: "move.failed", message: "boom" });
     expect(next.state).toEqual({ kind: "idle" });
     expect(next.effects).toEqual([
-      { type: "notify", message: "Move failed: boom", level: "error" },
+      { type: "notify", message: "Could not move it. boom", level: "error" },
     ]);
   });
 });
@@ -160,7 +160,7 @@ describe("undo", () => {
     expect(state).toEqual({ kind: "idle" });
     expect(effects).toEqual([
       { type: "rename", from: "C/A", to: "A" },
-      { type: "notify", message: "Move undone", level: "info" },
+      { type: "notify", message: "Move undone.", level: "info" },
     ]);
   });
 
@@ -188,7 +188,7 @@ describe("undo", () => {
     );
     expect(effects.at(-1)).toEqual({
       type: "notify",
-      message: "Move failed: exists",
+      message: "Could not move it. exists",
       level: "error",
     });
   });
@@ -260,7 +260,7 @@ describe("reorder", () => {
           { path: "B", from: 3, to: 1 },
         ],
       },
-      { type: "notify", message: "Order restored", level: "info" },
+      { type: "notify", message: "Order restored.", level: "info" },
     ]);
   });
 
@@ -280,5 +280,69 @@ describe("reorder", () => {
     expect(effects).toEqual([
       { type: "reorder", path: "A", placement: { after: "B" } },
     ]);
+  });
+});
+
+describe("menus", () => {
+  const anchor = { left: 1, top: 2, right: 3, bottom: 4 };
+
+  it("a ⋯ opens a row's menu, and picking an item runs it and closes the menu", () => {
+    const opened = run([
+      { type: "menu.open", menu: { kind: "row", target: "A" }, anchor },
+    ]);
+    const menu = { kind: "row", target: "A", anchor };
+    expect(opened.state).toEqual({ kind: "idle", menu });
+    expect(opened.effects).toEqual([{ type: "showMenu", menu }]);
+
+    const picked = transition(opened.state, {
+      type: "menu.pick",
+      item: "action:1",
+    });
+    expect(picked.state).toEqual({ kind: "idle" });
+    expect(picked.effects).toEqual([
+      { type: "showMenu" },
+      { type: "runMenuItem", menu, item: "action:1" },
+    ]);
+  });
+
+  it("closing hides the menu and keeps the undo on offer", () => {
+    const undo = { kind: "move", from: "C/A", to: "A" } as const;
+    const next = transition(
+      {
+        kind: "idle",
+        undo,
+        menu: { kind: "new" },
+      },
+      { type: "menu.close" },
+    );
+    expect(next.state).toEqual({ kind: "idle", undo });
+    expect(next.effects).toEqual([{ type: "showMenu" }]);
+  });
+
+  it("closing or picking with no menu open does nothing", () => {
+    expect(run([{ type: "menu.close" }]).effects).toEqual([]);
+    expect(run([{ type: "menu.pick", item: "x" }]).effects).toEqual([]);
+  });
+
+  it("no menu opens while a move is running", () => {
+    const moving: TreeState = { kind: "moving", undoing: false };
+    const next = transition(moving, {
+      type: "menu.open",
+      menu: { kind: "new" },
+    });
+    expect(next.state).toBe(moving);
+    expect(next.effects).toEqual([]);
+  });
+
+  it("a page is asked for in one place, whatever the tree is doing", () => {
+    for (const state of [
+      { kind: "idle" },
+      { kind: "moving", undoing: false },
+      { kind: "dragging", path: "A" },
+    ] as TreeState[]) {
+      const next = transition(state, { type: "page.new", folder: "Projects" });
+      expect(next.state).toBe(state);
+      expect(next.effects).toEqual([{ type: "newPage", folder: "Projects" }]);
+    }
   });
 });

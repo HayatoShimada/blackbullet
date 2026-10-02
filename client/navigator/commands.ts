@@ -6,7 +6,15 @@ import {
 } from "@silverbulletmd/silverbullet/syscalls";
 import type { CommandHook } from "../plugos/hooks/command.ts";
 import { openCommand } from "./navigator.ts";
-import { undoLastTreeMove } from "./ui/mediator/tree_host.ts";
+import {
+  emitToTree,
+  selectedTreeFolder,
+  undoLastTreeMove,
+} from "./ui/mediator/tree_host.ts";
+import { emptyCommand, restoreCommand } from "./trash.ts";
+import { folderOf } from "./views/create_target.ts";
+import { createPageIn } from "./views/new_page.ts";
+import { newMenuEntries, runNewEntry } from "./views/new_menu.ts";
 import { REVISIONS_CHANGED_EVENT, requestGitSync } from "./views/revisions.ts";
 
 /** The built-in navigator views that come with a command of their own. */
@@ -27,8 +35,26 @@ export function registerNavigatorCommands(
     requireMode: "rw",
     run: async () => {
       if (!undoLastTreeMove())
-        await editor.flashNotification("Nothing to undo");
+        await editor.flashNotification("Nothing to undo.");
     },
+  });
+  hook.registerCommand({
+    name: "New",
+    key: "Ctrl-Alt-n",
+    mac: "Cmd-Alt-n",
+    requireMode: "rw",
+    // The same list the tree's `+` draws, here as a small centred picker.
+    run: newCommand,
+  });
+  hook.registerCommand({
+    name: "Trash: Restore",
+    requireMode: "rw",
+    run: restoreCommand,
+  });
+  hook.registerCommand({
+    name: "Trash: Empty",
+    requireMode: "rw",
+    run: emptyCommand,
   });
   if (gitAvailable) {
     hook.registerCommand({
@@ -85,6 +111,31 @@ export function registerNavigatorCommands(
   });
 }
 
+/** `New` (Ctrl-Alt-n): Page here · Row in <database>… · Quick note · Journal: Today. */
+async function newCommand(): Promise<void> {
+  const folder =
+    selectedTreeFolder() ?? folderOf(await editor.getCurrentPage());
+  const entries = await newMenuEntries(folder);
+  const picked = await editor.filterBox(
+    "New",
+    entries.map((entry) => ({
+      name: entry.label,
+      description: entry.description,
+    })),
+    "",
+    "",
+  );
+  const entry = entries.find((e) => e.label === picked?.name);
+  if (!entry) return;
+  await runNewEntry(entry.id, folder, async (target) => {
+    // The Mediator owns the one page-creation path; with no tree around to
+    // ask, the same function runs directly.
+    if (!emitToTree({ type: "page.new", folder: target })) {
+      await createPageIn(target);
+    }
+  });
+}
+
 /**
  * Registered whenever revisions are enabled, not only for a space the boot
  * config calls managed: a synced App space is advertised as unmanaged (its
@@ -100,7 +151,7 @@ async function createSnapshot(): Promise<void> {
     return;
   }
   await editor.flashNotification(
-    committed ? "Snapshot created" : "Nothing to snapshot",
+    committed ? "Snapshot created." : "Nothing to snapshot.",
   );
   await events.dispatchEvent(REVISIONS_CHANGED_EVENT, {});
 }

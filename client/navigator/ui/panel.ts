@@ -2,7 +2,9 @@ import type { RefObject } from "preact";
 import type { Dispatch, MutableRef, StateUpdater } from "preact/hooks";
 import type { SourceCtx } from "../types.ts";
 import type { ViewState } from "./engine.ts";
+import type { MenuItem } from "./components/popover_menu.tsx";
 import type { TreeHost } from "./mediator/tree_host.ts";
+import type { OpenMenu } from "./mediator/tree_mediator.ts";
 
 export type ActiveView = ViewState & { name: string };
 
@@ -65,6 +67,11 @@ export type SharedRefs = {
   readySignaledToken: MutableRef<number | undefined>;
   /** The tree's Mediator runner, created on first use -- see `TreeHost`. */
   treeHost: MutableRef<TreeHost | undefined>;
+  /**
+   * The row the editor's own page selected (following it), as opposed to one
+   * the user picked. Only a pick says where something new is made.
+   */
+  revealedPath?: MutableRef<string | undefined>;
 };
 
 /**
@@ -90,6 +97,14 @@ export type EventRefs = SharedRefs & {
   revealedPage: MutableRef<string | undefined>;
 };
 
+/** A menu on screen: what it is of, and what it lists (a passive view of both). */
+export type MenuView = {
+  menu: OpenMenu;
+  /** Names the menu for assistive technology. */
+  label: string;
+  items: MenuItem[];
+};
+
 /** The state setters the handlers outside the component write through. */
 export type PanelSetters = {
   setView: Dispatch<StateUpdater<ActiveView | undefined>>;
@@ -101,4 +116,6 @@ export type PanelSetters = {
   setSelectedIndex: Dispatch<StateUpdater<number>>;
   setSelectedPath: Dispatch<StateUpdater<string | undefined>>;
   setExpanded: Dispatch<StateUpdater<Set<string>>>;
+  /** The menu the Mediator wants drawn; undefined hides it. */
+  setMenu?: Dispatch<StateUpdater<MenuView | undefined>>;
 };

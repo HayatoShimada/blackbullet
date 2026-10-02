@@ -499,7 +499,7 @@ async function spaceLogRows(ctx: SourceCtx): Promise<LogRow[]> {
 /** See `loadMorePageHistory`'s comment: the boolean return is what lets the
  * caller skip dispatching a refresh for a no-op click. */
 async function loadMoreSpaceLog(): Promise<boolean> {
-  if (!logAcc || !logAcc.more || logAcc.loading) return false;
+  if (!logAcc?.more || logAcc.loading) return false;
   const inProgress = logAcc;
   inProgress.loading = true;
   try {

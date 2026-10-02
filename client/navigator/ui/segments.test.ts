@@ -1,8 +1,10 @@
 import { expect, test } from "vitest";
 import {
   applySegment,
+  revealedNames,
   cycleSegmentIndex,
   defaultSegmentIndex,
+  emptySegmentText,
   type SegmentMasks,
   segmentIndexFor,
 } from "./segments.ts";
@@ -78,4 +80,46 @@ test("a row with no mask is dropped, not admitted", () => {
     "a",
   ]);
   expect(applySegment(rows, 1, segments, undefined)).toEqual([]);
+});
+
+const hiding: SegmentMeta[] = [
+  {
+    label: "Pages",
+    hasWhere: false,
+    hiddenNames: ["Library/", "Templates/", "Trash/", "CONFIG"],
+  },
+];
+
+test("a segment keeps its hidden folders and pages out of the way", () => {
+  const rows = [
+    "Notes",
+    "Library/Std/Docs",
+    "Templates/Project",
+    "Trash/Old",
+    "CONFIG",
+    "CONFIG Backup",
+  ].map(row);
+  expect(applySegment(rows, 0, hiding).map((r) => r.obj.name)).toEqual([
+    "Notes",
+    "CONFIG Backup",
+  ]);
+});
+
+test("typing a hidden prefix brings those rows back", () => {
+  const rows = ["Notes", "Library/Std/Docs", "Trash/Old"].map(row);
+  const revealed = revealedNames(hiding[0], "library/st");
+  expect(revealed).toEqual(["Library/"]);
+  expect(
+    applySegment(rows, 0, hiding, undefined, revealed).map((r) => r.obj.name),
+  ).toEqual(["Notes", "Library/Std/Docs"]);
+  expect(revealedNames(hiding[0], "")).toEqual([]);
+  expect(revealedNames(hiding[0], "Lib")).toEqual([]);
+});
+
+test("an empty segment that cannot hold a page says so instead of offering +", () => {
+  expect(emptySegmentText("All")).toBeUndefined();
+  expect(emptySegmentText("Pages")).toBeUndefined();
+  expect(emptySegmentText(undefined)).toBeUndefined();
+  expect(emptySegmentText("Documents")).toBe("No documents yet.");
+  expect(emptySegmentText("Meta")).toBe("No meta pages yet.");
 });

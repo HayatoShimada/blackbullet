@@ -96,6 +96,7 @@ export function builtinMeta(name: string): ViewMeta | undefined {
       label: action.label,
       hasWhen: action.when !== undefined,
       requireMode: action.requireMode,
+      danger: action.danger,
     })),
     segments: view.segments?.map((segment) => ({
       label: segment.label,
@@ -104,6 +105,8 @@ export function builtinMeta(name: string): ViewMeta | undefined {
       default: segment.default === true,
       prefix: segment.prefix,
       placeholder: segment.placeholder,
+      dockPlaceholder: segment.dockPlaceholder,
+      hiddenNames: segment.hiddenNames,
     })),
   } as ViewMeta;
 }
@@ -124,6 +127,8 @@ async function builtinRows(
       decorations: view.row.decorations?.(obj),
       cssClass: view.row.cssClass?.(obj),
       priority: view.row.priority?.(obj),
+      passive: view.row.passive?.(obj) === true ? true : undefined,
+      when: view.row.when?.(obj),
     }));
   } catch (e: any) {
     // The panel renders this rather than emptying itself, same as the Lua
@@ -195,7 +200,7 @@ async function runHandler<T>(
     return await fn();
   } catch (e: any) {
     await editor.flashNotification(
-      `navigator ${what}: ${e?.message ?? e}`,
+      `That did not work (${what}). ${e?.message ?? e}`,
       "error",
     );
     return undefined;
@@ -245,7 +250,7 @@ export async function builtinHandle(
       if (!action) return undefined;
       if (action.requireMode === "rw" && (await isReadOnly())) {
         await editor.flashNotification(
-          `navigator: ${action.label} is unavailable in read-only mode`,
+          `${action.label} is unavailable in read-only mode.`,
           "error",
         );
         return undefined;
