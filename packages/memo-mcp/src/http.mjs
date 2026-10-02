@@ -4,7 +4,8 @@
 /**
  * Streamable HTTP トランスポート。
  *
- * 127.0.0.1 のみで待ち受け、外部公開は tailscale serve に任せる（他サービスと同じ方針）。
+ * 既定では 127.0.0.1 のみで待ち受ける（MEMO_MCP_HOST で変更可。Docker では 0.0.0.0 にして
+ * compose 側で 127.0.0.1 に公開する）。外部へ出すときは必ずリバースプロキシ / VPN の内側に置く。
  * Bearer トークン必須。トークンは MEMO_MCP_TOKEN で渡す。
  *
  * 注意: MCP SDK 1.30.0 が実装しているのは protocol 2025-11-25 までで、
@@ -143,7 +144,7 @@ const httpServer = http.createServer(async (req, res) => {
         }
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
-          // 9ツールは全て単純な request/response。SSE にする理由がない。
+          // ツールは全て単純な request/response。SSE にする理由がない。
           enableJsonResponse: true,
           enableDnsRebindingProtection: true,
           allowedHosts: ALLOWED_HOSTS,

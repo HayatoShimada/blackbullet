@@ -70,6 +70,7 @@ async function search(idx, q) {
     })),
   };
   if (!EMBED_ENABLED && mode !== "lexical") body.warning = NO_EMBED_WARNING;
+  else if (mode !== "lexical" && hits.semanticError) body.warning = `意味検索が今は使えません（${hits.semanticError}）。語彙検索で返しています`;
   else if (mode !== "lexical" && !hits.semanticUsed) body.warning = "セマンティック検索の結果がありません（埋め込み未生成の可能性）。語彙検索で返しています";
   return body;
 }

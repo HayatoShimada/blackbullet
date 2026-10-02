@@ -114,20 +114,27 @@ export async function searchSpace(idx, opts) {
 
   // 3. semantic
   let semanticUsed = false;
+  let semanticError = null;
   if (q && mode !== "lexical" && EMBED_ENABLED) {
-    const emb = embedderFor(space);
-    await emb.ensure(idx.rows("select id, hash, context_text from sections"));
-    const qv = await emb.query(q);
-    const scored = [];
-    for (const c of candidates) {
-      const v = emb.get(c.hash);
-      if (v) scored.push([c.id, cosine(qv, v)]);
+    try {
+      const emb = embedderFor(space);
+      await emb.ensure(idx.rows("select id, hash, context_text from sections"));
+      const qv = await emb.query(q);
+      const scored = [];
+      for (const c of candidates) {
+        const v = emb.get(c.hash);
+        if (v) scored.push([c.id, cosine(qv, v)]);
+      }
+      scored.sort((a, b) => b[1] - a[1]);
+      scored.slice(0, TOP_EACH).forEach(([id], r) => {
+        ranks.set(id, { ...(ranks.get(id) ?? {}), semantic: r });
+      });
+      semanticUsed = scored.length > 0;
+    } catch (e) {
+      // モデルが取得できない（オフライン、初回ダウンロード中の切断）ときに検索全体を落とさない
+      semanticError = e?.message ?? String(e);
+      console.error(`[memo-mcp] semantic search unavailable, lexical only: ${semanticError}`);
     }
-    scored.sort((a, b) => b[1] - a[1]);
-    scored.slice(0, TOP_EACH).forEach(([id], r) => {
-      ranks.set(id, { ...(ranks.get(id) ?? {}), semantic: r });
-    });
-    semanticUsed = scored.length > 0;
   }
 
   // 4. 統合（クエリ無しなら更新順）
@@ -181,7 +188,19 @@ export async function searchSpace(idx, opts) {
     if (out.length >= limit) break;
   }
   out.semanticUsed = semanticUsed;
+  out.semanticError = semanticError;
   return out;
+}
+
+/** 埋め込みを揃える。モデルが取得できなければ false（呼び出し側はリンクのみ / 辺なしで返す）。 */
+async function ensureEmbeddings(emb, idx) {
+  try {
+    await emb.ensure(idx.rows("select id, hash, context_text from sections"));
+    return true;
+  } catch (e) {
+    console.error(`[memo-mcp] embeddings unavailable: ${e?.message ?? e}`);
+    return false;
+  }
 }
 
 /** 意味的に近い節（related_notes 用）。同じページは除く。 */
@@ -189,7 +208,7 @@ export async function neighbors(idx, page, limit = 5) {
   if (!EMBED_ENABLED) return [];
   const emb = embedderFor(idx.space);
   const all = idx.rows("select id, page, heading_path, hash, line_start, line_end from sections");
-  await emb.ensure(idx.rows("select id, hash, context_text from sections"));
+  if (!(await ensureEmbeddings(emb, idx))) return [];
   const mine = all.filter((s) => s.page === page).map((s) => emb.get(s.hash)).filter(Boolean);
   if (!mine.length) return [];
   // ページ全体は節ベクトルの平均で代表させる
@@ -215,7 +234,7 @@ export async function neighbors(idx, page, limit = 5) {
 export async function sectionVectors(idx, { includeJournal = false } = {}) {
   if (!EMBED_ENABLED) return null;
   const emb = embedderFor(idx.space);
-  await emb.ensure(idx.rows("select id, hash, context_text from sections"));
+  if (!(await ensureEmbeddings(emb, idx))) return null;
   const rows = idx.rows(
     `select s.page, s.hash from sections s join pages p on p.page = s.page
      ${includeJournal ? "" : "where p.is_journal = 0"} order by s.page, s.n`

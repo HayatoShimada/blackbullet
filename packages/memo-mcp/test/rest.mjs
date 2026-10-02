@@ -57,11 +57,20 @@ const withHost = (port, host) =>
 
 const OFF_PORT = 3041;
 const ON_PORT = 3042;
-let off, on;
+// 埋め込みは有効だがモデルが取得できない（オフライン / 初回ダウンロード失敗）状況。配布元を閉じたポートに向ける
+const FAIL_PORT = 3043;
+let off, on, fail;
 
 before(async () => {
   await fs.mkdir(path.join(tmp, "idx-off"));
   off = await start(OFF_PORT, { MEMO_EMBED: "off", MEMO_INDEX_DIR: path.join(tmp, "idx-off"), MEMO_MCP_EXTRA_HOSTS: "host.docker.internal:3010" });
+  await fs.mkdir(path.join(tmp, "idx-fail"));
+  fail = await start(FAIL_PORT, {
+    MEMO_EMBED: "on",
+    MEMO_EMBED_MODEL: "nobody/no-such-model",
+    MEMO_EMBED_REMOTE_HOST: "http://127.0.0.1:1/",
+    MEMO_INDEX_DIR: path.join(tmp, "idx-fail"),
+  });
   if (haveModel) {
     await fs.mkdir(path.join(tmp, "idx-on"));
     await fs.symlink(MODELS, path.join(tmp, "idx-on", "models"));
@@ -71,7 +80,25 @@ before(async () => {
 after(async () => {
   off?.kill();
   on?.kill();
+  fail?.kill();
   await fs.rm(tmp, { recursive: true, force: true });
+});
+
+test("モデルが取得できないとき: search は語彙検索 + warning、related はリンクのみ、graph は辺なし（500 にしない）", async () => {
+  const a = api(FAIL_PORT);
+  const s = await a("search?space=notes&q=" + encodeURIComponent("demo launch campaign") + "&limit=3");
+  assert.equal(s.status, 200);
+  assert.equal(s.body.mode, "lexical");
+  assert.ok(s.body.results.length >= 1);
+  assert.match(s.body.warning, /意味検索が今は使えません/);
+  // 2 回目も同じ（失敗を覚え込んで以後ずっと落ちる、にならない）
+  assert.equal((await a("search?space=notes&q=demo")).status, 200);
+  const r = await a("related?space=notes&page=" + encodeURIComponent("Projects/Demo"));
+  assert.equal(r.status, 200);
+  assert.ok(r.body.results.every((x) => x.via === "link"));
+  const g = await a("graph?space=notes");
+  assert.equal(g.status, 200);
+  assert.deepEqual(g.body.edges, []);
 });
 
 test("認証なし / 違うトークンは 401", async () => {

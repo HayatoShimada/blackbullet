@@ -15,7 +15,7 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | File | Role |
 |---|---|
 | `src/space.mjs` | Filesystem layer: `MEMO_SPACES` parsing, frontmatter / task / link parsing, path validation, conflict detection |
-| `src/index.mjs` | Index. Built in memory with SQLite (official WASM build) at startup and refreshed by mtime. Sections, FTS5 (trigram), links, tasks |
+| `src/index.mjs` | Index. Built lazily in memory with SQLite (official WASM build) on the first call and refreshed by mtime on every call. Sections, FTS5 (trigram), links, tasks |
 | `src/embed.mjs` | Local embeddings (`Xenova/multilingual-e5-small`, ONNX q8), cached per section hash in `$MEMO_INDEX_DIR/*.embeddings.json` |
 | `src/search.mjs` | Hybrid search: BM25 and cosine merged with RRF, boosted by title match / active status / journal freshness |
 | `src/resources.mjs` | MCP resources (`memo://<space>/<page>`) |
@@ -37,6 +37,7 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `MEMO_INDEX_DIR` | Where embeddings and the model cache live. Default `~/.cache/memo-mcp`. Derived data: safe to delete and rebuild. |
 | `MEMO_EMBED` | `off` disables embeddings (lexical search only; the model is never loaded or downloaded). Default `on`. |
 | `MEMO_EMBED_MODEL` | Embedding model id. Default `Xenova/multilingual-e5-small`. |
+| `MEMO_EMBED_REMOTE_HOST` | Where the model is downloaded from on first use (a Hugging Face mirror). Default: the Hugging Face Hub. If the model cannot be fetched, search falls back to lexical with a `warning`, related notes to links only and the graph to no edges; the download is retried on the next request. |
 
 A space marked `:confidential` gets `confidential: true` in tool and REST results, a notice in
 `search_notes`, and a marker comment in resources, so clients know not to quote it in public material.
@@ -88,6 +89,45 @@ npm run start:http          # HTTP: /mcp and /api/*
 npm start                   # stdio MCP (the client launches it, e.g. over: ssh user@your-host /path/to/memo-mcp/src/stdio.mjs)
 npm run reindex:embed       # optional: precompute embeddings
 ```
+
+In the BlackBullet repository, `./setup.sh` starts this server as the `memo-mcp` compose service next to the app (see the root `compose.yaml`); the settings above are then taken from the root `.env`.
+
+### Connect an MCP client
+
+HTTP (the server is running, e.g. via `./setup.sh`):
+
+```bash
+claude mcp add --transport http memo http://127.0.0.1:3010/mcp \
+  --header "Authorization: Bearer $MEMO_MCP_TOKEN"
+```
+
+```json
+{
+  "mcpServers": {
+    "memo": {
+      "type": "http",
+      "url": "http://127.0.0.1:3010/mcp",
+      "headers": { "Authorization": "Bearer <MEMO_MCP_TOKEN>" }
+    }
+  }
+}
+```
+
+stdio (the client starts the process itself; nothing needs to be running):
+
+```json
+{
+  "mcpServers": {
+    "memo": {
+      "command": "node",
+      "args": ["/path/to/packages/memo-mcp/src/stdio.mjs"],
+      "env": { "MEMO_SPACES": "notes=/path/to/your/notes" }
+    }
+  }
+}
+```
+
+Through a reverse proxy on another host, set `MEMO_MCP_PUBLIC_HOST` to the name clients use (for example `memo.example.net:443`) and use `https://<that name>/mcp`.
 
 ## Tests
 

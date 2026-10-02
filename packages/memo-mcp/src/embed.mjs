@@ -22,11 +22,17 @@ async function pipe() {
     pipePromise = (async () => {
       const { pipeline, env } = await import("@huggingface/transformers");
       env.cacheDir = path.join(INDEX_DIR, "models");
+      // モデルの配布元（ミラーやオフライン試験用）。既定は Hugging Face Hub
+      if (process.env.MEMO_EMBED_REMOTE_HOST) env.remoteHost = process.env.MEMO_EMBED_REMOTE_HOST;
       const t0 = Date.now();
       const p = await pipeline("feature-extraction", MODEL, { dtype: "q8" });
       console.error(`[memo-mcp] embedding model loaded in ${Date.now() - t0}ms (${MODEL})`);
       return p;
-    })();
+    })().catch((e) => {
+      // 取得失敗（オフライン、途中で切断）を覚え込まず、次の呼び出しでやり直す
+      pipePromise = undefined;
+      throw e;
+    });
   }
   return pipePromise;
 }
