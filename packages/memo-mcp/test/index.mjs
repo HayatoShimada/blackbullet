@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { splitSections, parsePage, parseDocument } from "../src/index.mjs";
-import { stripQueries } from "../src/space.mjs";
-import { splitTerms } from "../src/search.mjs";
+import { stripQueries, splitFrontmatter, tagList, metaText } from "../src/space.mjs";
+import { splitTerms, rankBoost, rrf } from "../src/search.mjs";
 
 const RAW = `---
 tags: project
@@ -83,4 +83,42 @@ test("parseDocument は単位ラベルを見出しパスにし、kind を持ち�
   assert.equal(d.row.kind, "pptx");
   assert.deepEqual(d.sections.map((x) => x.heading_path), ["deck.pptx slide.1", "deck.pptx slide.2"]);
   assert.equal(d.sections[0].line_start, 0);
+});
+
+test("frontmatter: 入れ子のマップ・ブロック形式のリスト・流れ形式のリストを読む", () => {
+  const { meta, body, bodyStartLine } = splitFrontmatter(
+    "---\ntags:\n  - project\n  - \"pc\"\nstatus: active\npageDecoration:\n  icon: 🖥️\n  cover: Images/server.png\nalias: [a, b]\nempty:\n---\n# T\n",
+  );
+  assert.deepEqual(meta.pageDecoration, { icon: "🖥️", cover: "Images/server.png" });
+  assert.deepEqual(meta.tags, ["project", "pc"]);
+  assert.deepEqual(tagList(meta), ["project", "pc"]);
+  assert.equal(meta.status, "active");
+  assert.equal(meta.empty, "");
+  assert.equal(metaText(meta.alias), "a, b");
+  assert.equal(metaText(meta.pageDecoration), null);
+  assert.equal(body, "# T\n");
+  assert.equal(bodyStartLine, 12); // 閉じの --- が 11 行目、本文は 12 行目から
+  assert.deepEqual(tagList({ tags: "[x, y]" }), ["x", "y"]);
+  assert.deepEqual(tagList({ tags: "x, y" }), ["x", "y"]);
+});
+
+test("parsePage: 入れ子の frontmatter があっても索引の値は文字列か null", () => {
+  const { row } = parsePage({
+    space: "notes",
+    page: "Areas/PC",
+    raw: "---\ntags: [area]\narea:\n  - ops\n  - it\npageDecoration:\n  icon: 🖥️\n---\n# PC\n\n## Setup\ntext\n",
+    mtime: 0,
+  });
+  assert.equal(row.tags, "area");
+  assert.equal(row.area, "ops, it");
+});
+
+test("鮮度・active の補正は、意味的 1 位と 7 位の差を覆さない", () => {
+  const fresh = rankBoost({ journal: true, ageDays: 0, active: true });
+  // 意味的 1 位（rank 0）の通常ページ vs 7 位（rank 6）の今日の日報
+  assert.ok(rrf(0) > rrf(6) + fresh, `boost ${fresh} must not beat ${rrf(0) - rrf(6)}`);
+  // 1 位と 2 位のような僅差なら、新しい日報が上に来てよい
+  assert.ok(rrf(1) + fresh > rrf(0));
+  // 古い日報ほど補正は小さい
+  assert.ok(rankBoost({ journal: true, ageDays: 60 }) < rankBoost({ journal: true, ageDays: 0 }));
 });

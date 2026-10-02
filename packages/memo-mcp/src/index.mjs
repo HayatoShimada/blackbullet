@@ -26,6 +26,7 @@ import {
   listDocs,
   splitFrontmatter,
   tagList,
+  metaText,
   normalizeStatus,
   stripQueries,
   parseTaskLine,
@@ -177,17 +178,21 @@ export function parsePage({ space, page, raw, mtime }) {
   const body = stripQueries(rawBody);
   const title = page.split("/").pop();
   const tags = tagList(meta);
-  const status = normalizeStatus(meta.status);
+  // frontmatter の値は入れ子（マップ・配列）にもなる。索引と文脈行には 1 行の文字列だけを入れる
+  const area = metaText(meta.area) || null;
+  const due = metaText(meta.due) || null;
+  const goal = metaText(meta.goal) || null;
+  const status = normalizeStatus(metaText(meta.status));
   const isJournal = page.startsWith("Journal/");
-  const date = isJournal ? page.replace("Journal/", "") : meta.date || null;
-  const summary = meta.summary || meta.description || null;
+  const date = isJournal ? page.replace("Journal/", "") : metaText(meta.date) || null;
+  const summary = metaText(meta.summary) || metaText(meta.description) || null;
 
   const ctxHead = [
     `[${space} / ${page}`,
     tags.length ? `tags: ${tags.join(",")}` : "",
-    meta.area ? `area: ${meta.area}` : "",
+    area ? `area: ${area}` : "",
     status ? `status: ${status}` : "",
-    meta.due ? `due: ${meta.due}` : "",
+    due ? `due: ${due}` : "",
     date ? `date: ${date}` : "",
   ]
     .filter(Boolean)
@@ -216,10 +221,10 @@ export function parsePage({ space, page, raw, mtime }) {
       modified: new Date(mtime).toISOString(),
       title,
       tags: tags.join(","),
-      area: meta.area || null,
+      area,
       status,
-      due: meta.due || null,
-      goal: meta.goal || null,
+      due,
+      goal,
       summary,
       chars: body.length,
       is_journal: isJournal ? 1 : 0,

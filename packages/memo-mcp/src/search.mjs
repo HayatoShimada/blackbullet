@@ -53,6 +53,23 @@ function ageDays(iso) {
   return Math.max(0, (Date.now() - Date.parse(iso)) / 86400000);
 }
 
+// 関連度（RRF）に上乗せする補正。RRF の順位差は小さい（1 位と 2 位で約 0.00026、1 位と 7 位で約 0.0015）ので、
+// 補正はほぼ同点の並びを入れ替える程度に抑える。以前の 0.002 / 0.004 は、意味的に 1 位のノートを
+// 7 位の新しい日報の下に沈めていた。
+export const ACTIVE_BOOST = 0.0003;
+export const JOURNAL_BOOST = 0.0006;
+
+/** status: active と、日報の新しさ（半減期 30 日）による上乗せ分。 */
+export function rankBoost({ active = false, journal = false, ageDays: age = 0 } = {}) {
+  let boost = 0;
+  if (active) boost += ACTIVE_BOOST;
+  if (journal) boost += JOURNAL_BOOST * Math.pow(0.5, age / JOURNAL_HALF_LIFE_DAYS);
+  return boost;
+}
+
+/** RRF の 1 リスト分の得点（rank は 0 始まり）。 */
+export const rrf = (rank) => 1 / (RRF_K + rank);
+
 /**
  * @param {import("./index.mjs").SpaceIndex} idx
  * @returns {Promise<Array<object>>} 節単位のヒット（ページごとに最大 2）
@@ -164,14 +181,13 @@ export async function searchSpace(idx, opts) {
       const c = byId.get(id);
       let score = 0;
       const why = [];
-      if (rk.lexical !== undefined) { score += 1 / (RRF_K + rk.lexical); why.push("lexical"); }
-      if (rk.semantic !== undefined) { score += 1 / (RRF_K + rk.semantic); why.push("semantic"); }
+      if (rk.lexical !== undefined) { score += rrf(rk.lexical); why.push("lexical"); }
+      if (rk.semantic !== undefined) { score += rrf(rk.semantic); why.push("semantic"); }
       const qlc = q.toLowerCase();
       if (c.page.toLowerCase().includes(qlc) || long.some((t) => c.page.toLowerCase().includes(t.toLowerCase()))) {
         score += 0.01; why.push("title");
       }
-      if (c.status === "active") score += 0.002;
-      if (c.is_journal) score += 0.004 * Math.pow(0.5, ageDays(c.modified) / JOURNAL_HALF_LIFE_DAYS);
+      score += rankBoost({ active: c.status === "active", journal: Boolean(c.is_journal), ageDays: ageDays(c.modified) });
       hits.push({ c, score, why });
     }
   }

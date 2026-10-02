@@ -120,31 +120,70 @@ export async function listDocs(spaces, space) {
   }));
 }
 
+const unquote = (s) => s.trim().replace(/^["']|["']$/g, "");
+const indentOf = (line) => /^ */.exec(line)[0].length;
+
 /**
- * frontmatter を分離する。
- * 単純な `key: value` のみを解釈する。SilverBullet の実データがその形しか使っていないため、
- * 完全な YAML パーサは持ち込まない。
+ * frontmatter の YAML の、ノートで実際に使われる部分集合を解釈する（完全な YAML パーサは持ち込まない）。
+ * - `key: value`（スカラーは文字列のまま）
+ * - 値が空で、続く行がより深く字下げされていれば入れ子: `- item` の並びなら配列、`key: value` ならマップ
+ *   （例: pageDecoration の icon / cover、`tags:` の下の `- a`）
+ * - `[a, b]` の流れ形式は、tagList と metaText で必要なときに配列として読む
  */
+function parseYamlBlock(lines) {
+  const out = {};
+  let i = 0;
+  while (i < lines.length) {
+    const km = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/.exec(lines[i].trimStart());
+    const base = indentOf(lines[i]);
+    i++;
+    if (!km) continue;
+    const [, key, raw] = km;
+    if (raw.trim() !== "") {
+      out[key] = unquote(raw);
+      continue;
+    }
+    // 値が空: 続く、より深く字下げされた行を子として集める（空行は飛ばす）
+    const child = [];
+    while (i < lines.length && (lines[i].trim() === "" || indentOf(lines[i]) > base)) {
+      if (lines[i].trim() !== "") child.push(lines[i]);
+      i++;
+    }
+    if (child.length === 0) out[key] = "";
+    else if (child.every((l) => /^\s*-(\s|$)/.test(l))) {
+      out[key] = child.map((l) => unquote(l.replace(/^\s*-\s?/, ""))).filter(Boolean);
+    } else {
+      const depth = Math.min(...child.map(indentOf));
+      out[key] = parseYamlBlock(child.map((l) => l.slice(depth)));
+    }
+  }
+  return out;
+}
+
+/** frontmatter を分離する。値は文字列、入れ子のマップはオブジェクト、ブロック形式のリストは配列になる。 */
 export function splitFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   if (!m) return { meta: {}, body: text, bodyStartLine: 1 };
-  const meta = {};
-  for (const line of m[1].split(/\r?\n/)) {
-    const km = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-    if (!km) continue;
-    let v = km[2].trim().replace(/^["']|["']$/g, "");
-    meta[km[1]] = v;
-  }
+  const meta = parseYamlBlock(m[1].split(/\r?\n/));
   // body がファイル全体の何行目から始まるか。タスクの行番号をファイル基準で返すのに要る。
   const consumed = text.slice(0, text.length - m[2].length);
   const bodyStartLine = consumed.split(/\r?\n/).length;
   return { meta, body: m[2], bodyStartLine };
 }
 
-/** tags: "a, b" → ["a","b"] */
+/** 索引や文脈行に入れる 1 行の文字列。配列は ", " でつなぎ、マップなど文字列にできないものは null。 */
+export function metaText(v) {
+  if (typeof v === "string") return v.replace(/^\[(.*)\]$/, "$1");
+  if (Array.isArray(v)) return v.map(String).join(", ");
+  return null;
+}
+
+/** tags: "a, b" / "[a, b]" / ["a", "b"]（ブロック形式のリスト）→ ["a","b"] */
 export function tagList(meta) {
-  if (!meta.tags) return [];
-  return meta.tags.split(",").map((t) => t.trim()).filter(Boolean);
+  const t = meta.tags;
+  if (!t) return [];
+  const items = Array.isArray(t) ? t : typeof t === "string" ? t.replace(/^\[(.*)\]$/, "$1").split(",") : [];
+  return items.map((x) => unquote(String(x))).filter(Boolean);
 }
 
 /**
@@ -239,7 +278,7 @@ export async function readPage(spaces, space, page, { stripQuery = true } = {}) 
     space,
     page,
     tags: tagList(meta),
-    status: normalizeStatus(meta.status),
+    status: normalizeStatus(metaText(meta.status)),
     meta,
     body: stripQuery ? stripQueries(body) : body,
     tasks,
