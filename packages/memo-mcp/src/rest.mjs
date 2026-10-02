@@ -6,7 +6,7 @@
  * 検索・節分割・埋め込みは MCP ツールと同じコード（search.mjs / index.mjs）を通す。
  * ここはクエリの検証と、ページ単位への整形だけを持つ。認証は http.mjs 側で済ませてある。
  */
-import { searchSpace, neighbors, sectionVectors } from "./search.mjs";
+import { searchSpace, neighbors, sectionVectors, unitOf } from "./search.mjs";
 import { EMBED_ENABLED, cosine } from "./embed.mjs";
 
 const NO_EMBED_WARNING = "MEMO_EMBED=off のため意味検索は無効です";
@@ -22,7 +22,10 @@ class HttpError extends Error {
 }
 
 function sendJson(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -31,7 +34,11 @@ function intParam(q, name, def, min, max) {
   const raw = q.get(name);
   if (raw === null || raw === "") return def;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${name} は ${min}〜${max} の整数で指定してください`);
+  if (!Number.isInteger(n) || n < min || n > max)
+    throw new HttpError(
+      400,
+      `${name} は ${min}〜${max} の整数で指定してください`,
+    );
   return n;
 }
 
@@ -39,7 +46,11 @@ function floatParam(q, name, def, min, max) {
   const raw = q.get(name);
   if (raw === null || raw === "") return def;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${name} は ${min}〜${max} の数値で指定してください`);
+  if (!Number.isFinite(n) || n < min || n > max)
+    throw new HttpError(
+      400,
+      `${name} は ${min}〜${max} の数値で指定してください`,
+    );
   return n;
 }
 
@@ -48,17 +59,38 @@ const flag = (q, name) => ["1", "true"].includes(q.get(name));
 /** 0 始まりの内部順位を 1 始まりにして返す。無ければ null。 */
 const rank1 = (r) => (r === undefined ? null : r + 1);
 
+/** 種別の絞り込み（md / pdf / docx など拡張子、または文書すべての "doc"）。 */
+function validKind(raw) {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string" || !/^[A-Za-z0-9]{1,10}$/.test(raw))
+    throw new HttpError(400, "kind は md / pdf / docx など英数字か doc です");
+  return raw.toLowerCase();
+}
+
+/** フォルダの絞り込み（ページ名の前方一致）。 */
+function validPrefix(raw) {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string" || raw.length > 200)
+    throw new HttpError(400, "prefix は 200 字までの文字列で指定してください");
+  return raw;
+}
+
 /** 検索語の検証（/api/search の q、/api/ask の body.q で共通）。 */
 function validQuery(raw) {
   const query = (typeof raw === "string" ? raw : "").trim();
   if (!query) throw new HttpError(400, "q が必要です");
-  if (query.length > 500) throw new HttpError(400, "q が長すぎます（500 字まで）");
+  if (query.length > 500)
+    throw new HttpError(400, "q が長すぎます（500 字まで）");
   return query;
 }
 
 function validMode(raw) {
   const mode = raw ?? "hybrid";
-  if (!MODES.includes(mode)) throw new HttpError(400, "mode は hybrid / lexical / semantic のいずれかです");
+  if (!MODES.includes(mode))
+    throw new HttpError(
+      400,
+      "mode は hybrid / lexical / semantic のいずれかです",
+    );
   return mode;
 }
 
@@ -66,8 +98,10 @@ function validMode(raw) {
 function semanticWarning(mode, hits) {
   if (mode === "lexical") return undefined;
   if (!EMBED_ENABLED) return NO_EMBED_WARNING;
-  if (hits.semanticError) return `意味検索が今は使えません（${hits.semanticError}）。語彙検索で返しています`;
-  if (!hits.semanticUsed) return "セマンティック検索の結果がありません（埋め込み未生成の可能性）。語彙検索で返しています";
+  if (hits.semanticError)
+    return `意味検索が今は使えません（${hits.semanticError}）。語彙検索で返しています`;
+  if (!hits.semanticUsed)
+    return "セマンティック検索の結果がありません（埋め込み未生成の可能性）。語彙検索で返しています";
   return undefined;
 }
 
@@ -78,11 +112,19 @@ async function search(idx, q) {
   const mode = validMode(q.get("mode"));
   const limit = intParam(q, "limit", 10, 1, 50);
 
-  const hits = await searchSpace(idx, { query, mode, limit });
+  const scope = {};
+  const prefix = validPrefix(q.get("prefix"));
+  const kind = validKind(q.get("kind"));
+  if (prefix) scope.prefix = prefix;
+  if (kind) scope.kind = kind;
+
+  const hits = await searchSpace(idx, { query, mode, limit, ...scope });
   const body = {
+    ...(Object.keys(scope).length ? { scope } : {}),
     mode: hits.semanticUsed ? mode : "lexical",
     results: hits.map((h) => ({
       page: h.page,
+      ...docFields(h),
       // 長い節の続き断片の " (2)" 接尾辞は表示用に落とす。" > " を含む見出しは分割される（ベストエフォート）。
       heading_path: h.heading_path.replace(/ \([2-9]\d*\)$/, "").split(" > "),
       line_start: h.line_start,
@@ -90,7 +132,10 @@ async function search(idx, q) {
       heading_line: h.heading_line,
       snippet: h.snippet,
       score: h.score,
-      ranks: { lexical: rank1(h.ranks.lexical), semantic: rank1(h.ranks.semantic) },
+      ranks: {
+        lexical: rank1(h.ranks.lexical),
+        semantic: rank1(h.ranks.semantic),
+      },
     })),
   };
   const warning = semanticWarning(mode, hits);
@@ -106,8 +151,49 @@ const ASK_K_MAX = 20;
 function bodyInt(body, name, def, min, max) {
   const v = body[name];
   if (v === undefined || v === null) return def;
-  if (!Number.isInteger(v) || v < min || v > max) throw new HttpError(400, `${name} は ${min}〜${max} の整数で指定してください`);
+  if (!Number.isInteger(v) || v < min || v > max)
+    throw new HttpError(
+      400,
+      `${name} は ${min}〜${max} の整数で指定してください`,
+    );
   return v;
+}
+
+/** /api/ask の絞り込み（任意の文字列）。未指定は undefined、文字列でない・長すぎる・since が日付でないときは 400。 */
+function bodyScope(body) {
+  const out = {};
+  for (const name of ["tag", "area", "status", "since", "prefix", "kind"]) {
+    const v = body[name];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v !== "string" || v.length > 200)
+      throw new HttpError(
+        400,
+        `${name} は 200 字までの文字列で指定してください`,
+      );
+    if (name === "since") {
+      // modified は ISO 文字列で、文字列として比べるので、ISO の日付（時刻つきも可）だけ受ける
+      if (!/^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v) || Number.isNaN(Date.parse(v)))
+        throw new HttpError(
+          400,
+          "since は日付（例 2026-09-01）で指定してください",
+        );
+      out[name] = v.replace(" ", "T");
+      continue;
+    }
+    if (name === "kind") {
+      out.kind = validKind(v);
+      continue;
+    }
+    out[name] = v;
+  }
+  return out;
+}
+
+/** 文書のヒットなら種別と単位（p.3 / slide.2）。.md では何も足さない。 */
+function docFields(h) {
+  if (!h.kind || h.kind === "md") return {};
+  const u = h.unit ? h : (unitOf(h.kind, h.heading_path) ?? {});
+  return { kind: h.kind, unit: u.unit ?? null, unit_no: u.unit_no ?? null };
 }
 
 /** 節を開く位置。見出し行があればそこ、無ければ本文の先頭行、それも無ければページだけ。 */
@@ -124,21 +210,55 @@ async function ask(idx, _q, body) {
   const query = validQuery(body.q);
   const mode = validMode(body.mode);
   const k = bodyInt(body, "k", 8, 1, ASK_K_MAX);
+  const scope = bodyScope(body);
 
-  const hits = await searchSpace(idx, { query, mode, limit: k });
+  const expand = body.expand === true;
+  if (body.expand !== undefined && typeof body.expand !== "boolean")
+    throw new HttpError(400, "expand は true / false で指定してください");
+
+  const hits = await searchSpace(idx, { query, mode, limit: k, ...scope });
+  const toSection = (h, row, extra) => ({
+    page: h.page,
+    ...docFields(h),
+    // 長い節の続き断片の " (2)" 接尾辞は表示用に落とす。" > " を含む見出しは分割される（ベストエフォート）。
+    heading_path: h.heading_path.replace(/ \([2-9]\d*\)$/, "").split(" > "),
+    heading_line: h.heading_line,
+    line_start: h.line_start,
+    line_end: h.line_end,
+    ref: sectionRef(h),
+    text: row?.text ?? "",
+    ...extra,
+  });
+  const textOf = (id) =>
+    idx.rows("select text from sections where id = ?", [id])[0];
+  const sections = hits.map((h) => toSection(h, textOf(h.id), { score: h.score }));
+  if (expand && hits.length) {
+    // 最上位の節の前後（同じページの n-1 / n+1。長い節の続き断片もここで拾える）を文脈として足す。
+    const top = hits[0];
+    const have = new Set(hits.map((h) => h.id));
+    const topRow = idx.rows("select n from sections where id = ?", [top.id])[0];
+    if (topRow) {
+      const near = idx.rows(
+        "select id, page, n, heading_path, line_start, line_end, text, (select kind from pages where pages.page = sections.page) kind from sections where page = ? and n in (?, ?) order by n",
+        [top.page, topRow.n - 1, topRow.n + 1],
+      );
+      for (const r of near) {
+        if (have.has(r.id)) continue;
+        sections.push(
+          toSection(
+            { ...r, heading_line: undefined },
+            r,
+            { context: true },
+          ),
+        );
+      }
+    }
+  }
   const out = {
     question: query,
+    ...(Object.keys(scope).length ? { scope } : {}),
     mode: hits.semanticUsed ? mode : "lexical",
-    sections: hits.map((h) => ({
-      page: h.page,
-      // 長い節の続き断片の " (2)" 接尾辞は表示用に落とす。" > " を含む見出しは分割される（ベストエフォート）。
-      heading_path: h.heading_path.replace(/ \([2-9]\d*\)$/, "").split(" > "),
-      heading_line: h.heading_line,
-      line_start: h.line_start,
-      line_end: h.line_end,
-      ref: sectionRef(h),
-      text: idx.rows("select text from sections where id = ?", [h.id])[0]?.text ?? "",
-    })),
+    sections,
   };
   const warning = semanticWarning(mode, hits);
   if (warning) out.warning = warning;
@@ -162,12 +282,18 @@ function resolveLinks(idx, page) {
     return c?.length === 1 ? c[0] : null;
   };
   const out = new Set();
-  for (const r of idx.rows("select distinct to_page from links where from_page = ?", [page])) {
+  for (const r of idx.rows(
+    "select distinct to_page from links where from_page = ?",
+    [page],
+  )) {
     const t = resolve(r.to_page);
     if (t) out.add(t);
   }
   const base = page.split("/").pop();
-  for (const r of idx.rows("select distinct from_page, to_page from links where to_page = ? or to_page = ?", [page, base])) {
+  for (const r of idx.rows(
+    "select distinct from_page, to_page from links where to_page = ? or to_page = ?",
+    [page, base],
+  )) {
     if (resolve(r.to_page) === page) out.add(r.from_page);
   }
   out.delete(page);
@@ -179,15 +305,23 @@ async function related(idx, q) {
   if (!page) throw new HttpError(400, "page が必要です");
   const limit = intParam(q, "limit", 10, 1, 50);
   const includeJournal = flag(q, "include_journal");
-  if (!idx.rows("select 1 x from pages where page = ?", [page]).length) throw new HttpError(404, `ページが見つかりません: ${idx.space}/${page}`);
+  if (!idx.rows("select 1 x from pages where page = ?", [page]).length)
+    throw new HttpError(404, `ページが見つかりません: ${idx.space}/${page}`);
 
-  const journal = new Set(idx.rows("select page from pages where is_journal = 1").map((r) => r.page));
+  const journal = new Set(
+    idx.rows("select page from pages where is_journal = 1").map((r) => r.page),
+  );
   const keep = (p) => includeJournal || !journal.has(p);
   const links = [...resolveLinks(idx, page)].filter(keep);
 
   // neighbors は節ベクトルとの類似度をページ単位に畳んだ全件（1000 ページまで）を返す
-  const sims = new Map((await neighbors(idx, page, 1000)).map((n) => [n.page, n.similarity]));
-  const semantic = [...sims].filter(([p]) => keep(p)).slice(0, limit).map(([p]) => p);
+  const sims = new Map(
+    (await neighbors(idx, page, 1000)).map((n) => [n.page, n.similarity]),
+  );
+  const semantic = [...sims]
+    .filter(([p]) => keep(p))
+    .slice(0, limit)
+    .map(([p]) => p);
   const semSet = new Set(semantic);
   const linkSet = new Set(links);
 
@@ -195,10 +329,18 @@ async function related(idx, q) {
     page: p,
     // リンク先は意味的に遠くても出る。score は意味的類似度（算出できなければ 0）
     score: sims.get(p) ?? 0,
-    via: semSet.has(p) && linkSet.has(p) ? "both" : linkSet.has(p) ? "link" : "semantic",
+    via:
+      semSet.has(p) && linkSet.has(p)
+        ? "both"
+        : linkSet.has(p)
+          ? "link"
+          : "semantic",
   }));
   // リンクで繋がっているものを優先し、同順位内は類似度順
-  results.sort((a, b) => (b.via !== "semantic") - (a.via !== "semantic") || b.score - a.score);
+  results.sort(
+    (a, b) =>
+      (b.via !== "semantic") - (a.via !== "semantic") || b.score - a.score,
+  );
   const body = { results: results.slice(0, limit) };
   if (!EMBED_ENABLED) body.warning = NO_EMBED_WARNING;
   return body;
@@ -224,12 +366,15 @@ async function neighborTable(byPage) {
     await new Promise((r) => setImmediate(r));
     for (let j = i + 1; j < pages.length; j++) {
       let best = -1;
-      for (const a of byPage.get(pages[i])) for (const b of byPage.get(pages[j])) best = Math.max(best, cosine(a, b));
+      for (const a of byPage.get(pages[i]))
+        for (const b of byPage.get(pages[j]))
+          best = Math.max(best, cosine(a, b));
       lists.get(pages[i]).push([pages[j], best]);
       lists.get(pages[j]).push([pages[i], best]);
     }
   }
-  for (const [p, l] of lists) lists.set(p, l.sort((x, y) => y[1] - x[1]).slice(0, MAX_K));
+  for (const [p, l] of lists)
+    lists.set(p, l.sort((x, y) => y[1] - x[1]).slice(0, MAX_K));
   return lists;
 }
 
@@ -237,14 +382,24 @@ async function graph(idx, q) {
   const k = intParam(q, "k", 3, 1, MAX_K);
   const threshold = floatParam(q, "threshold", 0.8, 0, 1);
   const page = q.get("page");
-  if (page && !idx.rows("select 1 x from pages where page = ?", [page]).length) throw new HttpError(404, `ページが見つかりません: ${idx.space}/${page}`);
+  if (page && !idx.rows("select 1 x from pages where page = ?", [page]).length)
+    throw new HttpError(404, `ページが見つかりません: ${idx.space}/${page}`);
   // ページを名指しした場合、日報でも辺を引けるようにする
-  const includeJournal = flag(q, "include_journal") || (page ? idx.rows("select is_journal j from pages where page = ?", [page])[0].j === 1 : false);
+  const includeJournal =
+    flag(q, "include_journal") ||
+    (page
+      ? idx.rows("select is_journal j from pages where page = ?", [page])[0]
+          .j === 1
+      : false);
 
   const pages = idx.rows(
-    `select page, title, tags from pages ${includeJournal ? "" : "where is_journal = 0"} order by page`
+    `select page, title, tags from pages ${includeJournal ? "" : "where is_journal = 0"} order by page`,
   );
-  const nodeOf = (p) => ({ id: p.page, title: p.title, tags: p.tags ? p.tags.split(",") : [] });
+  const nodeOf = (p) => ({
+    id: p.page,
+    title: p.title,
+    tags: p.tags ? p.tags.split(",") : [],
+  });
   const body = { nodes: pages.map(nodeOf), edges: [] };
 
   const vecs = await sectionVectors(idx, { includeJournal });
@@ -255,24 +410,37 @@ async function graph(idx, q) {
   const cacheKey = `${idx.space}:${includeJournal}`;
   let cached = graphCache.get(cacheKey);
   if (cached?.signature !== vecs.signature) {
-    cached = { signature: vecs.signature, table: await neighborTable(vecs.byPage) };
+    cached = {
+      signature: vecs.signature,
+      table: await neighborTable(vecs.byPage),
+    };
     graphCache.set(cacheKey, cached);
   }
 
   const seen = new Set();
   for (const [from, list] of cached.table) {
-    for (const [to, score] of list.filter(([, s]) => s >= threshold).slice(0, k)) {
+    for (const [to, score] of list
+      .filter(([, s]) => s >= threshold)
+      .slice(0, k)) {
       if (page && from !== page && to !== page) continue;
       const key = from < to ? `${from}\0${to}` : `${to}\0${from}`;
       if (seen.has(key)) continue; // A→B と B→A は同じ辺
       seen.add(key);
-      body.edges.push({ from, to, kind: "semantic", score: Number(score.toFixed(4)) });
+      body.edges.push({
+        from,
+        to,
+        kind: "semantic",
+        score: Number(score.toFixed(4)),
+      });
     }
   }
   body.edges.sort((a, b) => b.score - a.score);
   if (page) {
     // 指定ページに繋がるものだけ残す
-    const touched = new Set([page, ...body.edges.flatMap((e) => [e.from, e.to])]);
+    const touched = new Set([
+      page,
+      ...body.edges.flatMap((e) => [e.from, e.to]),
+    ]);
     body.nodes = body.nodes.filter((n) => touched.has(n.id));
   }
   return body;
@@ -288,7 +456,8 @@ const ROUTES = {
 
 /** POST の JSON body を読む。空なら {}。壊れた JSON は 400、大きすぎれば 413。 */
 async function readJsonBody(req) {
-  const tooLarge = () => new HttpError(413, "body が大きすぎます（4 MiB まで）");
+  const tooLarge = () =>
+    new HttpError(413, "body が大きすぎます（4 MiB まで）");
   // 読み始める前に Content-Length で弾く。読んでいる途中で中断すると接続ごと切れて 413 が届かない
   if (Number(req.headers["content-length"]) > MAX_BODY) throw tooLarge();
   const chunks = [];
@@ -306,7 +475,8 @@ async function readJsonBody(req) {
   } catch {
     throw new HttpError(400, "body を JSON として読めません");
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "body は JSON オブジェクトで指定してください");
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new HttpError(400, "body は JSON オブジェクトで指定してください");
   return body;
 }
 
@@ -326,12 +496,17 @@ export async function handleRest(req, res, url, { spaces, indexes }) {
     }
     const json = req.method === "POST" ? await readJsonBody(req) : {};
     // space はクエリでも body でも指定できる（POST は body が普通）
-    const space = url.searchParams.get("space") || (typeof json.space === "string" ? json.space : "");
+    const space =
+      url.searchParams.get("space") ||
+      (typeof json.space === "string" ? json.space : "");
     if (!space) throw new HttpError(400, "space が必要です");
     if (!spaces[space]) throw new HttpError(404, `未知のスペース: ${space}`);
     const idx = await indexes.get(space);
     const body = await handler(idx, url.searchParams, json);
-    sendJson(res, 200, { ...body, confidential: Boolean(spaces[space].confidential) });
+    sendJson(res, 200, {
+      ...body,
+      confidential: Boolean(spaces[space].confidential),
+    });
   } catch (e) {
     if (e instanceof HttpError) {
       sendJson(res, e.status, { error: e.message });

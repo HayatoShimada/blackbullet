@@ -16,6 +16,8 @@ All requests go through SilverBullet's own `/.proxy/` route (`net.proxyFetch`), 
 
 # Commands
 * ${widgets.commandButton("Memo: Search")} (`Ctrl-Shift-f`, `Cmd-Shift-f` on macOS): a modal search over all sections. Type to search, `Up`/`Down` to move, `Enter` or a click to jump to the section. The `Details` segment adds a badge per result with the lexical rank, the semantic rank and the RRF score.
+  * Hits that are documents (PDF, Word, slides, sheets indexed by the sidecar) carry a badge such as `[PDF p.3]` or `[PPTX slide.2]`. Selecting one opens the file; set `pdfPages = true` in `memoSidecar` to open a PDF at the hit's page (`Page.pdf#page=3`), but only if your viewer understands `#page=N` (otherwise it opens the file as before).
+  * Scope words at the start of the query: `kind:pdf` (also `docx`, `xlsx`, `pptx`, `text`, `odf`, `html`, `legacy`, `md`; extensions like `csv`, `txt`, `odt`, `doc` map to their kind; `kind:doc` is every document), `in:Projects/` (or `folder:`). Example: `kind:pdf in:Receipts/ invoice`. The sidecar's `/api/search` takes the same as `kind=` and `prefix=`.
 * ${widgets.commandButton("Memo: Related Notes")}: toggles the _Related notes_ panel at the bottom of the current page (semantic neighbours and linked pages). It is closed until you open it and only queries the sidecar while it is open; fold it with its title bar.
 
 # Implementation
@@ -32,6 +34,7 @@ config.define("memoSidecar", {
     url = { type = "string", description = "host:port of the sidecar (the SilverBullet server proxies the calls)" },
     token = { type = "string", description = "Bearer token of the sidecar" },
     space = { type = "string", description = "Sidecar space to query, e.g. notes" },
+    pdfPages = { type = "boolean", description = "Open a PDF hit at its page (Page.pdf#page=N); only for a viewer that understands #page=N" },
   },
   additionalProperties = false,
 })
@@ -213,6 +216,12 @@ end
 -- heading, so it is only the fallback (older sidecars, or sections that have no heading line).
 -- SilverBullet line refs (`Page@L<n>`) are 1-based, like both of these.
 function memo.navRef(hit)
+  if hit.kind == "pdf" and type(hit.unit_no) == "number" and hit.unit_no >= 1 then
+    local cfg = config.get("memoSidecar", nil)
+    if type(cfg) == "table" and cfg.pdfPages == true then
+      return hit.page .. "#page=" .. string.format("%d", hit.unit_no)
+    end
+  end
   local line = hit.heading_line
   if type(line) != "number" or line < 1 then
     line = hit.line_start
@@ -221,6 +230,18 @@ function memo.navRef(hit)
     return hit.page .. "@L" .. string.format("%d", line)
   end
   return hit.page
+end
+
+-- "PDF p.3", "PPTX slide.2", "DOCX": what kind of file a hit is, or nil for a note.
+function memo.docLabel(hit)
+  if type(hit.kind) != "string" or hit.kind == "" or hit.kind == "md" then
+    return nil
+  end
+  local label = string.upper(hit.kind)
+  if type(hit.unit) == "string" and hit.unit != "" then
+    label = label .. " " .. hit.unit
+  end
+  return label
 end
 
 -- "Page › Heading › Subheading". The sidecar's first heading is usually the page's own title,
@@ -233,11 +254,45 @@ function memo.headingLabel(hit)
   local base = string.match(hit.page, "([^/]+)$") or hit.page
   local parts = { hit.page }
   for i, h in ipairs(path) do
-    if not (i == 1 and (h == hit.page or h == base)) then
+    -- a document's only heading is "<file> p.3": the label below says that already
+    local unitHeading = type(hit.unit) == "string" and h == base .. " " .. hit.unit
+    if not (i == 1 and (h == hit.page or h == base)) and not unitHeading then
       table.insert(parts, h)
     end
   end
+  local label = memo.docLabel(hit)
+  if label then
+    return table.concat(parts, " › ") .. " [" .. label .. "]"
+  end
   return table.concat(parts, " › ")
+end
+
+-- Search scope words at the start of the phrase -> query, scope {prefix =, kind =}.
+-- `kind:pdf` (or docx, md, ... or `kind:doc` for every document), `in:Projects/` or `folder:Projects/`.
+-- A word with no value yet (`kind:`) stays in the query so typing it does not search.
+function memo.searchParseScope(input)
+  local scope = {}
+  local rest = string.gsub(tostring(input or ""), "^%s+", "")
+  while true do
+    local _, e, k, v = string.find(rest, '^(%a+):"([^"]*)"%s*')
+    if not e then
+      _, e, k, v = string.find(rest, "^(%a+):(%S+)%s*")
+    end
+    if not e then
+      break
+    end
+    k = string.lower(k)
+    if k == "kind" then
+      scope.kind = string.lower(v)
+    elseif k == "in" or k == "folder" then
+      scope.prefix = string.find(v, "/$") and v or (v .. "/")
+    else
+      break
+    end
+    rest = string.sub(rest, e + 1)
+  end
+  rest = string.gsub(rest, "%s+$", "")
+  return rest, scope
 end
 
 -- /api/search body -> view rows. `details` adds the score badge.
@@ -250,6 +305,7 @@ function memo.searchRows(body, details)
       page = hit.page,
       ref = memo.navRef(hit),
       title = memo.headingLabel(hit),
+      docLabel = memo.docLabel(hit),
       snippet = memo.cleanSnippet(hit.snippet),
       badge = details and memo.scoreBadge(hit) or nil,
       badgeTitle = details and memo.scoreTitle(hit) or nil,
@@ -298,21 +354,21 @@ local lastSearch = nil
 local CACHE_SECONDS = 15
 
 local function searchRowsFor(phrase, details)
-  local q = string.gsub(phrase or "", "^%s+", "")
-  q = string.gsub(q, "%s+$", "")
+  local q, scope = memo.searchParseScope(phrase)
   local cfg, err = memo.sidecarConfig()
   if not cfg then
     return { memo.messageRow(err, true) }
   end
   if q == "" then
-    return { memo.messageRow("Type to search " .. cfg.space .. " by section (keywords or meaning)") }
+    return { memo.messageRow("Type to search " .. cfg.space .. " by section (keywords or meaning)\n" ..
+      "Narrow with kind:pdf, kind:doc (all documents) or in:Folder/") }
   end
-  local key = cfg.base .. "|" .. cfg.space .. "|" .. q
+  local key = cfg.base .. "|" .. cfg.space .. "|" .. q .. "|" .. tostring(scope.kind) .. "|" .. tostring(scope.prefix)
   local body
   if lastSearch and lastSearch.key == key and os.time() - lastSearch.at < CACHE_SECONDS then
     body = lastSearch.body
   else
-    local res, failure = memo.request("search", { { "q", q }, { "limit", 20 } })
+    local res, failure = memo.request("search", { { "q", q }, { "limit", 20 }, { "kind", scope.kind }, { "prefix", scope.prefix } })
     if not res then
       return { memo.messageRow(failure, true) }
     end

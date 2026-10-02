@@ -57,20 +57,38 @@ function ageDays(iso) {
  * @param {import("./index.mjs").SpaceIndex} idx
  * @returns {Promise<Array<object>>} 節単位のヒット（ページごとに最大 2）
  */
+/** 文書の節の単位ラベル（heading_path 末尾の "p.3" / "slide.2"）。無ければ null。 */
+export function unitOf(kind, headingPath) {
+  if (!kind || kind === "md") return null;
+  const m = / (p\.(\d+)|slide\.(\d+))(?: \([2-9]\d*\))?$/.exec(headingPath ?? "");
+  return m ? { unit: m[1], unit_no: Number(m[2] ?? m[3]) } : null;
+}
+
+// 拡張子で指定しても種別に解決する（kind:csv -> text など）
+const KIND_ALIASES = {
+  txt: "text", csv: "text", odt: "odf", ods: "odf", odp: "odf",
+  htm: "html", doc: "legacy", xls: "legacy", ppt: "legacy",
+};
+
 export async function searchSpace(idx, opts) {
-  const { query = "", tag, area, status, since, mode = "hybrid", limit = 20 } = opts;
+  const { query = "", tag, area, status, since, prefix, kind, mode = "hybrid", limit = 20 } = opts;
   const space = idx.space;
 
   // 1. メタデータで候補を絞る
   const where = [];
   const bind = [];
-  if (tag) { where.push("(',' || p.tags || ',') like ?"); bind.push(`%,${tag},%`); }
+  if (tag) { where.push("instr(lower(',' || p.tags || ','), lower(?)) > 0"); bind.push(`,${tag},`); }
   if (area) { where.push("p.area = ?"); bind.push(area); }
   if (status) { where.push("p.status = ?"); bind.push(status); }
   if (since) { where.push("p.modified >= ?"); bind.push(since); }
+  // ページ名の前方一致（フォルダで絞る）。LIKE のワイルドカードを避けるため substr で比べる
+  if (prefix) { where.push("substr(p.page, 1, ?) = ?"); bind.push([...prefix].length, prefix); }
+  // 種別で絞る。"doc" は .md 以外（PDF / Office）すべて
+  if (kind === "doc") where.push("p.kind <> 'md'");
+  else if (kind) { where.push("p.kind = ?"); bind.push(KIND_ALIASES[kind.toLowerCase()] ?? kind.toLowerCase()); }
   const candidates = idx.rows(
     `select s.id, s.page, s.heading_path, s.level, s.line_start, s.line_end, s.text, s.hash,
-            p.tags, p.status, p.modified, p.is_journal, p.summary
+            p.kind, p.tags, p.status, p.modified, p.is_journal, p.summary
      from sections s join pages p on p.page = s.page
      ${where.length ? "where " + where.join(" and ") : ""}`,
     bind
@@ -172,6 +190,8 @@ export async function searchSpace(idx, opts) {
       space,
       page: c.page,
       heading_path: c.heading_path,
+      kind: c.kind ?? "md",
+      ...(unitOf(c.kind, c.heading_path) ?? {}),
       line_start: c.line_start,
       line_end: c.line_end,
       // 見出し行そのもの（1 始まり）。見出しの前の導入部と、長い節の 2 つ目以降の断片には無い

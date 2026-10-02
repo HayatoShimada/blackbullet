@@ -189,6 +189,63 @@ describe("Memo Search library", () => {
     `);
   });
 
+  test("document hits carry a kind badge and open the PDF page only when pdfPages is on", async () => {
+    await runLua(`
+      local pdf = { page = "Images/report.pdf", kind = "pdf", unit = "p.3", unit_no = 3, heading_path = { "report.pdf p.3" }, line_start = 0, heading_line = nil }
+      assert(memo.docLabel(pdf) == "PDF p.3")
+      assert(memo.docLabel({ page = "A", kind = "md" }) == nil and memo.docLabel({ page = "A" }) == nil)
+      assert(memo.docLabel({ kind = "docx" }) == "DOCX")
+      assert(memo.headingLabel(pdf) == "Images/report.pdf [PDF p.3]", memo.headingLabel(pdf))
+      -- slide with a note-like heading kept
+      local sl = { page = "D/x.pptx", kind = "pptx", unit = "slide.2", unit_no = 2, heading_path = { "x.pptx slide.2" } }
+      assert(memo.headingLabel(sl) == "D/x.pptx [PPTX slide.2]", memo.headingLabel(sl))
+      assert(memo.headingLabel({ page = "A", heading_path = { "A", "H" } }) == "A › H")
+      -- default: the bare file (a viewer may not understand #page=N)
+      setConfig({ url = "127.0.0.1:3010", token = "t", space = "notes" })
+      assert(memo.navRef(pdf) == "Images/report.pdf", memo.navRef(pdf))
+      setConfig({ url = "127.0.0.1:3010", token = "t", space = "notes", pdfPages = true })
+      assert(memo.navRef(pdf) == "Images/report.pdf#page=3", memo.navRef(pdf))
+      -- slides and notes never get a page fragment
+      assert(memo.navRef(sl) == "D/x.pptx")
+      assert(memo.navRef({ page = "A", line_start = 2, heading_line = 1 }) == "A@L1")
+      local row = memo.searchRows({ results = { pdf } }, false)[1]
+      assert(row.docLabel == "PDF p.3" and row.ref == "Images/report.pdf#page=3", row.ref)
+    `);
+  });
+
+  test("searchParseScope reads kind:, in: and folder: words and leaves the rest", async () => {
+    await runLua(`
+      local q, sc = memo.searchParseScope('kind:PDF in:Receipts invoice 2026')
+      assert(q == "invoice 2026" and sc.kind == "pdf" and sc.prefix == "Receipts/", q)
+      q, sc = memo.searchParseScope('folder:"My Notes/" kind:doc')
+      assert(q == "" and sc.kind == "doc" and sc.prefix == "My Notes/")
+      q, sc = memo.searchParseScope("plain words kind:pdf")
+      assert(q == "plain words kind:pdf" and next(sc) == nil, q)
+      q, sc = memo.searchParseScope("note: x")
+      assert(q == "note: x" and next(sc) == nil)
+      q, sc = memo.searchParseScope(nil)
+      assert(q == "" and next(sc) == nil)
+    `);
+  });
+
+  test("the search view sends kind and prefix and keys its cache on them", async () => {
+    await runLua(`
+      setConfig({ url = "127.0.0.1:3010", token = "t", space = "notes" })
+      nextResponse = { ok = true, status = 200, headers = {}, body = { results = {
+        { page = "R/a.pdf", kind = "pdf", unit = "p.1", unit_no = 1, heading_path = { "a.pdf p.1" }, line_start = 0, snippet = "x" } } } }
+      local src = views["memo.search"].source
+      local rows = src({ phrase = "kind:pdf in:R invoice", segment = "Compact" })
+      local url = fetches[#fetches].url
+      assert(string.find(url, "q=invoice", 1, true) and string.find(url, "kind=pdf", 1, true) and string.find(url, "prefix=R%2F", 1, true), url)
+      assert(string.find(rows[1].title, "[PDF p.1]", 1, true), rows[1].title)
+      local n = #fetches
+      src({ phrase = "invoice", segment = "Compact" })
+      assert(#fetches == n + 1, "a different scope must not reuse the cache")
+      rows = src({ phrase = "kind:pdf", segment = "Compact" })
+      assert(rows[1].kind == "message" and not rows[1].isError)
+    `);
+  });
+
   test("relatedRows labels how a page is related", async () => {
     await runLua(`
       local rows = memo.relatedRows({ results = {

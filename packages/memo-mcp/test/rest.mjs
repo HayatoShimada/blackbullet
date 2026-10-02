@@ -70,7 +70,7 @@ let off, on, fail;
 
 before(async () => {
   await fs.mkdir(path.join(tmp, "idx-off"));
-  off = await start(OFF_PORT, { MEMO_EMBED: "off", MEMO_INDEX_DIR: path.join(tmp, "idx-off"), MEMO_MCP_EXTRA_HOSTS: "host.docker.internal:3010" });
+  off = await start(OFF_PORT, { MEMO_EMBED: "off", MEMO_INDEX_DIR: path.join(tmp, "idx-off"), MEMO_MCP_EXTRA_HOSTS: "host.docker.internal:3010,front.example.net,front.example.net:443" });
   await fs.mkdir(path.join(tmp, "idx-fail"));
   fail = await start(FAIL_PORT, {
     MEMO_EMBED: "on",
@@ -149,6 +149,75 @@ test("ask: 質問に関係する節が本文と ref つきで返る", async () =
   assert.equal(viaQuery.status, 200);
   assert.equal(viaQuery.body.warning, undefined);
   assert.ok(viaQuery.body.sections.length >= 1);
+});
+
+test("ask: 節に score が付き、expand で最上位の節の前後が context として足される", async () => {
+  const a = api(OFF_PORT);
+  const base = await a("ask", { body: { space: "notes", q: "demo launch campaign", k: 1 } });
+  assert.equal(base.status, 200);
+  for (const s of base.body.sections) {
+    assert.equal(typeof s.score, "number");
+    assert.equal(s.context, undefined);
+  }
+  const scores = base.body.sections.map((s) => s.score);
+  assert.deepEqual(scores, [...scores].sort((x, y) => y - x), "score は降順");
+
+  const ex = await a("ask", { body: { space: "notes", q: "demo launch campaign", k: 1, expand: true } });
+  assert.equal(ex.status, 200);
+  const head = ex.body.sections.slice(0, base.body.sections.length);
+  assert.deepEqual(head.map((s) => s.ref), base.body.sections.map((s) => s.ref), "ヒットの並びは変わらない");
+  const extra = ex.body.sections.slice(base.body.sections.length);
+  assert.ok(extra.length >= 1 && extra.length <= 2, `neighbours: ${extra.length}`);
+  const top = base.body.sections[0];
+  const have = new Set(base.body.sections.map((s) => `${s.page}:${s.line_start}`));
+  for (const s of extra) {
+    assert.equal(s.context, true);
+    assert.equal(s.page, top.page);
+    assert.equal(typeof s.text, "string");
+    assert.ok(!have.has(`${s.page}:${s.line_start}`), "ヒット済みの節は重複しない");
+    assert.equal(s.score, undefined);
+  }
+  assert.equal((await a("ask", { body: { space: "notes", q: "x", expand: "yes" } })).status, 400);
+});
+
+test("ask: tag / prefix / since / area で絞り込める", async () => {
+  const a = api(OFF_PORT);
+  const q = { space: "notes", q: "demo launch", mode: "lexical" };
+  const all = await a("ask", { body: q });
+  assert.ok(new Set(all.body.sections.map((s) => s.page)).size >= 2, "絞らなければ複数ページ");
+  assert.equal(all.body.scope, undefined);
+  const pre = await a("ask", { body: { ...q, prefix: "Journal/" } });
+  assert.equal(pre.status, 200);
+  assert.deepEqual(pre.body.scope, { prefix: "Journal/" });
+  assert.ok(pre.body.sections.length >= 1 && pre.body.sections.every((s) => s.page.startsWith("Journal/")));
+  const tag = await a("ask", { body: { ...q, tag: "journal" } });
+  assert.ok(tag.body.sections.length >= 1 && tag.body.sections.every((s) => s.page.startsWith("Journal/")));
+  // % は前方一致の文字として扱う（ワイルドカードにならない）
+  assert.equal((await a("ask", { body: { ...q, prefix: "%" } })).body.sections.length, 0);
+  const future = await a("ask", { body: { ...q, since: "2999-01-01" } });
+  assert.equal(future.status, 200);
+  assert.equal(future.body.sections.length, 0);
+  assert.equal((await a("ask", { body: { ...q, area: "no-such-area" } })).body.sections.length, 0);
+  assert.equal((await a("ask", { body: { ...q, since: "yesterday-ish" } })).status, 400);
+  // Date.parse が受けても ISO でない値は 400
+  assert.equal((await a("ask", { body: { ...q, since: "1" } })).status, 400);
+  assert.equal((await a("ask", { body: { ...q, since: "Sep 1 2026" } })).status, 400);
+  // 正の例: 過去の since・status は絞り込んだ結果を返し、scope を返す
+  const past = await a("ask", { body: { ...q, since: "2000-01-01" } });
+  assert.deepEqual(past.body.scope, { since: "2000-01-01" });
+  assert.equal(past.body.sections.length, all.body.sections.length);
+  const active = await a("ask", { body: { ...q, status: "active" } });
+  assert.deepEqual(active.body.scope, { status: "active" });
+  assert.ok(active.body.sections.length >= 1 && active.body.sections.every((s) => s.page.startsWith("Projects/")));
+  assert.equal((await a("ask", { body: { ...q, status: "no-such" } })).body.sections.length, 0);
+  // tag の _ や % はワイルドカードにならない
+  assert.equal((await a("ask", { body: { ...q, tag: "proje_t" } })).body.sections.length, 0);
+  assert.equal((await a("ask", { body: { ...q, tag: "%" } })).body.sections.length, 0);
+  assert.ok((await a("ask", { body: { ...q, tag: "project" } })).body.sections.length >= 1);
+  // tag は大文字小文字を区別しない
+  assert.ok((await a("ask", { body: { ...q, tag: "PROJECT" } })).body.sections.length >= 1);
+  assert.equal((await a("ask", { body: { ...q, tag: 5 } })).status, 400);
+  assert.equal((await a("ask", { body: { ...q, prefix: "p".repeat(201) } })).status, 400);
 });
 
 test("ask: q 必須、k・mode の不正と壊れた JSON は 400", async () => {
@@ -320,7 +389,96 @@ test("CONFIG.md（トークンを置く場所）は検索に出ない", async ()
   assert.ok(!body.results.some((r) => r.page === "CONFIG" || r.snippet.includes("SECRET-TOKEN")));
 });
 
+test("Trash/（DB ビューで削除したページ）は検索に出ない", async () => {
+  const { status, body } = await api(OFF_PORT)("search?space=notes&q=" + encodeURIComponent("TRASHED-MARKER discarded") + "&limit=10");
+  assert.equal(status, 200);
+  assert.ok(!body.results.some((r) => r.page.startsWith("Trash/")));
+});
+
 test("MEMO_MCP_EXTRA_HOSTS の Host だけ追加で許可される", async () => {
   assert.equal(await withHost(OFF_PORT, "host.docker.internal:3010"), 200);
+  assert.equal(await withHost(OFF_PORT, "front.example.net"), 200); // Caddy forwards the client Host without :443
   assert.equal(await withHost(OFF_PORT, "evil.example:3010"), 403);
 });
+
+// ---- 文書のヒット（kind / unit / page）と kind・フォルダでの絞り込み。pdftotext なしで、索引へ直接入れる ----
+{
+  process.env.MEMO_EMBED = "off";
+  const { SpaceIndex } = await import("../src/index.mjs");
+  const { parseDocument, parsePage } = await import("../src/index.mjs");
+  const { handleRest } = await import("../src/rest.mjs");
+  const { unitOf, searchSpace } = await import("../src/search.mjs");
+
+  const idx = await new SpaceIndex({ notes: { root: tmp } }, "notes").open();
+  const mtime = Date.parse("2026-09-01T00:00:00Z");
+  const doc = (page, kind, units) => idx.upsert(parseDocument({ space: "notes", page, kind, units, mtime }), `/x/${page}`);
+  doc("Receipts/report.pdf", "pdf", [{ label: "p.1", text: "intro" }, { label: "p.3", text: "quarterly zebrafish revenue" }]);
+  doc("Decks/launch.pptx", "pptx", [{ label: "slide.2", text: "zebrafish launch plan" }]);
+  doc("Decks/memo.docx", "docx", [{ label: null, text: "zebrafish memo body" }]);
+  idx.upsert(parsePage({ space: "notes", page: "Projects/Zebra", raw: "# Zebra\n\nzebrafish note", mtime }), "/x/Projects/Zebra.md");
+
+  const call = async (method, query, body) => {
+    const out = {};
+    const res = { setHeader() {}, writeHead(s) { out.status = s; }, end(t) { out.body = JSON.parse(t); } };
+    const req = Object.assign((async function* () { if (body) yield Buffer.from(JSON.stringify(body)); })(), { method, headers: {} });
+    const route = method === "GET" ? "search" : "ask";
+    await handleRest(req, res, new URL(`http://x/api/${route}?space=notes&${query}`), { spaces: { notes: {} }, indexes: { get: async () => idx } });
+    return out;
+  };
+  const search = (extra) => call("GET", `q=zebrafish&mode=lexical&${extra}`);
+  const pages = (r) => r.body.results.map((x) => x.page).sort();
+
+  test("unitOf は文書の見出しパスから p.N / slide.N を取り、続き断片の (2) を無視する", () => {
+    assert.deepEqual(unitOf("pdf", "report.pdf p.37"), { unit: "p.37", unit_no: 37 });
+    assert.deepEqual(unitOf("pptx", "a.pptx slide.2 (2)"), { unit: "slide.2", unit_no: 2 });
+    assert.equal(unitOf("docx", "memo.docx"), null);
+    assert.equal(unitOf("md", "Page p.3"), null);
+  });
+
+  test("search: 文書のヒットは kind と unit / unit_no を持ち、ノートは持たない", async () => {
+    const r = await search("");
+    const by = (p) => r.body.results.find((x) => x.page === p);
+    assert.deepEqual([by("Receipts/report.pdf").kind, by("Receipts/report.pdf").unit, by("Receipts/report.pdf").unit_no], ["pdf", "p.3", 3]);
+    assert.deepEqual([by("Decks/launch.pptx").kind, by("Decks/launch.pptx").unit, by("Decks/launch.pptx").unit_no], ["pptx", "slide.2", 2]);
+    assert.deepEqual([by("Decks/memo.docx").kind, by("Decks/memo.docx").unit, by("Decks/memo.docx").unit_no], ["docx", null, null]);
+    assert.equal(by("Projects/Zebra").kind, undefined);
+  });
+
+  test("search: kind=doc は文書だけ、kind=pdf は PDF だけ、kind=md はノートだけ", async () => {
+    assert.deepEqual(pages(await search("kind=doc")), ["Decks/launch.pptx", "Decks/memo.docx", "Receipts/report.pdf"]);
+    assert.deepEqual(pages(await search("kind=PDF")), ["Receipts/report.pdf"]);
+    assert.deepEqual(pages(await search("kind=md")), ["Projects/Zebra"]);
+    assert.deepEqual((await search("kind=pdf")).body.scope, { kind: "pdf" });
+  });
+
+  test("search: prefix でフォルダに絞れ、kind と組み合わせられる", async () => {
+    assert.deepEqual(pages(await search("prefix=Decks/")), ["Decks/launch.pptx", "Decks/memo.docx"]);
+    assert.deepEqual(pages(await search("prefix=Decks/&kind=docx")), ["Decks/memo.docx"]);
+    assert.deepEqual((await search("prefix=Decks/&kind=docx")).body.scope, { prefix: "Decks/", kind: "docx" });
+    assert.equal((await search("prefix=Nope/")).body.results.length, 0);
+  });
+
+  test("search: 不正な kind は 400", async () => {
+    assert.equal((await search("kind=" + encodeURIComponent("p;drop"))).status, 400);
+  });
+
+  test("ask: 文書の節は kind / unit を持ち、kind で絞れ、前後の文脈にも付く", async () => {
+    const r = await call("POST", "", { q: "zebrafish quarterly", mode: "lexical", kind: "pdf", expand: true });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.scope, { kind: "pdf" });
+    assert.ok(r.body.sections.every((s) => s.kind === "pdf"));
+    const hit = r.body.sections.find((s) => !s.context);
+    assert.equal(hit.unit, "p.3");
+    assert.equal(hit.unit_no, 3);
+    assert.equal(hit.ref, "Receipts/report.pdf");
+    const ctx = r.body.sections.find((s) => s.context);
+    assert.equal(ctx?.kind, "pdf");
+    assert.equal(ctx?.unit, "p.1");
+    assert.equal((await call("POST", "", { q: "zebrafish", kind: "a b" })).status, 400);
+  });
+
+  test("searchSpace: kind の絞り込みは直接呼んでも効く", async () => {
+    const hits = await searchSpace(idx, { query: "zebrafish", mode: "lexical", kind: "doc" });
+    assert.ok(hits.length === 3 && hits.every((h) => h.kind !== "md"));
+  });
+}
