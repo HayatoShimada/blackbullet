@@ -1,8 +1,17 @@
 import { describe, expect, test } from "vitest";
 import type { DbRow, Spec } from "../../src/model.ts";
 import type { WriteResult } from "../../src/functions.ts";
-import { initialState } from "./db_mediator.ts";
-import { createDbRunner, type DbRunnerDeps } from "./db_runner.ts";
+import {
+  initialState,
+  type PendingUndo,
+  UNDO_MS,
+  visibleCount,
+} from "./db_mediator.ts";
+import {
+  createDbRunner,
+  type DbRunnerDeps,
+  restoreEvent,
+} from "./db_runner.ts";
 
 const row = (
   id: string,
@@ -87,6 +96,12 @@ function setup(
     async navigate(target) {
       log.push(`navigate ${target}`);
     },
+    async editSource() {
+      return true;
+    },
+    async confirm() {
+      return true;
+    },
     onState: () => {},
     ...over,
   };
@@ -118,7 +133,7 @@ describe("db runner", () => {
     const { runner, log } = setup([row("A", { status: "active" })], () => ({
       ok: false,
       reason: "stale",
-      message: "ページが変わっています",
+      message: "The page changed. Reloaded.",
     }));
     runner.emit({
       type: "cell.commit",
@@ -127,7 +142,7 @@ describe("db runner", () => {
       value: "done",
     });
     await settle();
-    expect(runner.getState().notice?.text).toBe("ページが変わっています");
+    expect(runner.getState().notice?.text).toBe("The page changed. Reloaded.");
     expect(log).toEqual(["page A status=done (select) @m1", "query"]);
     expect(runner.getState().rows.map((r) => r.id)).toEqual(["Fresh", "A"]);
   });
@@ -227,7 +242,7 @@ describe("db runner", () => {
     });
     await settle();
     expect(log).toEqual([]);
-    expect(runner.getState().notice?.text).toContain("完了と期限");
+    expect(runner.getState().notice?.text).toContain("Done and Due");
   });
 
   test("a failed read is shown", async () => {
@@ -240,6 +255,53 @@ describe("db runner", () => {
     await settle();
     expect(runner.getState().notice?.text).toContain("index not ready");
     expect(runner.getState().reloading).toBe(false);
+  });
+
+  test("Edit source puts the cursor in the block that drew the view", async () => {
+    const asked: string[] = [];
+    const runner = createDbRunner(
+      initialState({
+        spec,
+        rows: [],
+        truncated: false,
+        today: "2026-10-02",
+        block: { page: "P", body: "source: tasks" },
+      }),
+      {
+        async editSource(page: string, body: string) {
+          asked.push(`${page}|${body}`);
+          return true;
+        },
+        onState: () => {},
+      } as unknown as DbRunnerDeps,
+    );
+    runner.emit({ type: "view.menu" });
+    runner.emit({ type: "source.edit" });
+    await settle();
+    expect(asked).toEqual(["P|source: tasks"]);
+    expect(runner.getState().mode.kind).toBe("idle");
+    expect(runner.getState().notice).toBeNull();
+  });
+
+  test("Edit source says so when the block is gone", async () => {
+    const runner = createDbRunner(
+      initialState({
+        spec,
+        rows: [],
+        truncated: false,
+        today: "2026-10-02",
+        block: { page: "P", body: "source: tasks" },
+      }),
+      {
+        async editSource() {
+          return false;
+        },
+        onState: () => {},
+      } as unknown as DbRunnerDeps,
+    );
+    runner.emit({ type: "source.edit" });
+    await settle();
+    expect(runner.getState().notice?.level).toBe("error");
   });
 
   test("opening a row navigates", async () => {
@@ -498,7 +560,7 @@ describe("+ New", () => {
           return {
             ok: false,
             reason: "exists",
-            message: "Projects/Launch はもうあります",
+            message: "A page named Projects/Launch already exists.",
           };
         },
       },
@@ -508,10 +570,13 @@ describe("+ New", () => {
     runner.emit({ type: "row.create", title: "Launch" });
     await settle();
     expect(log).toEqual([]);
-    expect(runner.getState().mode).toEqual({ kind: "idle" });
-    expect(runner.getState().notice?.text).toBe(
-      "Projects/Launch はもうあります",
-    );
+    // The input comes back with what was typed, and the reason beneath it.
+    expect(runner.getState().mode).toEqual({
+      kind: "creating",
+      title: "Launch",
+      error: "A page named Projects/Launch already exists.",
+    });
+    expect(runner.getState().notice).toBeNull();
   });
 
   test("a throwing create is a failure, not a crash", async () => {
@@ -528,8 +593,11 @@ describe("+ New", () => {
     runner.emit({ type: "create.open" });
     runner.emit({ type: "row.create", title: "Launch" });
     await settle();
-    expect(runner.getState().notice?.text).toBe("disk full");
-    expect(runner.getState().mode).toEqual({ kind: "idle" });
+    expect(runner.getState().mode).toMatchObject({
+      kind: "creating",
+      title: "Launch",
+      error: "disk full",
+    });
   });
 });
 
@@ -557,14 +625,45 @@ describe("db runner row actions", () => {
     );
     const log2: string[] = [];
     runner.emit({ type: "row.menu", rowId: "A" });
+    // The host's dialog asks; its "yes" deletes.
     runner.emit({ type: "row.delete.ask", rowId: "A" });
-    runner.emit({ type: "row.delete.confirm" });
+    expect(runner.getState().mode).toEqual({ kind: "confirming", rowId: "A" });
     await settle();
     expect(log2).toEqual(["delete A @m1"]);
     expect(log).toEqual(["query"]);
     expect(asked).toEqual(["A"]);
     expect(runner.getState().mode).toEqual({ kind: "idle" });
-    expect(runner.getState().notice?.text).toBe("ゴミ箱へ移しました");
+    expect(runner.getState().notice?.text).toBe(
+      "Moved to trash. You can restore it from Trash.",
+    );
+  });
+  test("the dialog names the row and the consequence; No leaves it alone", async () => {
+    const asked: [string, unknown][] = [];
+    const { runner, log } = setup(
+      [row("Spring Launch")],
+      undefined,
+      {
+        async confirm(message, options) {
+          asked.push([message, options]);
+          return false;
+        },
+        async deleteRow() {
+          throw new Error("must not delete");
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "row.menu", rowId: "Spring Launch" });
+    runner.emit({ type: "row.delete.ask", rowId: "Spring Launch" });
+    await settle();
+    expect(asked).toEqual([
+      [
+        "Move Spring Launch to trash? You can restore it from Trash.",
+        { destructive: true, okLabel: "Move to trash" },
+      ],
+    ]);
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
+    expect(log).toEqual([]);
   });
   test("rename waits for the old name to go and the new one to show", async () => {
     const asked: string[] = [];
@@ -602,6 +701,9 @@ describe("db runner row actions", () => {
         async duplicateRow() {
           return { ok: false, reason: "failed", message: "disk full" };
         },
+        // The Undo offer stays up for the length of the test.
+        sleep: (n: number) =>
+          n === 8000 ? new Promise<void>(() => {}) : Promise.resolve(),
       },
       withDb,
     );
@@ -609,6 +711,15 @@ describe("db runner row actions", () => {
     runner.emit({ type: "row.archive", rowId: "A" });
     await settle();
     expect(calls).toEqual(["archive A true @m1"]);
+    // Archiving offers Undo in the view; Undo restores it with the fresh stamp.
+    expect(runner.getState().undo?.label).toBe("Archived");
+    runner.emit({ type: "undo.run" });
+    await settle();
+    expect(calls).toEqual(["archive A true @m1", "archive A false @m2"]);
+    expect(runner.getState().notice).toEqual({
+      level: "info",
+      text: "Restored",
+    });
     runner.emit({ type: "row.menu", rowId: "A" });
     runner.emit({ type: "row.duplicate", rowId: "A" });
     await settle();
@@ -725,5 +836,292 @@ describe("db runner write enforcement", () => {
     });
     await settle();
     expect(log[0]).toContain("db=projects");
+  });
+});
+
+describe("tick and Undo", () => {
+  const tasksSpec: Spec = {
+    ...spec,
+    source: { kind: "tasks" },
+    where: { done: false },
+  };
+  const task = (n: number) =>
+    row(
+      `T@${n}`,
+      { done: false },
+      { kind: "task", page: "Alpha", range: [n * 10, n * 10 + 8], state: " " },
+    );
+  test("a tick keeps the row, Undo writes the line back, eight seconds end the offer", async () => {
+    const ms: number[] = [];
+    let release: () => void = () => {};
+    const { runner, log } = setup(
+      [task(1), task(2)],
+      undefined,
+      {
+        async query() {
+          log.push("query");
+          return {
+            spec: tasksSpec,
+            rows: [task(1)],
+            truncated: false,
+            today: "2026-10-02",
+          };
+        },
+        // Index waits return at once; the Undo timer waits to be released.
+        sleep: (n: number) => {
+          ms.push(n);
+          return n === 8000
+            ? new Promise<void>((r) => {
+                release = r;
+              })
+            : Promise.resolve();
+        },
+      },
+      tasksSpec,
+    );
+    runner.emit({
+      type: "cell.commit",
+      rowId: "T@2",
+      column: "done",
+      value: true,
+    });
+    await settle();
+    expect(log).toEqual([
+      'task Alpha@20 [ ] {"type":"done","done":true} @m1',
+      "query",
+    ]);
+    // The read no longer lists it; the view still draws it, struck through.
+    let state = runner.getState();
+    expect(state.rows.map((r) => r.id)).toEqual(["T@1", "T@2"]);
+    expect(state.rows[1].values.done).toBe(true);
+    expect(state.undo?.label).toBe("Done");
+    expect(visibleCount(state)).toBe(1);
+    expect(ms).toContain(8000);
+    runner.emit({ type: "undo.run" });
+    await settle();
+    expect(log[2]).toBe('task Alpha@20 [x] {"type":"done","done":false} @m2');
+    state = runner.getState();
+    expect(state.undo).toBeNull();
+    // The timer of the first tick runs out after Undo: nothing happens.
+    release();
+    await settle();
+    expect(runner.getState().undo).toBeNull();
+  });
+  test("when nothing is done the row goes with the offer", async () => {
+    let release: () => void = () => {};
+    const { runner } = setup(
+      [task(1), task(2)],
+      undefined,
+      {
+        async query() {
+          return {
+            spec: tasksSpec,
+            rows: [task(1)],
+            truncated: false,
+            today: "2026-10-02",
+          };
+        },
+        sleep: (n: number) =>
+          n === 8000
+            ? new Promise<void>((r) => {
+                release = r;
+              })
+            : Promise.resolve(),
+      },
+      tasksSpec,
+    );
+    runner.emit({
+      type: "cell.commit",
+      rowId: "T@2",
+      column: "done",
+      value: true,
+    });
+    await settle();
+    expect(runner.getState().rows).toHaveLength(2);
+    release();
+    await settle();
+    expect(runner.getState().undo).toBeNull();
+    expect(runner.getState().rows.map((r) => r.id)).toEqual(["T@1"]);
+  });
+});
+
+describe("an Undo outlives a rebuilt frame", () => {
+  const tasksSpec: Spec = {
+    ...spec,
+    source: { kind: "tasks" },
+    where: { done: false },
+  };
+  const task = (n: number) =>
+    row(
+      `T@${n}`,
+      { done: false },
+      { kind: "task", page: "Alpha", range: [n * 10, n * 10 + 8], state: " " },
+    );
+  const tasksQuery = async () => ({
+    spec: tasksSpec,
+    rows: [task(1)],
+    truncated: false,
+    today: "2026-10-02",
+  });
+
+  test("a tick is remembered with its time, and forgotten when Undo runs", async () => {
+    const kept: (PendingUndo | null)[] = [];
+    const { runner } = setup(
+      [task(1), task(2)],
+      undefined,
+      {
+        query: tasksQuery,
+        // The Undo timer never runs out in this test.
+        sleep: (n: number) =>
+          n === UNDO_MS ? new Promise<void>(() => {}) : Promise.resolve(),
+        remember: (p) => kept.push(p),
+        now: () => 1000,
+      },
+      tasksSpec,
+    );
+    runner.emit({
+      type: "cell.commit",
+      rowId: "T@2",
+      column: "done",
+      value: true,
+    });
+    await settle();
+    const last = kept[kept.length - 1];
+    expect(last).toMatchObject({
+      undo: { label: "Done" },
+      ghost: true,
+      until: 1000 + UNDO_MS,
+    });
+    runner.emit({ type: "undo.run" });
+    await settle();
+    expect(kept[kept.length - 1]).toBeNull();
+  });
+
+  test("the frame that comes back shows the tick again for the time left", async () => {
+    const kept: (PendingUndo | null)[] = [];
+    const first = setup(
+      [task(1), task(2)],
+      undefined,
+      {
+        query: tasksQuery,
+        sleep: (n: number) =>
+          n === UNDO_MS ? new Promise<void>(() => {}) : Promise.resolve(),
+        remember: (p) => kept.push(p),
+        now: () => 1000,
+      },
+      tasksSpec,
+    );
+    first.runner.emit({
+      type: "cell.commit",
+      rowId: "T@2",
+      column: "done",
+      value: true,
+    });
+    await settle();
+    const saved = JSON.parse(JSON.stringify(kept[kept.length - 1]));
+    // 3 seconds later the editor rebuilds the page: a fresh frame, fresh rows.
+    const again = restoreEvent(saved, 4000);
+    expect(again).toMatchObject({ type: "undo.restore", ms: UNDO_MS - 3000 });
+    const kept2: (PendingUndo | null)[] = [];
+    const second = setup(
+      [task(1)],
+      undefined,
+      {
+        query: tasksQuery,
+        sleep: () => new Promise<void>(() => {}),
+        remember: (p) => kept2.push(p),
+        now: () => 4000,
+      },
+      tasksSpec,
+    );
+    second.runner.emit(again!);
+    const state = second.runner.getState();
+    expect(state.rows.map((r) => r.id)).toEqual(["T@1", "T@2"]);
+    expect(state.undo?.label).toBe("Done");
+    expect(visibleCount(state)).toBe(1);
+    // It runs out when the first one would have, not eight seconds later.
+    expect(kept2[kept2.length - 1]?.until).toBe(1000 + UNDO_MS);
+  });
+
+  test("the Undo is remembered when the tick is issued, before its write lands", async () => {
+    const kept: (PendingUndo | null)[] = [];
+    let land: (r: WriteResult) => void = () => {};
+    const { runner } = setup(
+      [task(1), task(2)],
+      () =>
+        new Promise<WriteResult>((r) => {
+          land = r;
+        }),
+      {
+        query: tasksQuery,
+        sleep: () => new Promise<void>(() => {}),
+        remember: (p) => kept.push(p),
+        now: () => 1000,
+      },
+      tasksSpec,
+    );
+    runner.emit({
+      type: "cell.commit",
+      rowId: "T@2",
+      column: "done",
+      value: true,
+    });
+    await settle();
+    // The write has not landed, yet a rebuilt frame could already show Undo.
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({
+      undo: { label: "Done", action: { kind: "untick", index: 1 } },
+      ghost: true,
+      until: 1000 + UNDO_MS,
+    });
+    land({ ok: false, reason: "failed", message: "no" });
+    await settle();
+    // The tick failed: nothing is left on offer.
+    expect(kept[kept.length - 1]).toBeNull();
+  });
+
+  test("Undo in a rebuilt frame writes with the page's current modification time", async () => {
+    const { runner, log } = setup(
+      [task(1)],
+      undefined,
+      {
+        query: tasksQuery,
+        sleep: () => new Promise<void>(() => {}),
+        indexedModified: async () => "m9",
+        now: () => 4000,
+      },
+      tasksSpec,
+    );
+    const ticked = { ...task(2), values: { done: true }, state: "x" };
+    runner.emit({
+      type: "undo.restore",
+      undo: {
+        id: 1,
+        label: "Done",
+        action: { kind: "untick", row: ticked, index: 1 },
+      },
+      ghost: true,
+      ms: 5000,
+    });
+    runner.emit({ type: "undo.run" });
+    await settle();
+    expect(log.find((l) => l.startsWith("task"))).toContain("@m9");
+  });
+
+  test("an Undo that has run out is not brought back", () => {
+    const pending = {
+      undo: {
+        id: 1,
+        label: "Done",
+        action: { kind: "unarchive", row: row("A") },
+      },
+      ghost: false,
+      until: 5000,
+    } as PendingUndo;
+    expect(restoreEvent(pending, 5000)).toBeNull();
+    expect(restoreEvent(pending, 9000)).toBeNull();
+    expect(restoreEvent(null, 0)).toBeNull();
+    // A time further out than Undo ever lasts is not ours.
+    expect(restoreEvent(pending, -UNDO_MS - 1)).toBeNull();
   });
 });

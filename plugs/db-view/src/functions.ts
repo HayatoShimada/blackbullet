@@ -23,7 +23,7 @@ import {
   rowPatches,
   valuePatches,
 } from "./create.ts";
-import { isoDate, matchesWhere } from "./derive.ts";
+import { isoDate, matchesWhere, pageName } from "./derive.ts";
 import {
   isStale,
   parseCellInput,
@@ -32,11 +32,15 @@ import {
   setTaskDue,
 } from "./edit.ts";
 import type { CellKind, DatabaseSpec, DbRow, Spec } from "./model.ts";
-import { countTasks, pageRow, taskRow } from "./rows.ts";
+import { countTasks, isListedTaskPage, pageRow, taskRow } from "./rows.ts";
 import { replaceBlock, patchBlockBody, type SavedView } from "./viewblock.ts";
 import { databaseFrom, databaseName, parseSpec } from "./spec.ts";
 
 const PLUG_NAME = "db-view";
+
+/** The refusal for a name that is taken: names the page, not its folder path. */
+export const exists = (page: string) =>
+  `A page named ${pageName(page)} already exists.`;
 
 /** What the view is built from: the spec, and the rows it asked for. */
 export type ViewModel = {
@@ -55,8 +59,8 @@ async function tasksOf(): Promise<Record<string, any>[]> {
   const tasks = await index.queryLuaObjects<Record<string, any>>("task", {
     objectVariable: "_",
   });
-  // Tasks of a trashed page are out of every view too.
-  return tasks.filter((t) => !String(t.page ?? "").startsWith(TRASH));
+  // Tasks of a template, a library page or a trashed page are out of every view.
+  return tasks.filter((t) => isListedTaskPage(t.page));
 }
 
 /** Where deleted rows go: a page there is out of every view. */
@@ -154,7 +158,7 @@ export async function render(
     raw = await syscall("yaml.parse", body);
   } catch (e) {
     return errorWidget(
-      `YAML を読めません: ${e instanceof Error ? e.message : e}`,
+      `Cannot read the YAML: ${e instanceof Error ? e.message : e}`,
     );
   }
   const parsed = parseSpec(raw, await databaseOf(databaseName(raw)));
@@ -166,7 +170,7 @@ export async function render(
     });
   } catch (e) {
     return errorWidget(
-      `読み込みに失敗しました: ${e instanceof Error ? e.message : e}`,
+      `Could not load the view: ${e instanceof Error ? e.message : e}`,
     );
   }
 }
@@ -196,10 +200,18 @@ async function expandedTemplate(
   template: string,
   ctx: { title: string; page: string; database: string },
 ): Promise<{ body: string; inherited: Record<string, unknown> }> {
-  const expand = async (text: string): Promise<string> =>
-    text.includes("${")
-      ? String(await lua.evalExpression(expandExpression(text, ctx)))
-      : text;
+  const expand = async (text: string): Promise<string> => {
+    if (!text.includes("${")) return text;
+    try {
+      return String(await lua.evalExpression(expandExpression(text, ctx)));
+    } catch (e) {
+      // A mistake in the template, not in the row: say which template and
+      // what it may use, rather than writing a page that says "nil".
+      throw new Error(
+        `The template ${template} could not be filled in (${e instanceof Error ? e.message : e}). It can use \${title}, \${page} and \${database}.`,
+      );
+    }
+  };
   const extracted: {
     frontmatter?: Record<string, unknown>;
     text: string;
@@ -242,12 +254,12 @@ export async function createRow(
     return {
       ok: false,
       reason: "invalid",
-      message: "この表には database が設定されていません",
+      message: "This view has no database to add rows to.",
     };
   }
   const page = rowPageName(database.folder, title);
   if (!page) {
-    return { ok: false, reason: "invalid", message: "名前を入力してください" };
+    return { ok: false, reason: "invalid", message: "Enter a name." };
   }
   const given = valuePatches(database, values, spec.date);
   if (!given.ok) {
@@ -258,7 +270,7 @@ export async function createRow(
       return {
         ok: false,
         reason: "exists",
-        message: `${page} はもうあります`,
+        message: exists(page),
       };
     }
     const seed = database.template
@@ -334,7 +346,7 @@ export type WriteResult =
     };
 
 const STALE =
-  "ページが変わっています。表示を更新して、もう一度操作してください";
+  "The page changed since it was shown. Reload the view and try again.";
 
 /** The page's last change right now, as the index would record it. */
 async function currentModified(page: string): Promise<string> {
@@ -419,9 +431,7 @@ export async function updateTask(
         ok: false,
         reason: result.reason,
         message:
-          result.reason === "stale"
-            ? STALE
-            : "その行はタスクではなくなっています",
+          result.reason === "stale" ? STALE : "That line is no longer a task.",
       };
     }
     if (result.text === text) return { ok: true, modified };
@@ -460,7 +470,7 @@ async function isRowOf(spec: Spec, page: string): Promise<boolean> {
   return (await pagesTagged(tag)).some((p) => p.name === page);
 }
 
-const NOT_A_ROW = "この行は、この表の行ではなくなっています";
+const NOT_A_ROW = "That row is no longer in this view.";
 
 /** Runs `action` on a page row once it is checked to belong to the view and
  * not to have changed since it was read. */
@@ -509,7 +519,7 @@ export async function trashName(
 
 /** "Deletes" a row: moves its page to `Trash/<name>`, recording where it came
  * from (`trashedFrom`) and when (`trashedAt`) in its frontmatter. Nothing is
- * lost: **Database: Restore From Trash** brings it back. The panel has asked
+ * lost: **Trash: Restore** brings it back. The panel has asked
  * the reader to confirm. */
 export function deleteRow(
   spec: Spec,
@@ -553,7 +563,7 @@ export function deleteRow(
       return {
         ok: false,
         reason: "failed",
-        message: "ゴミ箱へ移せませんでした",
+        message: "Could not move it to trash.",
       };
     }
     return { ok: true, page, modified: null };
@@ -565,23 +575,39 @@ export function deleteRow(
 export async function restoreTrashed(page: string): Promise<RowResult> {
   try {
     if (!page.startsWith(TRASH)) {
-      return { ok: false, reason: "invalid", message: "ゴミ箱のページではありません" };
+      return {
+        ok: false,
+        reason: "invalid",
+        message: "That page is not in Trash.",
+      };
     }
     const text = await space.readPage(page);
     const extracted: { frontmatter?: Record<string, unknown> } =
       await system.invokeFunction("index.extractFrontmatter", text, {});
     const from = extracted.frontmatter?.trashedFrom;
     if (typeof from !== "string" || from === "") {
-      return { ok: false, reason: "invalid", message: "元の名前が分かりません" };
+      return {
+        ok: false,
+        reason: "invalid",
+        message: "The original name is not known.",
+      };
     }
     if (from.startsWith(TRASH)) {
-      return { ok: false, reason: "invalid", message: "元の名前が分かりません" };
+      return {
+        ok: false,
+        reason: "invalid",
+        message: "The original name is not known.",
+      };
     }
     if (await pageExists(from)) {
-      return { ok: false, reason: "exists", message: `${from} はもうあります` };
+      return {
+        ok: false,
+        reason: "exists",
+        message: exists(from),
+      };
     }
     if (!(await renamePage(page, from))) {
-      return { ok: false, reason: "failed", message: "戻せませんでした" };
+      return { ok: false, reason: "failed", message: "Could not restore it." };
     }
     // The page is back: failing to drop the marks must not report failure.
     try {
@@ -672,7 +698,7 @@ export function renameRow(
     return Promise.resolve({
       ok: false,
       reason: "invalid",
-      message: "名前を入力してください",
+      message: "Enter a name.",
     });
   }
   if (target === page) {
@@ -683,7 +709,7 @@ export function renameRow(
       return {
         ok: false,
         reason: "exists",
-        message: `${target} はもうあります`,
+        message: exists(target),
       };
     }
     const done = await renamePage(page, target);
@@ -691,7 +717,7 @@ export function renameRow(
       return {
         ok: false,
         reason: "failed",
-        message: "名前を変えられませんでした",
+        message: "Could not rename it.",
       };
     }
     return { ok: true, page: target, modified: await currentModified(target) };
@@ -714,7 +740,7 @@ export async function saveView(
   saved: SavedView,
 ): Promise<SaveViewResult> {
   if (!["table", "board", "calendar"].includes(saved.view)) {
-    return { ok: false, reason: "invalid", message: "view が正しくありません" };
+    return { ok: false, reason: "invalid", message: "That view is not valid." };
   }
   if (
     typeof saved.filter !== "string" ||
@@ -727,7 +753,7 @@ export async function saveView(
     return {
       ok: false,
       reason: "invalid",
-      message: "保存する内容が正しくありません",
+      message: "That view cannot be saved.",
     };
   }
   try {
@@ -740,8 +766,8 @@ export async function saveView(
         reason: result.reason === "missing" ? "stale" : "invalid",
         message:
           result.reason === "missing"
-            ? "ブロックが書き換わっています。ページを開き直してから保存してください"
-            : "同じ内容の db ブロックが複数あるため、保存先を決められません",
+            ? "The block changed since it was shown. Reopen the page and save again."
+            : "Several db blocks are identical, so the one to save to is unclear.",
       };
     }
     if (result.text !== text) await space.writePage(page, result.text);

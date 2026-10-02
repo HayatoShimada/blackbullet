@@ -3,8 +3,13 @@ import type { DatabaseSpec, DbRow, Spec } from "../../src/model.ts";
 import {
   type DbEvent,
   type DbState,
+  groupKey,
   initialState,
+  newRowGroup,
+  newRowOf,
+  UNDO_MS,
   viewDirty,
+  visibleCount,
   selectView,
   transition,
 } from "./db_mediator.ts";
@@ -114,6 +119,15 @@ describe("editing a cell", () => {
       run([{ type: "cell.edit", rowId: "nope", column: "status" }], s).state
         .mode,
     ).toEqual({ kind: "idle" });
+  });
+
+  test("one click or tap edits, with any pointer, but not on a link", () => {
+    const s = start({ view: "table" });
+    const tap = (onLink = false) =>
+      run([{ type: "cell.tap", rowId: "A", column: "status", onLink }], s).state
+        .mode.kind;
+    expect(tap()).toBe("editing");
+    expect(tap(true)).toBe("idle");
   });
 
   test("committing a change writes it, and nothing else can start meanwhile", () => {
@@ -316,12 +330,12 @@ describe("what comes back from a write", () => {
     const { state, effects } = transition(writing, {
       type: "write.failed",
       reason: "stale",
-      message: "ページが変わっています",
+      message: "The page changed. Reloaded.",
     });
     expect(state.mode).toEqual({ kind: "idle" });
     expect(state.notice).toEqual({
       level: "error",
-      text: "ページが変わっています",
+      text: "The page changed. Reloaded.",
     });
     expect(effects).toEqual([{ type: "reload" }]);
     // The row on screen is as it was.
@@ -628,14 +642,33 @@ describe("+ New", () => {
     ).state;
     const { state, effects } = transition(writing, {
       type: "create.failed",
-      message: "Projects/Launch はもうあります",
+      message: "A page named Projects/Launch already exists.",
     });
-    expect(state.mode).toEqual({ kind: "idle" });
-    expect(state.notice).toEqual({
-      level: "error",
-      text: "Projects/Launch はもうあります",
+    // The input comes back with what was typed and the reason under it.
+    expect(state.mode).toEqual({
+      kind: "creating",
+      title: "Launch",
+      error: "A page named Projects/Launch already exists.",
+    });
+    expect(state.notice).toBeNull();
+    expect(newRowOf(state)).toEqual({
+      title: "Launch",
+      error: "A page named Projects/Launch already exists.",
+      busy: false,
     });
     expect(effects).toEqual([]);
+  });
+
+  test("the input stays on screen, read-only, while the create runs", () => {
+    const writing = run(
+      [
+        { type: "create.open", at: "active" },
+        { type: "row.create", title: "X" },
+      ],
+      withDb(),
+    ).state;
+    expect(newRowOf(writing)).toEqual({ at: "active", title: "X", busy: true });
+    expect(newRowOf(start())).toBeNull();
   });
 
   test("a page a cell names opens", () => {
@@ -696,8 +729,9 @@ describe("row menu", () => {
       { type: "row.menu", rowId: "B" },
       { type: "row.delete.ask", rowId: "B" },
     ]);
+    // The menu closes; the host's dialog asks.
     expect(asked.state.mode).toEqual({ kind: "confirming", rowId: "B" });
-    expect(asked.effects).toEqual([]);
+    expect(asked.effects).toEqual([{ type: "confirmTrash", row: rows[1] }]);
     const cancelled = run([{ type: "row.menu.close" }], asked.state);
     expect(cancelled.state.mode).toEqual({ kind: "idle" });
     const done = run([{ type: "row.delete.confirm" }], asked.state);
@@ -748,10 +782,10 @@ describe("row menu", () => {
     ]).state;
     const ok = transition(writing, {
       type: "row.done",
-      message: "複製しました",
+      message: "Duplicated",
     });
     expect(ok.effects).toEqual([{ type: "reload" }]);
-    expect(ok.state.notice).toEqual({ level: "info", text: "複製しました" });
+    expect(ok.state.notice).toEqual({ level: "info", text: "Duplicated" });
     const stale = transition(writing, {
       type: "row.failed",
       reason: "stale",
@@ -859,5 +893,481 @@ describe("save view", () => {
     expect(viewDirty(state)).toBe(true);
     expect(state.notice).toEqual({ level: "error", text: "changed" });
     expect(state.mode).toEqual({ kind: "idle" });
+  });
+});
+
+describe("row menu anchor and the view menu", () => {
+  const rect = { left: 10, top: 20, right: 30, bottom: 40 };
+  test("the row menu remembers the button it hangs from", () => {
+    const s = run([{ type: "row.menu", rowId: "A", rect }]).state;
+    expect(s.mode).toEqual({ kind: "menu", rowId: "A", anchor: rect });
+  });
+  test("the view menu opens, toggles and closes", () => {
+    const open = run([{ type: "view.menu", rect }]).state;
+    expect(open.mode).toEqual({ kind: "viewmenu", anchor: rect });
+    expect(run([{ type: "view.menu" }], open).state.mode).toEqual({
+      kind: "idle",
+    });
+    expect(run([{ type: "view.menu.close" }], open).state.mode).toEqual({
+      kind: "idle",
+    });
+    // Nothing opens it over an edit.
+    const editing = run([{ type: "cell.edit", rowId: "A", column: "status" }]);
+    expect(transition(editing.state, { type: "view.menu" }).state).toBe(
+      editing.state,
+    );
+  });
+  test("Reload from the menu closes it and reads again", () => {
+    const open = run([{ type: "view.menu", rect }]).state;
+    const next = transition(open, { type: "reload" });
+    expect(next.state.mode).toEqual({ kind: "idle" });
+    expect(next.state.reloading).toBe(true);
+    expect(next.effects).toEqual([{ type: "reload" }]);
+  });
+  test("Save view works from the menu", () => {
+    const base = start({ view: "board" });
+    const changed = run(
+      [
+        { type: "view.set", view: "table" },
+        { type: "view.menu", rect },
+      ],
+      { ...base, block: { page: "P", body: "x" } },
+    );
+    const saved = transition(changed.state, { type: "view.save" });
+    expect(saved.state.mode).toEqual({ kind: "writing" });
+    expect(saved.effects).toMatchObject([{ type: "saveView", view: "table" }]);
+  });
+});
+
+describe("tick and Undo", () => {
+  const task = (n: number, over: Record<string, unknown> = {}) =>
+    row(
+      `T@${n}`,
+      { done: false, ...over },
+      {
+        kind: "task",
+        page: "Projects/Alpha",
+        title: `Task ${n}`,
+        range: [n, n + 9],
+        state: " ",
+      },
+    );
+  const tasks = () =>
+    start(
+      { source: { kind: "tasks" }, view: "table", where: { done: false } },
+      [task(1), task(2), task(3)],
+    );
+  const tick = (s: DbState, id = "T@2") =>
+    transition(
+      transition(s, {
+        type: "cell.commit",
+        rowId: id,
+        column: "done",
+        value: true,
+      }).state,
+      {
+        type: "write.done",
+        rowId: id,
+        column: "done",
+        value: true,
+        modified: "m2",
+      },
+    );
+
+  test("ticking keeps the row, offers Undo for eight seconds and counts it done", () => {
+    const { state, effects } = tick(tasks());
+    expect(state.rows.map((r) => r.id)).toEqual(["T@1", "T@2", "T@3"]);
+    expect(state.rows[1].values.done).toBe(true);
+    expect(state.rows[1].state).toBe("x");
+    expect(state.undo).toMatchObject({ id: 1, label: "Done" });
+    expect(state.ghost).toBe("T@2");
+    expect(visibleCount(state)).toBe(2);
+    expect(effects).toEqual([
+      { type: "reload" },
+      { type: "timer", id: 1, ms: UNDO_MS },
+    ]);
+  });
+
+  test("the read that follows does not take the row away", () => {
+    const { state } = tick(tasks());
+    const loaded = transition(state, {
+      type: "rows.loaded",
+      rows: [task(1), task(3)],
+      truncated: false,
+      today: "2026-10-02",
+    }).state;
+    expect(loaded.rows.map((r) => r.id)).toEqual(["T@1", "T@2", "T@3"]);
+    expect(loaded.rows[1].values.done).toBe(true);
+    expect(visibleCount(loaded)).toBe(2);
+  });
+
+  test("a view that lists done tasks has no ghost and counts as it was", () => {
+    const s = start({ source: { kind: "tasks" } }, [task(1), task(2)]);
+    const { state } = tick(s);
+    expect(state.ghost).toBeUndefined();
+    expect(state.undo).not.toBeNull();
+    expect(visibleCount(state)).toBe(2);
+  });
+
+  test("Undo writes the line back, and the row is open again", () => {
+    const ticked = tick(tasks()).state;
+    const undone = transition(ticked, { type: "undo.run" });
+    expect(undone.state.undo).toBeNull();
+    expect(undone.state.mode).toEqual({ kind: "writing" });
+    expect(undone.effects).toEqual([
+      {
+        type: "write",
+        row: expect.objectContaining({ id: "T@2", state: "x", modified: "m2" }),
+        column: "done",
+        kind: "boolean",
+        value: false,
+      },
+    ]);
+    const done = transition(undone.state, {
+      type: "write.done",
+      rowId: "T@2",
+      column: "done",
+      value: false,
+      modified: "m3",
+    });
+    expect(done.state.ghost).toBeUndefined();
+    expect(done.state.undo).toBeNull();
+    expect(done.state.rows[1].values.done).toBe(false);
+    expect(visibleCount(done.state)).toBe(3);
+  });
+
+  test("after eight seconds Undo and the struck-through row go", () => {
+    const ticked = tick(tasks()).state;
+    // A stale timer (an older tick) does nothing.
+    expect(transition(ticked, { type: "undo.expire", id: 99 }).state).toBe(
+      ticked,
+    );
+    const gone = transition(ticked, { type: "undo.expire", id: 1 }).state;
+    expect(gone.undo).toBeNull();
+    expect(gone.rows.map((r) => r.id)).toEqual(["T@1", "T@3"]);
+    expect(visibleCount(gone)).toBe(2);
+  });
+
+  test("a second tick replaces the first one's row and Undo", () => {
+    const first = tick(tasks()).state;
+    const second = tick(first, "T@3").state;
+    expect(second.rows.map((r) => r.id)).toEqual(["T@1", "T@3"]);
+    expect(second.undo?.id).toBe(2);
+    expect(second.ghost).toBe("T@3");
+  });
+
+  test("Undo does nothing while something is being written", () => {
+    const ticked = tick(tasks()).state;
+    const busy: DbState = { ...ticked, mode: { kind: "writing" } };
+    expect(transition(busy, { type: "undo.run" }).state).toBe(busy);
+  });
+
+  test("archiving offers Undo, which restores the row", () => {
+    const row0 = row("A", { status: "active" });
+    const ok = transition(
+      { ...start(), mode: { kind: "writing" } },
+      {
+        type: "row.done",
+        message: "Archived",
+        undo: { label: "Archived", row: { ...row0, modified: "m9" } },
+      },
+    );
+    expect(ok.state.undo).toMatchObject({ label: "Archived" });
+    expect(ok.state.notice).toBeNull();
+    expect(ok.effects).toEqual([
+      { type: "reload" },
+      { type: "timer", id: 1, ms: UNDO_MS },
+    ]);
+    const undone = transition(ok.state, { type: "undo.run" });
+    expect(undone.effects).toEqual([
+      {
+        type: "rowAction",
+        action: "archive",
+        row: { ...row0, modified: "m9" },
+        archived: false,
+      },
+    ]);
+  });
+});
+
+describe("a moved card offers Undo", () => {
+  const dropped = (target: string, over: Partial<Spec> = {}) =>
+    run(
+      [
+        { type: "card.drag", rowId: "A" },
+        { type: "card.drop", target },
+      ],
+      start(over),
+    );
+  const landed = (s: DbState, column: string, value: string) =>
+    transition(s, {
+      type: "write.done",
+      rowId: "A",
+      column,
+      value,
+      modified: "m2",
+    });
+
+  test("a board drop says where, for eight seconds, once it has landed", () => {
+    const drop = dropped("done");
+    expect(drop.state.undo).toBeNull();
+    const { state, effects } = landed(drop.state, "status", "done");
+    expect(state.undo).toMatchObject({ id: 1, label: "Moved to done" });
+    expect(state.move).toBeUndefined();
+    expect(effects).toEqual([
+      { type: "reload" },
+      { type: "timer", id: 1, ms: UNDO_MS },
+    ]);
+  });
+
+  test("Undo writes the previous value back", () => {
+    const { state } = landed(dropped("done").state, "status", "done");
+    const undone = transition(state, { type: "undo.run" });
+    expect(undone.state.undo).toBeNull();
+    expect(undone.effects).toEqual([
+      {
+        type: "write",
+        row: expect.objectContaining({ id: "A", modified: "m2" }),
+        column: "status",
+        kind: "select",
+        value: "active",
+      },
+    ]);
+    // The write that undoes it is not itself a move: nothing more to undo.
+    const back = landed(undone.state, "status", "active");
+    expect(back.state.undo).toBeNull();
+  });
+
+  test("a card dropped on 'None' (or 'No date') can come back too", () => {
+    const none = landed(dropped("").state, "status", "");
+    expect(none.state.undo?.label).toBe("Moved to None");
+    expect(
+      transition(none.state, { type: "undo.run" }).effects[0],
+    ).toMatchObject({ column: "status", value: "active" });
+    const day = landed(
+      dropped("", { view: "calendar", date: "due" }).state,
+      "due",
+      "",
+    );
+    expect(day.state.undo?.label).toBe("Moved to No date");
+    expect(
+      transition(day.state, { type: "undo.run" }).effects[0],
+    ).toMatchObject({ column: "due", value: "2026-10-05" });
+  });
+
+  test("a calendar drop names the day", () => {
+    const day = dropped("2026-10-20", { view: "calendar", date: "due" });
+    const { state } = landed(day.state, "due", "2026-10-20");
+    expect(state.undo?.label).toBe("Moved to 2026-10-20");
+  });
+
+  test("a value that was empty is written back as empty", () => {
+    const d = run(
+      [
+        { type: "card.drag", rowId: "B" },
+        { type: "card.drop", target: "2026-10-20" },
+      ],
+      start({ view: "calendar", date: "due" }),
+    );
+    const { state } = transition(d.state, {
+      type: "write.done",
+      rowId: "B",
+      column: "due",
+      value: "2026-10-20",
+      modified: "m2",
+    });
+    expect(transition(state, { type: "undo.run" }).effects[0]).toMatchObject({
+      column: "due",
+      value: "",
+    });
+  });
+
+  test("a drop that fails offers nothing", () => {
+    const failed = transition(dropped("done").state, {
+      type: "write.failed",
+      reason: "stale",
+      message: "Changed",
+    }).state;
+    expect(failed.undo).toBeNull();
+    expect(failed.move).toBeUndefined();
+  });
+
+  test("an edit made by hand is not a move", () => {
+    const edited = transition(
+      transition(start({ view: "table" }), {
+        type: "cell.commit",
+        rowId: "A",
+        column: "status",
+        value: "done",
+      }).state,
+      {
+        type: "write.done",
+        rowId: "A",
+        column: "status",
+        value: "done",
+        modified: "m2",
+      },
+    );
+    expect(edited.state.undo).toBeNull();
+  });
+});
+
+describe("an Undo outlives the frame", () => {
+  const task = (n: number) =>
+    row(
+      `T@${n}`,
+      { done: false },
+      {
+        kind: "task",
+        page: "P",
+        title: `Task ${n}`,
+        range: [n, n + 9],
+        state: " ",
+      },
+    );
+  const tasks = () =>
+    start(
+      { source: { kind: "tasks" }, view: "table", where: { done: false } },
+      [task(1), task(2), task(3)],
+    );
+  const ticked = () =>
+    transition(
+      transition(tasks(), {
+        type: "cell.commit",
+        rowId: "T@2",
+        column: "done",
+        value: true,
+      }).state,
+      {
+        type: "write.done",
+        rowId: "T@2",
+        column: "done",
+        value: true,
+        modified: "m2",
+      },
+    ).state;
+
+  test("a rebuilt frame gets the struck-through row and Undo back, for what is left", () => {
+    const before = ticked();
+    // The frame is rebuilt from the index: the done task is not in it.
+    const fresh = start(
+      { source: { kind: "tasks" }, view: "table", where: { done: false } },
+      [task(1), task(3)],
+    );
+    const { state, effects } = transition(fresh, {
+      type: "undo.restore",
+      undo: before.undo!,
+      ghost: true,
+      ms: 5000,
+    });
+    expect(state.rows.map((r) => r.id)).toEqual(["T@1", "T@2", "T@3"]);
+    expect(state.rows[1].values.done).toBe(true);
+    expect(state.ghost).toBe("T@2");
+    expect(state.undo).toMatchObject({ id: 1, label: "Done" });
+    expect(visibleCount(state)).toBe(2);
+    expect(effects).toEqual([{ type: "timer", id: 1, ms: 5000 }]);
+    // Undo still works, and the timer ends it.
+    expect(transition(state, { type: "undo.run" }).effects[0]).toMatchObject({
+      column: "done",
+      value: false,
+    });
+    const gone = transition(state, { type: "undo.expire", id: 1 }).state;
+    expect(gone.rows.map((r) => r.id)).toEqual(["T@1", "T@3"]);
+  });
+
+  test("a row the index already lists is shown as the tick left it", () => {
+    const before = ticked();
+    const fresh = tasks();
+    const { state } = transition(fresh, {
+      type: "undo.restore",
+      undo: before.undo!,
+      ghost: false,
+      ms: 1000,
+    });
+    expect(state.rows).toHaveLength(3);
+    expect(state.rows[1].values.done).toBe(true);
+    expect(state.ghost).toBeUndefined();
+  });
+
+  test("nothing is restored with no time left, or over a newer Undo", () => {
+    const before = ticked();
+    const fresh = tasks();
+    expect(
+      transition(fresh, {
+        type: "undo.restore",
+        undo: before.undo!,
+        ghost: true,
+        ms: 0,
+      }).state,
+    ).toBe(fresh);
+    expect(
+      transition(before, {
+        type: "undo.restore",
+        undo: before.undo!,
+        ghost: true,
+        ms: 3000,
+      }).state,
+    ).toBe(before);
+  });
+});
+
+describe("board columns", () => {
+  const task = (n: number, page: string) =>
+    row(`T@${n}`, { done: false }, { kind: "task", page, title: `T${n}` });
+  test("tasks group by their page, named without the folder", () => {
+    const s = start({ source: { kind: "tasks" }, view: "board" }, [
+      task(1, "Projects/Alpha"),
+      task(2, "Projects/Beta"),
+      task(3, "Projects/Alpha"),
+    ]);
+    expect(groupKey(s)).toBe("page");
+    const groups = selectView(s).groups;
+    expect(groups.map((g) => [g.label, g.rows.length])).toEqual([
+      ["Alpha", 2],
+      ["Beta", 1],
+    ]);
+    // Tasks cannot move to another page: no drop writes.
+    const drop = run(
+      [
+        { type: "card.drag", rowId: "T@1" },
+        { type: "card.drop", target: "Projects/Beta" },
+      ],
+      s,
+    );
+    expect(drop.effects).toEqual([]);
+  });
+  test("a database board keeps its declared columns, but none empty beside a None column that holds everything", () => {
+    const s = start({ order: ["active", "someday", "done"] }, [
+      row("A"),
+      row("B"),
+    ]);
+    expect(selectView(s).groups.map((g) => g.key)).toEqual([""]);
+    expect(groupKey(s)).toBe("status");
+    // With a status somewhere the declared order is kept, empties and all.
+    const t = start({ order: ["active", "someday", "done"] });
+    expect(selectView(t).groups.map((g) => g.key)).toEqual([
+      "active",
+      "someday",
+      "done",
+    ]);
+  });
+  test("the header's + New lands in the declared default column, else the first", () => {
+    const s = start({ order: ["active", "someday", "done"] });
+    expect(newRowGroup(s, selectView(s).groups)).toBe("active");
+    const db = {
+      name: "p",
+      tag: "project",
+      folder: "Projects/",
+      properties: [
+        {
+          key: "status",
+          type: "select",
+          options: ["a", "b"],
+          default: "someday",
+        },
+      ],
+    } as unknown as DatabaseSpec;
+    const d = start({ database: db, order: ["active", "someday", "done"] });
+    expect(newRowGroup(d, selectView(d).groups)).toBe("someday");
   });
 });

@@ -96,11 +96,11 @@ function parseSource(
     return { kind: "tag", tag: database.tag };
   }
   if (source === undefined && tag === undefined) {
-    return "source が必要です(projects / tasks / tag:<名前>、または database: <名前>)";
+    return "A db block needs a source: projects, tasks, tag:<name>, or database: <name>";
   }
   if (source === undefined || source === "tag") {
     if (typeof tag !== "string" || tag.trim() === "") {
-      return "tag の名前が必要です(例: tag: meeting)";
+      return "A tag name is needed, for example tag: meeting";
     }
     return { kind: "tag", tag: tag.trim() };
   }
@@ -110,15 +110,15 @@ function parseSource(
     const name = source.slice(4).trim();
     return name
       ? { kind: "tag", tag: name }
-      : "tag の名前が必要です(例: source: tag:meeting)";
+      : "A tag name is needed, for example source: tag:meeting";
   }
-  return `source "${String(source)}" は使えません(projects / tasks / tag:<名前>)`;
+  return `source "${String(source)}" is not supported. Use projects, tasks or tag:<name>`;
 }
 
 function strings(raw: unknown, what: string): string[] | string | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string")) {
-    return `${what} は文字列の一覧にしてください`;
+    return `${what} must be a list of strings`;
   }
   return raw as string[];
 }
@@ -127,7 +127,7 @@ const isScalar = (v: unknown): v is Scalar =>
   typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
 const WHERE_HELP =
-  "文字列・数・真偽値、または {not, lt, lte, gt, gte, before, after, contains, empty} の条件(一覧にして複数も可)にしてください";
+  "Use a string, number or boolean, or a condition with {not, lt, lte, gt, gte, before, after, contains, empty} (or a list of them)";
 
 function operators(input: Record<string, unknown>): Operators | string {
   // YAML turns an unquoted `2026-10-05` into a Date: take it as its ISO day.
@@ -139,17 +139,18 @@ function operators(input: Record<string, unknown>): Operators | string {
         : x;
   }
   const keys = Object.keys(v);
-  if ("lt" in v && "before" in v) return "lt と before は同時に使えません";
-  if ("gt" in v && "after" in v) return "gt と after は同時に使えません";
+  if ("lt" in v && "before" in v)
+    return "lt and before cannot be used together";
+  if ("gt" in v && "after" in v) return "gt and after cannot be used together";
   if (keys.length === 0) return WHERE_HELP;
   for (const k of keys) {
     if (!(OPERATOR_KEYS as readonly string[]).includes(k)) {
-      return `条件 "${k}" は使えません(${OPERATOR_KEYS.join(" / ")})`;
+      return `Condition "${k}" is not supported. Use ${OPERATOR_KEYS.join(", ")}`;
     }
     if (k === "empty" ? typeof v[k] !== "boolean" : !isScalar(v[k])) {
       return k === "empty"
-        ? "empty は true か false にしてください"
-        : `${k} の値は文字列・数・真偽値にしてください`;
+        ? "empty must be true or false"
+        : `${k} must be a string, number or boolean`;
     }
   }
   return v as Operators;
@@ -193,12 +194,15 @@ export function databaseName(raw: unknown): string | undefined {
  */
 export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   if (!isRecord(raw)) {
-    return { ok: false, error: "```db の中身は YAML の設定にしてください" };
+    return {
+      ok: false,
+      error: "The body of a ```db block must be YAML settings",
+    };
   }
   if (raw.database !== undefined) {
     const name = databaseName(raw);
     if (!name) {
-      return { ok: false, error: "database は名前にしてください" };
+      return { ok: false, error: "database must be a name" };
     }
     if (!database) {
       return {
@@ -222,7 +226,7 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   if (typeof view !== "string" || !VIEWS.includes(view as ViewKind)) {
     return {
       ok: false,
-      error: `view "${String(view)}" は使えません(table / board / calendar)`,
+      error: `view "${String(view)}" is not supported. Use table, board or calendar`,
     };
   }
 
@@ -238,7 +242,7 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
       !Number.isInteger(raw.limit) ||
       raw.limit < 1
     ) {
-      return { ok: false, error: "limit は 1 以上の整数にしてください" };
+      return { ok: false, error: "limit must be a whole number, 1 or more" };
     }
     limit = raw.limit;
   }
@@ -248,7 +252,7 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
     if (raw.weekStart !== 0 && raw.weekStart !== 1) {
       return {
         ok: false,
-        error: "weekStart は 0(日曜)か 1(月曜)にしてください",
+        error: "weekStart must be 0 (Sunday) or 1 (Monday)",
       };
     }
     weekStart = raw.weekStart;
@@ -257,12 +261,12 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   const where: Spec["where"] = {};
   if (raw.where !== undefined) {
     if (!isRecord(raw.where)) {
-      return { ok: false, error: "where は「属性: 値」の形にしてください" };
+      return { ok: false, error: "where must be a list of property: value" };
     }
     for (const [key, value] of Object.entries(raw.where)) {
       const parsed = whereValue(value);
       if (typeof parsed === "string") {
-        return { ok: false, error: `where の ${key}: ${parsed}` };
+        return { ok: false, error: `where ${key}: ${parsed}` };
       }
       where[key] = parsed.value;
     }
@@ -273,7 +277,7 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
     if (typeof raw.sort !== "string" || raw.sort.trim() === "") {
       return {
         ok: false,
-        error: "sort は属性名にしてください(降順は -due のように)",
+        error: "sort must be a property name (descending: -due)",
       };
     }
     const text = raw.sort.trim();
@@ -283,17 +287,17 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   }
 
   if (raw.filter !== undefined && typeof raw.filter !== "string") {
-    return { ok: false, error: "filter は文字列にしてください" };
+    return { ok: false, error: "filter must be text" };
   }
 
   if (raw.archived !== undefined && typeof raw.archived !== "boolean") {
-    return { ok: false, error: "archived は true か false にしてください" };
+    return { ok: false, error: "archived must be true or false" };
   }
 
   const group = raw.group ?? "status";
   const date = raw.date ?? "due";
   if (typeof group !== "string" || typeof date !== "string") {
-    return { ok: false, error: "group と date は属性名にしてください" };
+    return { ok: false, error: "group and date must be property names" };
   }
 
   return {

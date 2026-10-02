@@ -72,7 +72,7 @@ export function valuePatches(
   const patches: YamlPatch[] = [];
   for (const [key, input] of Object.entries(values ?? {})) {
     if (key === "" || key === "tags" || key === "__proto__") {
-      return { ok: false, error: `${key} は設定できません` };
+      return { ok: false, error: `${key} cannot be set` };
     }
     const declared = database.properties.find((p) => p.key === key);
     const parsed = declared
@@ -122,12 +122,15 @@ export function luaLongString(text: string): string {
   return `[${eq}[\n${text}]${eq}]`;
 }
 
-/** The Lua expression that expands a template text with a title/page context. */
+/**
+ * The Lua expression that expands a template text with a title/page context.
+ * `name` is the same as `title`: page templates elsewhere say `${name}`.
+ */
 export function expandExpression(
   text: string,
   ctx: { title: string; page: string; database: string },
 ): string {
-  return `database.expandTemplate(${luaLongString(text)}, {title = ${luaLongString(ctx.title)}, page = ${luaLongString(ctx.page)}, database = ${luaLongString(ctx.database)}})`;
+  return `database.expandTemplate(${luaLongString(text)}, {title = ${luaLongString(ctx.title)}, name = ${luaLongString(ctx.title)}, page = ${luaLongString(ctx.page)}, database = ${luaLongString(ctx.database)}})`;
 }
 
 /** The folder a page name sits in, with its trailing `/`, or "". */

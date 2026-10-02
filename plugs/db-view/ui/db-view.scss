@@ -1,162 +1,300 @@
-// The db view's look: the shared panel palette (`--ui-*`) does the theming, so
-// light, dark and the explicit theme attribute all work without a token here.
+// The db view's look. The shared panel stylesheet (components.css) brings the
+// tokens (--sb-*, --db-*) and the control shapes (.sb-button, .sb-input,
+// .sb-segments, .sb-popover); this file only lays them out. Light, dark and the
+// explicit theme attribute all work without a colour here.
 
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
   font-family: var(--ui-font);
-  font-size: 14px;
-  color: var(--ui-surface-color);
+  font-size: var(--sb-text-md, 14px);
+  line-height: var(--sb-leading, 1.45);
+  color: var(--sb-ink);
   background: transparent;
-
-  --db-overdue: #c0392b;
-  --db-today: #d35400;
-  --db-soon: #b7791f;
-  --db-drop: var(--ui-accent-color, #3a6fd8);
 }
 
 body { margin: 0; }
 
-.db-app { padding: 4px 0 28px; } // the widget frame hides the last few pixels
+.db-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
+// One focus ring for every control of the view.
+.db-tab, .db-btn, .db-th, .db-check-label, .db-editable, .db-card, .db-row-menu-btn,
+.db-more, .db-link, .db-plus {
+  &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+}
+.db-check-label:has(:focus-visible) { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+.db-editable:focus-visible { outline-offset: -2px; }
+
+// Container: the layout answers to the width of the view, not of the screen.
+.db-app {
+  container-type: inline-size;
+  // The widget frame pulls the iframe 2ch under its own bottom edge
+  // (`margin-bottom: -2ch`), so the last pixels are never seen: leave them
+  // empty rather than clip the last row.
+  padding: 0 12px 24px;
+}
+
+// The host's Reload/Edit bar is hidden for this widget (it carries the
+// `sb-db-widget` class, see DB View.md): the header's last control sits at
+// the edge of the frame.
+
+// Header: Title · count | Table Board Calendar | Filter… | + New | ⋯
 .db-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 2px 8px;
-  flex-wrap: wrap;
+  min-height: 40px;
+  padding: 0 2px;
 }
-
-.db-title { font-size: 15px; }
-.db-count { color: var(--ui-surface-subtle-color); font-size: 12px; }
-
-.db-tabs { display: flex; gap: 2px; margin-left: auto; }
-
-.db-tab, .db-btn {
-  font: inherit;
-  color: inherit;
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 6px;
-  padding: 2px 10px;
-  cursor: pointer;
+.db-title { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.db-count {
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  font-variant-numeric: tabular-nums;
+  &::before { content: "·"; margin-right: 6px; }
 }
-.db-tab.db-active {
-  background: var(--ui-accent-color, #3a6fd8);
-  border-color: var(--ui-accent-color, #3a6fd8);
-  color: #fff;
+.db-tabs { margin-left: auto; flex: none; }
+.db-filter-wrap {
+  position: relative;
+  flex: none;
+  width: 160px;
+  svg {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    transform: translateY(-50%);
+    color: var(--sb-ink-3);
+    pointer-events: none;
+  }
 }
-.db-btn:disabled { opacity: 0.5; cursor: default; }
+.db-filter { width: 100%; min-height: 28px; padding: 0 8px 0 28px; }
+.db-new { min-height: 28px; padding: 0 12px; flex: none; }
+.db-more { width: 28px; height: 28px; flex: none; margin-left: 0; }
 
-.db-input {
-  font: inherit;
-  color: inherit;
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 6px;
-  padding: 2px 6px;
-  min-width: 0;
-}
-.db-filter { width: 140px; }
-.db-new { white-space: nowrap; }
-.db-new-title { width: 160px; }
+.db-input { min-width: 0; font: inherit; }
+.db-table .db-input, .db-row-card .db-input { min-height: 28px; padding: 0 6px; width: 100%; max-width: 220px; }
+.db-rename { width: 160px; }
 
+// Notices are rows with an action, never banners over the content.
 .db-notice {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin: 0 2px 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--ui-surface-border-color);
-  background: var(--ui-surface-section-background-color, var(--ui-surface-background-color));
+  min-height: 36px;
+  margin: 0 0 8px;
+  padding: 4px 8px 4px 12px;
+  border-radius: var(--sb-radius-2, 8px);
+  background: var(--sb-bg-2);
+  color: var(--sb-ink);
+  font-size: var(--sb-text-sm, 12.5px);
+  &:not(.db-notice-undo)::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--sb-ink-3);
+  }
+  .sb-button { min-height: 28px; padding: 0 10px; font-size: var(--sb-text-sm, 12.5px); }
 }
-.db-notice-error { border-color: var(--db-overdue); color: var(--db-overdue); }
+.db-notice-text { flex: 0 1 auto; min-width: 0; }
+.db-notice-undo { .db-notice-text { font-weight: 500; } }
+.db-notice-dot { color: var(--sb-ink-3); }
+.db-notice-error { color: var(--sb-danger); &::before { background: var(--sb-danger); } }
+.db-notice-undo + .db-notice, .db-notice-text + .db-dismiss { margin-left: auto; }
 
-.db-link { color: var(--ui-accent-color, #3a6fd8); cursor: pointer; text-decoration: none; }
+.db-link { color: var(--sb-link); cursor: pointer; text-decoration: none; }
 .db-link:hover { text-decoration: underline; }
 
-.db-empty { color: var(--ui-surface-subtle-color); }
-.db-empty-view { padding: 16px; text-align: center; color: var(--ui-surface-subtle-color); }
+.db-empty { color: var(--sb-ink-3); }
+.db-empty-view {
+  padding: 24px;
+  text-align: center;
+  color: var(--sb-ink-2);
+  p { margin: 0 0 12px; }
+}
+
+.db-hint { margin-top: 4px; font-size: var(--sb-text-xs, 11px); color: var(--sb-ink-3); }
+.db-field-error { margin-top: 4px; font-size: var(--sb-text-sm, 12.5px); color: var(--sb-danger); }
+.db-new-row { width: 100%; padding: 4px 0; .db-new-title { width: 100%; max-width: none; } }
 
 // Table
-.db-table-scroll { overflow-x: auto; }
+.db-table-scroll { position: relative; }
+.db-table-x { overflow-x: auto; }
+.db-table-scroll[data-scrollable]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--sb-ink) 12%, transparent));
+}
 .db-table { border-collapse: collapse; width: 100%; }
 .db-table th, .db-table td {
   text-align: left;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--ui-surface-border-color);
+  padding: 0 8px;
+  height: 34px;
+  border-bottom: 1px solid var(--sb-line);
   vertical-align: middle;
+  background: var(--sb-bg);
 }
+.db-table th:first-child, .db-table td:first-child { padding-left: 0; }
+.db-table tbody tr:hover > td { background: color-mix(in srgb, var(--sb-ink) 5%, var(--sb-bg)); }
+.db-table tbody tr.db-new-tr:hover > td { background: var(--sb-bg); }
+.db-table th { font-size: var(--sb-text-sm, 12.5px); font-weight: 500; color: var(--sb-ink-2); white-space: nowrap; }
+.db-col-title { position: sticky; left: 0; z-index: 1; min-width: 8em; }
 .db-th {
   font: inherit;
-  font-weight: 600;
-  color: var(--ui-surface-subtle-color);
+  color: inherit;
   background: none;
   border: none;
-  padding: 0;
+  border-radius: var(--sb-radius-1, 4px);
+  padding: 0 2px;
+  margin: 0 -2px;
+  min-height: 28px;
   cursor: pointer;
   white-space: nowrap;
+  &:hover { color: var(--sb-ink); }
 }
-.db-th:hover { color: var(--ui-surface-color); }
-.db-editable:hover { background: var(--ui-surface-hover-background-color); }
-.db-editable:focus-visible { outline: 2px solid var(--db-drop); outline-offset: -2px; }
+.db-sort-mark { margin-left: 4px; color: var(--sb-accent); font-size: 10px; }
 .db-cell-date, .db-cell-number { white-space: nowrap; }
-.db-row-done { opacity: 0.55; }
-.db-check { cursor: pointer; }
+.db-menu-col { width: 1%; white-space: nowrap; text-align: right; }
+
+// An editable cell: a click or tap edits it, the pencil shows on hover, Enter or
+// F2 on the focused cell.
+.db-editable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 28px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: var(--sb-radius-1, 4px);
+  cursor: pointer;
+}
+.db-pencil {
+  display: inline-flex;
+  border: 0;
+  background: none;
+  font: inherit;
+  flex: none;
+  padding: 4px;
+  margin: -4px;
+  color: var(--sb-ink-3);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--sb-dur-1, 80ms) var(--sb-ease-out, ease-out);
+}
+@media (hover: hover) {
+  .db-table tbody tr:hover .db-pencil,
+  .db-editable:hover { background: var(--sb-bg-2); }
+  .db-editable:hover .db-pencil,
+  .db-editable:focus-visible .db-pencil { opacity: 1; }
+  .db-pencil:hover { color: var(--sb-ink); }
+}
+
+// The link cell's pencil is a button of its own: it shows when focused.
+.db-pencil:focus-visible { opacity: 1; outline: 2px solid var(--sb-focus); outline-offset: 0; border-radius: var(--sb-radius-1, 4px); }
+
+.db-check-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--sb-radius-1, 4px);
+  cursor: pointer;
+}
+.db-check { margin: 0; width: 16px; height: 16px; accent-color: var(--sb-accent); cursor: pointer; }
+.db-check:disabled, .db-check[aria-disabled] { cursor: default; }
+
+// A page named for a person: the last segment, the folder dim before it.
+.db-page { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 4px; min-width: 0; }
+.db-crumb { color: var(--sb-ink-3); font-size: var(--sb-text-xs, 11px); white-space: nowrap; }
+.db-table .db-page { flex-wrap: nowrap; white-space: nowrap; }
+.db-chip-page { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .db-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .db-tag, .db-chip {
-  font-size: 12px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--ui-surface-hover-background-color);
-  border: 1px solid var(--ui-surface-border-color);
+  font-size: var(--sb-text-xs, 11px);
+  padding: 0 8px;
+  line-height: 18px;
+  border-radius: var(--sb-radius-pill, 999px);
+  background: var(--sb-bg-2);
+  color: var(--sb-ink-2);
 }
 
-.db-date { white-space: nowrap; }
+.db-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .db-due-overdue { color: var(--db-overdue); font-weight: 600; }
 .db-due-today { color: var(--db-today); font-weight: 600; }
 .db-due-soon { color: var(--db-soon); }
+.db-due-word { margin-left: 6px; font-size: var(--sb-text-xs, 11px); font-weight: 500; }
 
 .db-status {
+  display: inline-block;
   padding: 0 8px;
-  border-radius: 10px;
-  background: var(--ui-surface-hover-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  font-size: 12px;
+  line-height: 18px;
+  border-radius: var(--sb-radius-pill, 999px);
+  background: var(--sb-bg-2);
+  border: 1px solid var(--sb-line);
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-xs, 11px);
 }
-.db-status-active { border-color: #2e8b57; color: #2e8b57; }
-.db-status-done { color: var(--ui-surface-subtle-color); }
+.db-status-active { border-color: var(--db-ok); color: var(--db-ok); }
+.db-status-done { color: var(--sb-ink-3); }
+
+// Done and archived rows: grey, struck through on the title, no red dates.
+.db-row-done *, .db-row-archived * { color: var(--sb-ink-3); }
+.db-row-done .db-col-title .db-link,
+.db-row-done .db-card-title,
+.db-row-done .db-row-card-title { text-decoration: line-through; }
+.db-row-done .db-due-word { display: none; }
+.db-row-done .db-due-overdue, .db-row-done .db-due-today { font-weight: 400; }
 
 // Board
 .db-board {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(200px, 1fr);
-  gap: 10px;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 12px;
   overflow-x: auto;
-  padding: 2px;
+  scrollbar-width: thin;
+  padding: 2px 2px 6px;
 }
+.db-board-new { padding: 0 2px 8px; }
 .db-column, .db-undated {
-  background: var(--ui-surface-section-background-color, var(--ui-surface-hover-background-color));
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 8px;
+  background: var(--sb-bg-2);
+  border-radius: var(--sb-radius-2, 8px);
   min-height: 90px;
 }
 .db-column-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  font-weight: 600;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 4px 0 12px;
+  font-weight: 500;
+  .db-count::before { content: none; }
+  .db-column-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .db-plus { margin-left: auto; width: 28px; height: 28px; font-size: 18px; line-height: 1; }
 }
 .db-column-body, .db-undated-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 6px 8px;
+  gap: 8px;
+  padding: 0 8px 8px;
   min-height: 40px;
 }
 .db-drop { outline: 2px dashed var(--db-drop); outline-offset: -2px; }
@@ -164,83 +302,135 @@ body { margin: 0; }
 .db-card {
   touch-action: pan-x pan-y;
   -webkit-touch-callout: none;
-  background: var(--ui-surface-background-color);
-  border: 1px solid var(--ui-surface-border-color);
-  border-radius: 6px;
-  padding: 6px 8px;
+  background: var(--sb-bg);
+  border: 1px solid var(--sb-line);
+  border-radius: var(--sb-radius-2, 8px);
+  box-shadow: var(--sb-shadow-1);
+  padding: 8px 10px;
   cursor: grab;
   // A press on a card is for moving it, not for selecting its text.
   user-select: none;
   -webkit-user-select: none;
 }
 .db-card:active { cursor: grabbing; }
-.db-dragging { opacity: 0.4; }
-.db-card-title { display: block; font-weight: 600; margin-bottom: 2px; }
-.db-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.db-dragging { opacity: 0.4; box-shadow: var(--sb-shadow-2); }
+.db-card-head { display: flex; align-items: flex-start; gap: 4px; }
+.db-card-title { flex: 1; min-width: 0; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+.db-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: var(--sb-text-xs, 11px); color: var(--sb-ink-2); margin-top: 2px; }
+.db-card .db-row-menu-btn { margin: -4px -6px 0 0; }
+.db-row-menu-btn { width: 24px; height: 24px; flex: none; }
 
 // Calendar
-.db-cal-nav { display: flex; align-items: center; gap: 6px; padding: 0 2px 8px; }
-.db-cal-title { min-width: 7em; text-align: center; }
+.db-cal-nav { display: flex; align-items: center; gap: 4px; padding: 0 2px 8px; }
+.db-cal-title { margin-right: auto; font-weight: 500; }
+.db-cal-nav .sb-button-icon, .db-cal-nav .sb-button { min-height: 28px; height: 28px; }
+.db-cal-nav .sb-button-icon { width: 28px; }
 .db-cal-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  border-top: 1px solid var(--ui-surface-border-color);
-  border-left: 1px solid var(--ui-surface-border-color);
+  border-top: 1px solid var(--sb-line);
+  border-left: 1px solid var(--sb-line);
 }
 .db-cal-dow {
   text-align: center;
-  padding: 2px;
-  color: var(--ui-surface-subtle-color);
-  border-right: 1px solid var(--ui-surface-border-color);
-  border-bottom: 1px solid var(--ui-surface-border-color);
+  padding: 4px 2px;
+  font-size: var(--sb-text-sm, 12.5px);
+  color: var(--sb-ink-2);
+  border-right: 1px solid var(--sb-line);
+  border-bottom: 1px solid var(--sb-line);
 }
 .db-cal-day {
   min-height: 84px;
   padding: 2px 3px 4px;
-  border-right: 1px solid var(--ui-surface-border-color);
-  border-bottom: 1px solid var(--ui-surface-border-color);
+  border-right: 1px solid var(--sb-line);
+  border-bottom: 1px solid var(--sb-line);
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
-.db-cal-day.db-out { background: var(--ui-surface-hover-background-color); color: var(--ui-surface-subtle-color); }
+.db-cal-day.db-out { background: var(--sb-bg-panel); color: var(--sb-ink-3); }
 .db-cal-top { display: flex; align-items: center; justify-content: space-between; }
-.db-plus { padding: 0 8px; line-height: 1.3; }
-.db-new-inline { width: 100%; min-width: 0; box-sizing: border-box; }
-.db-cal-day .db-plus { padding: 0 5px; font-size: 11px; }
-.db-cal-day.db-today .db-cal-num { background: var(--ui-accent-color, #3a6fd8); color: #fff; border-radius: 10px; }
-.db-cal-num { align-self: flex-start; padding: 0 6px; font-size: 12px; }
-.db-cal-day .db-card { padding: 2px 6px; }
-.db-cal-day .db-card-title { font-size: 12px; margin: 0; }
+.db-cal-day .db-plus { width: 22px; height: 22px; font-size: 14px; line-height: 1; }
+.db-cal-day.db-today .db-cal-num { background: var(--sb-accent); color: var(--db-on-accent); border-radius: var(--sb-radius-pill, 999px); }
+.db-cal-wd { display: none; color: var(--sb-ink-2); }
+.db-today .db-cal-wd { color: inherit; }
+.db-cal-num { align-self: flex-start; padding: 0 6px; font-size: var(--sb-text-xs, 11px); }
+.db-cal-day .db-card { padding: 2px 6px; box-shadow: none; }
+.db-cal-day .db-card-title { font-size: var(--sb-text-sm, 12.5px); }
 .db-cal-day .db-card-meta { display: none; }
-.db-undated { margin-top: 10px; }
+.db-cal-day .db-new-row { padding: 0; }
+.db-undated { margin-top: 12px; }
 
-.db-menu-col { width: 1%; white-space: nowrap; text-align: right; }
-.db-row-menu { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.db-row-menu-btn { padding: 0 8px; }
-.db-danger { color: #c33; border-color: #c33; }
-.db-confirm { font-size: 12px; }
-.db-rename { width: 160px; }
-.db-row-archived { opacity: 0.55; }
-.db-stamp { font-variant-numeric: tabular-nums; color: var(--ui-surface-subtle-color); }
+.db-stamp { font-variant-numeric: tabular-nums; color: var(--sb-ink-2); white-space: nowrap; }
 
-// Narrow screens: the header wraps, the board scrolls one column at a time,
-// and the calendar's days stack as a list.
+// Narrow view (the width of the view, not of the screen): the table is a list
+// of cards, nothing scrolls sideways.
+.db-card-list { margin: 0; padding: 0; list-style: none; }
+.db-row-card {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sb-line);
+}
+.db-row-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.db-row-card-title { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.db-row-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 2px 0 0;
+  font-size: var(--sb-text-sm, 12.5px);
+  color: var(--sb-ink-2);
+  &.db-indent { margin-left: 36px; }
+  .db-meta-item { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+  .db-meta-label { color: var(--sb-ink-3); }
+  .db-editable { display: inline-flex; margin: 0; padding: 0; min-height: 24px; }
+}
+.db-new-li { border-bottom: 0; }
+// (Which of the table and the card list exists is `useNarrow`'s call, at the
+// same 480px; the two are never both mounted.)
+
+// Touch: every target is 44px and the editors are 16px (iOS does not zoom).
+@media (pointer: coarse) {
+  .db-tab, .db-new, .db-more, .db-filter, .db-th { min-height: var(--sb-control-touch, 44px); }
+  .db-more { width: var(--sb-control-touch, 44px); }
+  .db-check-label { width: 44px; height: 44px; }
+  .db-row-menu-btn, .db-plus, .db-cal-nav .sb-button-icon { width: 44px; height: 44px; }
+  .db-cal-nav .sb-button { min-height: 44px; height: 44px; }
+  .db-card .db-row-menu-btn { margin: -10px -12px -10px 0; }
+  .db-input, .db-table .db-input, .db-row-card .db-input { font-size: 16px; min-height: 44px; max-width: none; }
+  .db-editable:not(.db-editable-link) .db-pencil { display: none; }
+  .db-editable-link .db-pencil { opacity: 1; padding: 12px; margin: -12px; }
+  .db-editable { min-height: 44px; }
+  .db-table th, .db-table td { height: 44px; }
+  .db-notice .sb-button { min-height: 44px; }
+  .db-row-card-meta.db-indent { margin-top: -6px; margin-left: 52px; }
+  // Links in a card's meta line: 44px to hit, the line keeps its height.
+  .db-row-card-meta .db-link { display: inline-block; padding: 12px 0; margin: -12px 0; }
+  .db-hint { display: none; }
+  .db-cal-day .db-plus { width: 32px; height: 32px; }
+}
+
+// Under 600px of view width (title, tabs, filter, + New and ⋯ need about 570):
+// two rows (title, + New, ⋯; then the tabs), the filter below. Wider than
+// that, one row, and the title keeps its words.
+@container (max-width: 600px) {
+  .db-header { flex-wrap: wrap; row-gap: 8px; padding-bottom: 4px; }
+  .db-title { flex: 0 1 auto; }
+  .db-new { order: 1; margin-left: auto; }
+  .db-more { order: 2; }
+  // No + New (tasks, tags): the ⋯ is the right edge.
+  .db-filter-wrap + .db-more { margin-left: auto; }
+  .db-tabs { order: 3; margin-left: 0; width: 100%; display: flex; .db-tab { flex: 1; justify-content: center; } }
+  .db-filter-wrap { order: 4; width: 100%; }
+}
+
+// Under 600px: the board snaps, the calendar is a list.
 @media (max-width: 600px) {
-  .db-header { gap: 6px; }
-  .db-tabs { margin-left: 0; order: 1; width: 100%; }
-  .db-tab { flex: 1; }
-  .db-filter { flex: 1; min-width: 0; width: auto; }
-  .db-new-title { width: 100%; box-sizing: border-box; }
-  .db-btn, .db-tab { min-height: 36px; }
-  .db-board {
-    grid-auto-columns: 82%;
-    scroll-snap-type: x mandatory;
-  }
+  .db-board { grid-auto-columns: 86%; scroll-snap-type: x mandatory; }
   .db-column { scroll-snap-align: start; }
   .db-cal-grid { display: block; border-left: 0; }
   .db-cal-dow, .db-cal-day.db-out { display: none; }
-  .db-cal-day { min-height: 0; border-left: 1px solid var(--ui-surface-border-color); }
+  .db-cal-day { min-height: 0; border-left: 1px solid var(--sb-line); }
   .db-cal-day .db-card-meta { display: flex; }
-  .db-cal-num { font-size: 13px; }
+  .db-cal-num { font-size: var(--sb-text-sm, 12.5px); }
+  .db-cal-wd { display: inline; }
 }

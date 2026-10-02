@@ -80,13 +80,13 @@ export function parseCellInput(
     const iso = normalizeDate(text);
     return iso
       ? { ok: true, value: iso }
-      : { ok: false, error: "日付は 2026-10-02 の形にしてください" };
+      : { ok: false, error: "Use a date like 2026-10-02" };
   }
   if (kind === "number") {
     const n = Number(text);
     return Number.isFinite(n)
       ? { ok: true, value: n }
-      : { ok: false, error: "数にしてください" };
+      : { ok: false, error: "Use a number" };
   }
   return { ok: true, value: text };
 }
@@ -119,7 +119,7 @@ export function parsePropertyInput(
   ) {
     return {
       ok: false,
-      error: `${p.label ?? p.key} は ${p.options.join(" / ")} のどれかにしてください`,
+      error: `${p.label ?? p.key} must be one of: ${p.options.join(", ")}`,
     };
   }
   return parsed;

@@ -1,58 +1,130 @@
 import type { ViewKind } from "../../src/model.ts";
 import {
+  canSaveView,
   type DbEvent,
   type DbState,
   selectView,
-  canSaveView,
+  visibleCount,
 } from "../mediator/db_mediator.ts";
 import { BoardView } from "./board_view.tsx";
-import { NewTitleInput } from "./new_row.tsx";
 import { CalendarView } from "./calendar_view.tsx";
+import { MoreIcon, SearchIcon } from "./icons.tsx";
+import { Popover, rectOf } from "./popover.tsx";
+import { RowPopover } from "./row_menu.tsx";
 import { TableView } from "./table_view.tsx";
 
 type Emit = (event: DbEvent) => void;
 
-/** "+ New": a button, or while open the title input. It draws the Mediator's
- * mode and only ever emits. */
-function NewRow({ state, emit }: { state: DbState; emit: Emit }) {
-  if (state.mode.kind === "creating" && state.mode.at === undefined) {
-    return <NewTitleInput emit={emit} />;
-  }
-  return (
-    <button
-      type="button"
-      class="db-btn db-new"
-      disabled={state.mode.kind !== "idle" && state.mode.kind !== "creating"}
-      title="新しい行をページとして作る"
-      onClick={() => emit({ type: "create.open" })}
-    >
-      + New
-    </button>
-  );
-}
-
 const TABS: { view: ViewKind; label: string }[] = [
-  { view: "table", label: "表" },
-  { view: "board", label: "ボード" },
-  { view: "calendar", label: "カレンダー" },
+  { view: "table", label: "Table" },
+  { view: "board", label: "Board" },
+  { view: "calendar", label: "Calendar" },
 ];
 
 const SOURCE_TITLES: Record<string, string> = {
-  projects: "プロジェクト",
-  tasks: "タスク",
+  projects: "Projects",
+  tasks: "Tasks",
 };
+
+/** The view's "⋯": what applies to the view as a whole. The host's own
+ * Edit/Reload bar is hidden for this widget, so "Edit source" lives here. */
+function ViewMenu({ state, emit }: { state: DbState; emit: Emit }) {
+  const open = state.mode.kind === "viewmenu";
+  return (
+    <>
+      <button
+        type="button"
+        class="sb-button-icon db-more"
+        data-popover-trigger
+        aria-label="View actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="View actions"
+        onClick={(e) =>
+          emit({ type: "view.menu", rect: rectOf(e.currentTarget as Element) })
+        }
+      >
+        <MoreIcon />
+      </button>
+      {state.mode.kind === "viewmenu" && (
+        <Popover
+          anchor={state.mode.anchor}
+          label="View actions"
+          onClose={() => emit({ type: "view.menu.close" })}
+          items={[
+            {
+              label: "Save view",
+              disabled: !canSaveView(state),
+              onSelect: () => emit({ type: "view.save" }),
+            },
+            {
+              label: "Edit source",
+              disabled: !state.block,
+              onSelect: () => emit({ type: "source.edit" }),
+            },
+            {
+              label: state.reloading ? "Reloading…" : "Reload",
+              disabled: state.reloading,
+              onSelect: () => emit({ type: "reload" }),
+            },
+          ]}
+        />
+      )}
+    </>
+  );
+}
+
+/** The one-row notice: what happened, and the one thing to do about it. */
+function Notices({ state, emit }: { state: DbState; emit: Emit }) {
+  return (
+    <>
+      {state.undo && (
+        <div class="db-notice db-notice-undo" role="status">
+          <span class="db-notice-text">{state.undo.label}</span>
+          <span class="db-notice-dot" aria-hidden="true">
+            ·
+          </span>
+          <button
+            type="button"
+            class="sb-button db-undo"
+            onClick={() => emit({ type: "undo.run" })}
+          >
+            Undo
+          </button>
+        </div>
+      )}
+      {state.notice && (
+        <div
+          class={`db-notice db-notice-${state.notice.level}`}
+          role={state.notice.level === "error" ? "alert" : "status"}
+        >
+          <span class="db-notice-text">{state.notice.text}</span>
+          <button
+            type="button"
+            class="sb-button db-dismiss"
+            onClick={() => emit({ type: "notice.dismiss" })}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {state.truncated && (
+        <div class="db-notice db-notice-info" role="status">
+          <span class="db-notice-text">
+            Showing the first {state.spec.limit} rows. Raise limit in the block
+            to see more.
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
 
 /**
  * The widget's root view. It owns no state: everything it draws comes from the
  * Mediator's `state`, and everything a user does goes back as an event.
  */
-export function App({
-  state,
-  emit,
-}: {
-  state: DbState;
-  emit: (event: DbEvent) => void;
-}) {
+export function App({ state, emit }: { state: DbState; emit: Emit }) {
   const view = selectView(state);
   const title =
     state.spec.title ??
@@ -63,71 +135,55 @@ export function App({
     <div class="db-app">
       <header class="db-header">
         <strong class="db-title">{title}</strong>
-        <span class="db-count">{state.rows.length}</span>
-        <nav class="db-tabs">
-          {TABS.map((t) => (
-            <button
-              type="button"
-              key={t.view}
-              class={`db-tab${state.view === t.view ? " db-active" : ""}`}
-              onClick={() => emit({ type: "view.set", view: t.view })}
-            >
-              {t.label}
-            </button>
-          ))}
+        <span class="db-count" aria-label={`${visibleCount(state)} rows`}>
+          {visibleCount(state)}
+        </span>
+        <nav class="db-tabs sb-segments" aria-label="View">
+          {TABS.map((t) => {
+            const active = state.view === t.view;
+            return (
+              <button
+                type="button"
+                key={t.view}
+                class={`db-tab sb-segment${active ? " db-active sb-segment-active" : ""}`}
+                aria-pressed={active}
+                onClick={() => emit({ type: "view.set", view: t.view })}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </nav>
-        <input
-          class="db-input db-filter"
-          type="search"
-          placeholder="絞り込み"
-          value={state.phrase}
-          onInput={(e) =>
-            emit({
-              type: "phrase.set",
-              phrase: (e.currentTarget as HTMLInputElement).value,
-            })
-          }
-        />
-        {state.block && (
+        <span class="db-filter-wrap">
+          <SearchIcon />
+          <input
+            class="sb-input db-filter"
+            type="search"
+            aria-label="Filter rows"
+            placeholder="Filter…"
+            value={state.phrase}
+            onInput={(e) =>
+              emit({
+                type: "phrase.set",
+                phrase: (e.currentTarget as HTMLInputElement).value,
+              })
+            }
+          />
+        </span>
+        {state.spec.database && (
           <button
             type="button"
-            class="db-btn"
-            disabled={!canSaveView(state)}
-            title="今の表示(タブ・並び順・絞り込み)をこのブロックに書き込む"
-            onClick={() => emit({ type: "view.save" })}
+            class="sb-button-primary db-new"
+            disabled={state.mode.kind === "writing"}
+            title="New row: makes a page in this database"
+            onClick={() => emit({ type: "create.open" })}
           >
-            ビューを保存
+            + New
           </button>
         )}
-        <button
-          type="button"
-          class="db-btn"
-          disabled={state.reloading}
-          title="読み込み直す"
-          onClick={() => emit({ type: "reload" })}
-        >
-          {state.reloading ? "…" : "↻"}
-        </button>
-        {state.spec.database && <NewRow state={state} emit={emit} />}
+        <ViewMenu state={state} emit={emit} />
       </header>
-      {state.notice && (
-        <div class={`db-notice db-notice-${state.notice.level}`} role="alert">
-          <span>{state.notice.text}</span>
-          <button
-            type="button"
-            class="db-btn"
-            onClick={() => emit({ type: "notice.dismiss" })}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {state.truncated && (
-        <div class="db-notice db-notice-info">
-          件数が多いため、先頭の {state.spec.limit} 件だけ表示しています(limit
-          で変えられます)
-        </div>
-      )}
+      <Notices state={state} emit={emit} />
       {state.view === "table" && (
         <TableView state={state} view={view} emit={emit} />
       )}
@@ -137,6 +193,7 @@ export function App({
       {state.view === "calendar" && (
         <CalendarView state={state} view={view} emit={emit} />
       )}
+      <RowPopover state={state} emit={emit} />
     </div>
   );
 }

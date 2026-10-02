@@ -48,10 +48,14 @@ beforeEach(() => {
     // expand `${title}` / `${page}` in the text as `database.expandTemplate`.
     "lua.evalExpression": async (_ctx: unknown, expression: string) => {
       const long = /\[(=*)\[\n([\s\S]*?)\]\1\]/g;
-      const [text, title, page] = [...expression.matchAll(long)].map(
+      const [text, title, name, page] = [...expression.matchAll(long)].map(
         (m) => m[2],
       );
-      return text.replaceAll("${title}", title).replaceAll("${page}", page);
+      if (text.includes("${boom}")) throw new Error("attempt to call nil");
+      return text
+        .replaceAll("${title}", title)
+        .replaceAll("${name}", name)
+        .replaceAll("${page}", page);
     },
   });
 });
@@ -332,6 +336,17 @@ describe("loadRows", () => {
     expect(limited.rows).toHaveLength(2);
   });
 
+  test("tasks on templates, library pages and in the trash are left out", async () => {
+    await index([
+      task(1, "Plan", false),
+      task(2, "Templates/Project", false),
+      task(3, "Library/Std/Docs/Fork Guide", false),
+      task(4, "Trash/Plan", false),
+    ]);
+    const { rows } = await loadRows(spec({ source: { kind: "tasks" } }));
+    expect(rows.map((r) => r.page)).toEqual(["Plan"]);
+  });
+
   test("tasks", async () => {
     await index([task(1, "Plan", false), task(2, "Plan", true)]);
     const { rows } = await loadRows(spec({ source: { kind: "tasks" } }));
@@ -467,6 +482,38 @@ describe("createRow", () => {
     expect(text).toContain("# Launch\n\nsee Projects/Launch\n");
   });
 
+  test("${name} is an alias of ${title}", async () => {
+    await writePage(
+      "Templates/Project",
+      "---\ntags: meta/template/page\n---\n# ${name}\n",
+    );
+    const r = await createRow(
+      await withDb({ template: "Templates/Project" }),
+      "Launch",
+    );
+    expect(r.ok).toBe(true);
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toContain("# Launch\n");
+    expect(text).not.toContain("nil");
+  });
+
+  test("a template that cannot be filled in is a failure that names the template", async () => {
+    await writePage(
+      "Templates/Broken",
+      "---\ntags: meta/template/page\n---\n# ${boom}\n",
+    );
+    const r = await createRow(
+      await withDb({ template: "Templates/Broken" }),
+      "Launch",
+    );
+    expect(r).toMatchObject({ ok: false, reason: "failed" });
+    if (!r.ok) {
+      expect(r.message).toContain("Templates/Broken");
+      expect(r.message).toContain("${title}");
+    }
+    await expect(call("space.readPage", "Projects/Launch")).rejects.toThrow();
+  });
+
   test("a template's frontmatter: key holds the page's own attributes", async () => {
     await writePage(
       "Templates/Project",
@@ -510,7 +557,12 @@ describe("createRow", () => {
   test("a page that is there already is left alone", async () => {
     await writePage("Projects/Launch", "mine");
     const r = await createRow(await withDb(), "Launch");
-    expect(r).toMatchObject({ ok: false, reason: "exists" });
+    // The refusal names the page, not the folder path.
+    expect(r).toEqual({
+      ok: false,
+      reason: "exists",
+      message: "A page named Launch already exists.",
+    });
     expect(await call("space.readPage", "Projects/Launch")).toBe("mine");
   });
 
@@ -663,7 +715,11 @@ describe("row actions", () => {
     await deleteRow(view(), "Projects/A", m);
     await writePage("Projects/A", "someone else");
     const refused = await restoreTrashed("Trash/Projects/A");
-    expect(refused).toMatchObject({ ok: false, reason: "exists" });
+    expect(refused).toMatchObject({
+      ok: false,
+      reason: "exists",
+      message: "A page named A already exists.",
+    });
     expect(await exists("Trash/Projects/A")).toBe(true);
     await call("space.deletePage", "Projects/A");
     const back = await restoreTrashed("Trash/Projects/A");
@@ -719,7 +775,13 @@ describe("row actions", () => {
   test("tasks on a trashed page are out of a tasks view", async () => {
     await index(
       [
-        { ref: "Trash/P@1", tag: "task", name: "gone", page: "Trash/P", state: " " },
+        {
+          ref: "Trash/P@1",
+          tag: "task",
+          name: "gone",
+          page: "Trash/P",
+          state: " ",
+        },
         { ref: "Live@1", tag: "task", name: "kept", page: "Live", state: " " },
       ],
       "Seed",
@@ -730,7 +792,13 @@ describe("row actions", () => {
 
   test("a project source skips trashed pages", async () => {
     await index([
-      { ref: "Trash/Q", tag: "page", name: "Trash/Q", tags: ["project"], lastModified: "x" },
+      {
+        ref: "Trash/Q",
+        tag: "page",
+        name: "Trash/Q",
+        tags: ["project"],
+        lastModified: "x",
+      },
     ]);
     const { rows } = await loadRows(spec());
     expect(rows.map((r) => r.page)).not.toContain("Trash/Q");

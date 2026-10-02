@@ -8,6 +8,8 @@ import {
   matchesWhere,
   monthGrid,
   normalizeDate,
+  pageCrumb,
+  pageName,
   rowsByDate,
   selectOptions,
   shiftMonth,
@@ -209,7 +211,7 @@ describe("groupRows", () => {
     row("p4"),
     row("p5", { status: "active" }),
   ];
-  test("status runs active, someday, done, then whatever else, then (なし)", () => {
+  test("status runs active, someday, done, then whatever else, then None", () => {
     const groups = groupRows(rows, "status");
     expect(groups.map((g) => [g.key, g.rows.map((r) => r.title)])).toEqual([
       ["active", ["p2", "p5"]],
@@ -218,7 +220,7 @@ describe("groupRows", () => {
       ["waiting", ["p3"]],
       ["", ["p4"]],
     ]);
-    expect(groups.at(-1)!.label).toBe("(なし)");
+    expect(groups.at(-1)!.label).toBe("None");
   });
   test("an explicit order is shown whole, even where empty", () => {
     const groups = groupRows(rows, "status", ["waiting", "active", "later"]);
@@ -319,7 +321,7 @@ describe("columns", () => {
     expect(cols.find((c) => c.key === "status")).toMatchObject({
       editable: true,
       kind: "select",
-      label: "状態",
+      label: "Status",
     });
     expect(cols.find((c) => c.key === "status")!.options).toEqual([
       "active",
@@ -486,9 +488,9 @@ describe("created and modified", () => {
       columns: ["title", "created", "modified"],
     });
     expect(cols.map((c) => [c.label, c.editable])).toEqual([
-      ["名前", false],
-      ["作成", false],
-      ["更新", false],
+      ["Name", false],
+      ["Created", false],
+      ["Modified", false],
     ]);
   });
   test("a stamp shows to the minute; other text is left as it is", () => {
@@ -497,5 +499,18 @@ describe("created and modified", () => {
     );
     expect(shortStamp("hello")).toBe("hello");
     expect(shortStamp(undefined)).toBe("");
+  });
+});
+
+describe("a page's name for a person", () => {
+  test("the last segment is the name, the folder a dim breadcrumb", () => {
+    expect(pageName("Projects/Spring Launch")).toBe("Spring Launch");
+    expect(pageCrumb("Projects/Spring Launch")).toBe("Projects ›");
+    expect(pageName("Areas/Store/Shelves")).toBe("Shelves");
+    expect(pageCrumb("Areas/Store/Shelves")).toBe("Areas › Store ›");
+  });
+  test("a top-level page has no breadcrumb", () => {
+    expect(pageName("Tasks")).toBe("Tasks");
+    expect(pageCrumb("Tasks")).toBe("");
   });
 });

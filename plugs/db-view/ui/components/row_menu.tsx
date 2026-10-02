@@ -1,6 +1,8 @@
-import { useRef } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { DbRow } from "../../src/model.ts";
 import type { DbEvent, DbState } from "../mediator/db_mediator.ts";
+import { MoreIcon } from "./icons.tsx";
+import { Popover, rectOf } from "./popover.tsx";
 
 type Emit = (event: DbEvent) => void;
 
@@ -12,9 +14,9 @@ export const hasMenu = (row: DbRow) => row.kind === "page";
 export const renameDefault = (row: DbRow) =>
   row.page.slice(row.page.lastIndexOf("/") + 1) || row.title;
 
-/** The "…" of a row, and while it is open what it offers: rename, archive
- * (or restore), duplicate, delete (asking first). Draws the Mediator's mode and
- * only emits. */
+/** The "⋯" of a row. It never changes the row's height: the menu is the
+ * view's one popover (see `RowPopover`), and while a row is being renamed the
+ * box takes the button's place. It draws the Mediator's mode and only emits. */
 export function RowMenu({
   row,
   state,
@@ -25,34 +27,25 @@ export function RowMenu({
   emit: Emit;
 }) {
   const settled = useRef(false);
+  const rename = useRef<HTMLInputElement>(null);
+  const renaming =
+    state.mode.kind === "renaming" && state.mode.rowId === row.id;
+  useEffect(() => {
+    if (renaming) {
+      rename.current?.focus();
+      rename.current?.select();
+    }
+  }, [renaming]);
   if (!hasMenu(row)) return null;
   const mode = state.mode;
-  const open =
-    mode.kind === "menu" ||
-    mode.kind === "renaming" ||
-    mode.kind === "confirming"
-      ? mode
-      : null;
-  if (!open || open.rowId !== row.id) {
-    return (
-      <button
-        type="button"
-        class="db-btn db-row-menu-btn"
-        disabled={mode.kind !== "idle" && mode.kind !== "menu"}
-        title="行の操作"
-        onClick={() => emit({ type: "row.menu", rowId: row.id })}
-      >
-        …
-      </button>
-    );
-  }
-  if (open.kind === "renaming") {
+  if (renaming) {
     settled.current = false;
     return (
       <input
-        class="db-input db-rename"
+        ref={rename}
+        class="sb-input db-input db-rename"
         type="text"
-        autoFocus
+        aria-label={`Rename ${row.title}`}
         maxLength={100}
         defaultValue={renameDefault(row)}
         onKeyDown={(e) => {
@@ -70,68 +63,62 @@ export function RowMenu({
       />
     );
   }
-  if (open.kind === "confirming") {
-    return (
-      <span class="db-row-menu">
-        <span class="db-confirm">
-          「{row.title}」をゴミ箱へ移しますか? 戻すには「Database: Restore From Trash」
-        </span>
-        <button
-          type="button"
-          class="db-btn db-danger"
-          onClick={() => emit({ type: "row.delete.confirm" })}
-        >
-          ゴミ箱へ
-        </button>
-        <button
-          type="button"
-          class="db-btn"
-          onClick={() => emit({ type: "row.menu.close" })}
-        >
-          やめる
-        </button>
-      </span>
-    );
-  }
+  const open = mode.kind === "menu" && mode.rowId === row.id;
+  return (
+    <button
+      type="button"
+      class="sb-button-icon db-row-menu-btn"
+      data-popover-trigger
+      aria-label="Row actions"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      title="Row actions"
+      disabled={mode.kind !== "idle" && mode.kind !== "menu"}
+      onClick={(e) =>
+        emit({
+          type: "row.menu",
+          rowId: row.id,
+          rect: rectOf(e.currentTarget as Element),
+        })
+      }
+    >
+      <MoreIcon />
+    </button>
+  );
+}
+
+/** What a row's menu offers, hanging from its button: the one popover. */
+export function RowPopover({ state, emit }: { state: DbState; emit: Emit }) {
+  const mode = state.mode;
+  if (mode.kind !== "menu") return null;
+  const row = state.rows.find((r) => r.id === mode.rowId);
+  if (!row) return null;
   const archived = row.values.archived === true;
   return (
-    <span class="db-row-menu">
-      <button
-        type="button"
-        class="db-btn"
-        onClick={() => emit({ type: "row.rename.start", rowId: row.id })}
-      >
-        名前を変える
-      </button>
-      <button
-        type="button"
-        class="db-btn"
-        onClick={() => emit({ type: "row.duplicate", rowId: row.id })}
-      >
-        複製
-      </button>
-      <button
-        type="button"
-        class="db-btn"
-        onClick={() => emit({ type: "row.archive", rowId: row.id })}
-      >
-        {archived ? "アーカイブを戻す" : "アーカイブ"}
-      </button>
-      <button
-        type="button"
-        class="db-btn db-danger"
-        onClick={() => emit({ type: "row.delete.ask", rowId: row.id })}
-      >
-        ゴミ箱へ
-      </button>
-      <button
-        type="button"
-        class="db-btn"
-        title="閉じる"
-        onClick={() => emit({ type: "row.menu.close" })}
-      >
-        ×
-      </button>
-    </span>
+    <Popover
+      anchor={mode.anchor}
+      label={`Actions for ${row.title}`}
+      onClose={() => emit({ type: "row.menu.close" })}
+      items={[
+        {
+          label: "Rename",
+          onSelect: () => emit({ type: "row.rename.start", rowId: row.id }),
+        },
+        {
+          label: "Duplicate",
+          onSelect: () => emit({ type: "row.duplicate", rowId: row.id }),
+        },
+        {
+          label: archived ? "Unarchive" : "Archive",
+          onSelect: () => emit({ type: "row.archive", rowId: row.id }),
+        },
+        "separator",
+        {
+          label: "Move to trash",
+          danger: true,
+          onSelect: () => emit({ type: "row.delete.ask", rowId: row.id }),
+        },
+      ]}
+    />
   );
 }

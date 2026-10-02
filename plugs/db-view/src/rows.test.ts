@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { countTasks, pageRow, taskRow } from "./rows.ts";
+import { countTasks, isListedTaskPage, pageRow, taskRow } from "./rows.ts";
 
 describe("pageRow", () => {
   const obj = {
@@ -97,5 +97,22 @@ describe("pageRow created", () => {
       pageRow({ name: "A", created: "2026-01-01T00:00:00Z" }).created,
     ).toBe("2026-01-01T00:00:00Z");
     expect(pageRow({ name: "A" }).created).toBeUndefined();
+  });
+});
+
+describe("isListedTaskPage", () => {
+  test("templates, library pages and the trash are not listed", () => {
+    expect(isListedTaskPage("Templates/Project")).toBe(false);
+    expect(isListedTaskPage("Library/Std/Docs/Fork Guide")).toBe(false);
+    expect(isListedTaskPage("Trash/Projects/Old")).toBe(false);
+  });
+
+  test("the user's own pages are", () => {
+    expect(isListedTaskPage("Projects/Spring Launch")).toBe(true);
+    expect(isListedTaskPage("Journal/2026-10-02")).toBe(true);
+    expect(isListedTaskPage("index")).toBe(true);
+    // Only a folder prefix counts: these merely start with the same letters.
+    expect(isListedTaskPage("Templates and more")).toBe(true);
+    expect(isListedTaskPage("Libraryfoo/x")).toBe(true);
   });
 });

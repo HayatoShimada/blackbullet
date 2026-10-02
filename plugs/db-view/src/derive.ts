@@ -10,6 +10,19 @@ import {
   type Spec,
 } from "./model.ts";
 
+/** A page's name for a person: its last path segment ("Spring Launch" for
+ * "Projects/Spring Launch"), never the whole path. */
+export function pageName(page: string): string {
+  return page.slice(page.lastIndexOf("/") + 1);
+}
+
+/** The folder a page sits in, as a dim breadcrumb ("Projects ›"), or "" at
+ * the top level. */
+export function pageCrumb(page: string): string {
+  const i = page.lastIndexOf("/");
+  return i === -1 ? "" : `${page.slice(0, i).replaceAll("/", " › ")} ›`;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** `2026-10-02`, in the reader's own time zone. */
@@ -209,7 +222,7 @@ export function groupRows(
   }
   const groups = keys.map((key) => ({ key, label: key, rows: [] as DbRow[] }));
   const byKey = new Map(groups.map((g) => [g.key, g]));
-  const none: Group = { key: NONE_KEY, label: "(なし)", rows: [] };
+  const none: Group = { key: NONE_KEY, label: "None", rows: [] };
   for (const row of rows) {
     const key = keyOf(row);
     (key === NONE_KEY ? none : byKey.get(key)!).rows.push(row);
@@ -331,19 +344,19 @@ const DEFAULT_COLUMNS: Record<string, string[]> = {
 };
 
 const LABELS: Record<string, string> = {
-  title: "名前",
-  status: "状態",
-  due: "期限",
-  area: "エリア",
-  goal: "目標",
-  openTasks: "未完了",
-  doneTasks: "完了",
-  done: "完了",
-  tags: "タグ",
-  page: "ページ",
-  created: "作成",
-  modified: "更新",
-  lastModified: "更新",
+  title: "Name",
+  status: "Status",
+  due: "Due",
+  area: "Area",
+  goal: "Goal",
+  openTasks: "Open",
+  doneTasks: "Done",
+  done: "Done",
+  tags: "Tags",
+  page: "Page",
+  created: "Created",
+  modified: "Modified",
+  lastModified: "Modified",
 };
 
 /** The columns of a table: the spec's, else the database's properties, else

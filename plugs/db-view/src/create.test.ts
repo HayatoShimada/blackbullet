@@ -153,7 +153,7 @@ describe("Lua expansion expression", () => {
       database: "p",
     });
     expect(e).toBe(
-      "database.expandTemplate([[\n${title}]], {title = [[\nT]], page = [[\nP/T]], database = [[\np]]})",
+      "database.expandTemplate([[\n${title}]], {title = [[\nT]], name = [[\nT]], page = [[\nP/T]], database = [[\np]]})",
     );
   });
 });

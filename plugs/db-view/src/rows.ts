@@ -2,6 +2,16 @@ import type { DbRow } from "./model.ts";
 
 type Obj = Record<string, any>;
 
+/** Pages here are not the user's own notes: their tasks are not listed. */
+export const UNLISTED_TASK_FOLDERS = ["Templates/", "Library/", "Trash/"];
+
+/** Whether a task on `page` belongs in a task list (not a template, a library
+ * page or a trashed page). */
+export function isListedTaskPage(page: unknown): boolean {
+  const name = String(page ?? "");
+  return !UNLISTED_TASK_FOLDERS.some((folder) => name.startsWith(folder));
+}
+
 /** What the index keeps about a page that is not the page's own attributes. */
 const INTERNAL = new Set([
   "ref",
