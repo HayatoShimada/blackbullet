@@ -2,7 +2,7 @@
 # Debug builds of rust-embed read client_bundle/ from disk at runtime (absolute path
 # baked in at compile time: /src/client_bundle/...), so the server image is built
 # ONCE per Rust change and the client bundle is bind-mounted at /src/client_bundle.
-# Build with: docker build -f Dockerfile.fork-dev -t silverbullet-fork:devrun .
+# Build with: docker build -f Dockerfile.fork-dev -t blackbullet:devrun .  (scripts/fork-dev.sh server)
 FROM rust:1-alpine AS server
 RUN apk add --no-cache build-base pkgconf perl \
  && ln -s /usr/bin/gcc /usr/local/bin/aarch64-linux-gnu-gcc \

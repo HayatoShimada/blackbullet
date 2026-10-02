@@ -3,7 +3,8 @@
 # This is the SLIM variant: no Chromium, so `/.runtime/*` returns 503.
 # `Dockerfile.runtime-api` layers Chromium on top to create the default image.
 #
-# Published by `.github/workflows/ci.yml`.
+# Upstream SilverBullet publishes this from its CI. BlackBullet has no CI and
+# publishes no images: build natively with Dockerfile.fork (compose.yaml / setup.sh).
 
 FROM alpine:latest
 

@@ -1,4 +1,4 @@
-# Native build of the fork (used on the Pi: no CI-supplied binaries).
+# Native build of BlackBullet (no CI-supplied binaries; this is what compose.yaml / setup.sh use).
 # Slim variant (no Chromium); add the runtime layer later if server-side Lua is needed.
 FROM node:24-bookworm AS web
 WORKDIR /src

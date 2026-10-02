@@ -104,7 +104,7 @@ build-cli-releases-rust:
 # FreeBSD `sb` CLI release archive — kept SEPARATE because it needs a clang +
 # FreeBSD-sysroot cross setup (no apt cross-gcc exists), unlike the apt-only
 # targets above. Requires: clang lld llvm + a FreeBSD base sysroot at
-# /opt/freebsd-sysroot (see edge.yml / .cargo/config.toml).
+# /opt/freebsd-sysroot (see .cargo/config.toml).
 build-cli-releases-freebsd:
 	cargo build --release -p sb --target x86_64-unknown-freebsd
 	cp target/x86_64-unknown-freebsd/release/sb sb && zip sb-freebsd-x86_64.zip sb && rm sb

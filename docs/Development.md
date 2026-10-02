@@ -96,6 +96,8 @@ make test
 ```
 
 ### Docker
+> **BlackBullet:** no images are published and there is no CI. Build and run locally with `./setup.sh` (which uses `compose.yaml` and `Dockerfile.fork`). The rest of this section describes upstream SilverBullet's images.
+
 Multi-arch (amd64 + arm64 + arm/v7) Docker images are published to Docker Hub and the GitHub Container Registry. The **edge** channel is rebuilt on every push to `main`; **stable** images come from git tags:
 
 * `zefhemel/silverbullet:edge` (also `:v2`) / `:latest` + `:X.Y.Z` — the server with Chromium for the server-side Lua runtime (`/.runtime/*`). The old `-runtime-api` tags remain as compatibility aliases.
