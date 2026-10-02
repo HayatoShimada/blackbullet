@@ -31,6 +31,10 @@ claude mcp add --transport http memo http://127.0.0.1:3010/mcp \
 
 Any MCP client works the same way (Claude Desktop, Cursor, …; JSON examples in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md)). Tools include `search_notes`, `read_note`, `related_notes`, `list_tasks`, `list_journal`, `append_journal` and `add_inbox`. The sidecar listens on localhost only; to reach it from another device, put it behind a VPN or the tailnet front door below.
 
+### Ask your notes
+
+`Memo: Ask` answers a question from your notes with citations: the sidecar picks the matching sections, the Anthropic API writes the answer, and each `[n]` links back to the section. It needs an API key in the space's `CONFIG` page, `config.set("memoAsk", {apiKey = "sk-ant-…"})` (optionally `model`, default `claude-opus-5-5`). Only the sections that match that one question are sent, only when you run the command, and not from a space marked `:confidential` in `MEMO_SPACES` unless you set `memoAsk.allowConfidential = true`. The browser sends the key to your SilverBullet server, which forwards it; it never goes to the sidecar and is never indexed. Details in `libraries/Library/Std/Editor/Memo Ask.md`.
+
 ### Reach it from your other devices (optional)
 
 `./setup.sh --tailnet` adds a tailnet-only HTTPS front door: a real domain and certificate, but only people on your [Tailscale](https://tailscale.com) network *and* on your allowlist can open it, and the app itself needs no login screen. Fill in the `TS_AUTHKEY` … `SITE_DOMAIN` keys in `.env` first; the Tailscale ACL, Cloudflare token and DNS steps are in [`deploy/tailnet-proxy/README.md`](deploy/tailnet-proxy/README.md).
@@ -44,11 +48,12 @@ Any MCP client works the same way (Claude Desktop, Cursor, …; JSON examples in
 | Block editor: drag handles, fold toggles, reorder blocks | `client/codemirror/block_editor/`, [`dev-docs/phase3-block-editor-design.md`](dev-docs/phase3-block-editor-design.md) |
 | Database views from a ```` ```db ```` block: table / board / calendar, with in-place edits | `plugs/db-view/`, [`dev-docs/phase4-db-views-design.md`](dev-docs/phase4-db-views-design.md) |
 | Search and related notes; a graph with semantic edges, filters and hops | `libraries/Library/Std/Editor/Memo Search.md`, `plugs/object-graph/` |
+| Ask your notes: answers with citations through the Anthropic API | `libraries/Library/Std/Editor/Memo Ask.md` |
 | In-app guide (the **?** button; Japanese) | `libraries/Library/Std/Docs/Fork Guide.md` |
 | MCP server + REST sidecar: hybrid search (FTS5 trigram + local embeddings, RRF), related notes, graph | [`packages/memo-mcp/`](packages/memo-mcp/) |
 | Tailnet-only HTTPS front door (Tailscale login, no password screen) | [`deploy/tailnet-proxy/`](deploy/tailnet-proxy/) |
 
-Commands added by BlackBullet (open the command palette with `Ctrl-/` or `Cmd-/`): `Navigate: Tree`, `Tree: Undo Move`, `Page: Set Icon`, `Page: Set Cover`, `Page: Remove Cover`, `Memo: Search` (`Ctrl-Shift-f` / `Cmd-Shift-f`), `Memo: Related Notes`, `Help: Fork Guide`. Everything from SilverBullet (quick notes `Ctrl-q q`, journal `Ctrl-q j`, templates, Space Lua, …) is still there.
+Commands added by BlackBullet (open the command palette with `Ctrl-/` or `Cmd-/`): `Navigate: Tree`, `Tree: Undo Move`, `Page: Set Icon`, `Page: Set Cover`, `Page: Remove Cover`, `Memo: Search` (`Ctrl-Shift-f` / `Cmd-Shift-f`), `Memo: Related Notes`, `Memo: Ask`, `Help: Fork Guide`. Everything from SilverBullet (quick notes `Ctrl-q q`, journal `Ctrl-q j`, templates, Space Lua, …) is still there.
 
 The app talks to the sidecar over its own `/.proxy/` route, configured in the space's `CONFIG` page with `config.set("memoSidecar", {url=…, token=…, space=…})` (`setup.sh` writes this). Without the sidecar, search and the semantic graph stay empty; the editor, tree, block editor and database views work on their own.
 

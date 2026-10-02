@@ -168,6 +168,7 @@ export async function searchSpace(idx, opts) {
     perPage.set(h.c.page, n + 1);
     const c = h.c;
     out.push({
+      id: c.id,
       space,
       page: c.page,
       heading_path: c.heading_path,

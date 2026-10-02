@@ -98,6 +98,7 @@ group: status
 * **表示を読んだあとにページが変わっていたら、書き込みません**(「ページが変わっています」と出て、表示を読み直します)。
 * タスクで書き換えられるのは、完了と期限だけです。ページの名前・タグ・タスク数は表では編集しません。
 * 設定(`columns` `where` `sort` `limit` `weekStart` など)の一覧は、ページ [[Library/Std/Editor/DB View]] にあります。
+* `database.define` でデータベース(列の型・既定値・置き場)を定義すると、ビューに「+ New」が出て行を追加できます(詳細は [[Library/Std/APIs/Database]])。
 
 # `@` で人・日付・ページを呼ぶ
 本文で `@` を打つと、候補が出ます。選ぶと次のように入ります。
@@ -118,6 +119,7 @@ group: status
 
 * ${widgets.commandButton("Memo: Search")}(`Ctrl-Shift-f` / `Cmd-Shift-f`): 見出しごとの節を検索。`Enter` でその節へ移動します。
 * ${widgets.commandButton("Memo: Related Notes")}: ページ下部に、意味の近いページとリンク先を表示します。
+* ${widgets.commandButton("Memo: Ask")}: 質問を入力すると、ノートの関連する節を根拠に AI が答えます(出典は `[1]` のリンク)。設定は `memoAsk {apiKey, model}`(詳細は [[Library/Std/Editor/Memo Ask]])。その質問に関係する節だけを Anthropic API に送り、秘匿(`:confidential`)スペースのノートは `memoAsk.allowConfidential = true` にしない限り送りません。
 * グラフ(`Ctrl-Shift-g`): 明示リンクに加えて、意味の近いページ同士を破線でつなぎます。
 
 # 設定
@@ -127,6 +129,7 @@ group: status
 | `actionButtons` | ヘッダーのボタン。このフォークでは「?」(ヘルプ)を足してあります。自前の `actionButtons` を書くと表全体が置き換わるので、`{icon = "help-circle", description = "Help", command = "Help: Fork Guide"}` も書いてください |
 | `view.defaults` | ビューごとの既定(ドック、開閉、幅)。このフォークでは `std.spaceTree` が起動時に開く既定です。自前の `view.defaults` を書くと表全体が置き換わるので、`["std.spaceTree"] = {open = true}` も書いてください |
 | `memoSidecar` | 検索サイドカーの接続(`url` / `token` / `space`) |
+| `memoAsk` | Memo: Ask の設定(`apiKey` / `model` / `maxTokens` / `k` / `allowConfidential`) |
 
 # このフォークのコマンド一覧
 このフォークで追加したコマンドです(登録されているものだけを、キーの割り当てとともに表示します)。
@@ -148,6 +151,7 @@ local FORK_COMMANDS = {
   "Page: Remove Cover",
   "Memo: Search",
   "Memo: Related Notes",
+  "Memo: Ask",
   "Help: Fork Guide",
 }
 

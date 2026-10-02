@@ -112,6 +112,20 @@ function memo.describeFailure(res)
   return msg
 end
 
+-- The result of a pcall(net.proxyFetch, …) -> decoded body, or nil plus a message.
+function memo.decodeResponse(ok, res)
+  if not ok then
+    return nil, "Memo sidecar is unreachable\nIs it running? " .. tostring(res)
+  end
+  if not res.ok or res.status < 200 or res.status >= 300 then
+    return nil, memo.describeFailure(res)
+  end
+  if type(res.body) != "table" then
+    return nil, "Memo sidecar returned an unexpected response"
+  end
+  return res.body
+end
+
 -- Returns the decoded body, or nil plus a message. Never throws: a sidecar that is down
 -- must only cost the memo views, not the editor.
 function memo.request(endpoint, params)
@@ -123,17 +137,34 @@ function memo.request(endpoint, params)
   if cfg.token and cfg.token != "" then
     headers.Authorization = "Bearer " .. cfg.token
   end
-  local ok, res = pcall(net.proxyFetch, memo.buildUrl(cfg, endpoint, params), { headers = headers })
-  if not ok then
-    return nil, "Memo sidecar is unreachable\nIs it running? " .. tostring(res)
+  local body, failure = memo.decodeResponse(pcall(net.proxyFetch, memo.buildUrl(cfg, endpoint, params), { headers = headers }))
+  if not body then
+    return nil, failure
   end
-  if not res.ok or res.status < 200 or res.status >= 300 then
-    return nil, memo.describeFailure(res)
+  return body, nil, cfg
+end
+
+-- POST variant of memo.request for the endpoints that take a JSON body (/api/ask). The
+-- sidecar space goes into the body; net.proxyFetch JSON-encodes a table body itself.
+function memo.requestJson(endpoint, fields)
+  local cfg, err = memo.sidecarConfig()
+  if not cfg then
+    return nil, err
   end
-  if type(res.body) != "table" then
-    return nil, "Memo sidecar returned an unexpected response"
+  local headers = { ["content-type"] = "application/json" }
+  if cfg.token and cfg.token != "" then
+    headers.Authorization = "Bearer " .. cfg.token
   end
-  return res.body, nil, cfg
+  local payload = { space = cfg.space }
+  for k, v in pairs(fields or {}) do
+    payload[k] = v
+  end
+  local body, failure = memo.decodeResponse(pcall(net.proxyFetch, cfg.base .. "/api/" .. endpoint,
+    { method = "POST", headers = headers, body = payload }))
+  if not body then
+    return nil, failure
+  end
+  return body, nil, cfg
 end
 
 -- FTS snippets start with the section's context header, "[notes / Page > Heading] ...".

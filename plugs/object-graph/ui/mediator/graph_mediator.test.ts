@@ -389,12 +389,12 @@ describe("selectView", () => {
       type: "semantic.loaded",
       result: {
         status: "unconfigured",
-        message: "no memoSidecar",
+        message: "Memo sidecar is not configured — set memoSidecar in CONFIG",
         edges: [],
       },
     }).state;
     expect(selectView(off).semanticNotice).toBe(
-      "Semantic edges off: no memoSidecar",
+      "Semantic edges off: Memo sidecar is not configured — set memoSidecar in CONFIG",
     );
     const ok = transition(base, {
       type: "semantic.loaded",

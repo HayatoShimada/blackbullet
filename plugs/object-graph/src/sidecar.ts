@@ -44,7 +44,7 @@ export async function fetchSemanticGraph(): Promise<SemanticGraphResult> {
   if (!cfg?.url || !cfg.space) {
     return {
       status: "unconfigured",
-      message: "memoSidecar is not configured",
+      message: "Memo sidecar is not configured — set memoSidecar in CONFIG",
       edges: [],
     };
   }

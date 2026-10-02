@@ -41,9 +41,16 @@ async function start(port, env) {
   throw new Error("サーバーが起動しない");
 }
 
-const api = (port) => async (p, { token = TOKEN, method = "GET" } = {}) => {
-  const r = await fetch(`http://127.0.0.1:${port}/api/${p}`, { method, headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  return { status: r.status, body: await r.json() };
+// body（文字列ならそのまま、それ以外は JSON）を付けると POST になる
+const api = (port) => async (p, { token = TOKEN, body, method = body === undefined ? "GET" : "POST" } = {}) => {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const init = { method, headers };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = typeof body === "string" ? body : JSON.stringify(body);
+  }
+  const r = await fetch(`http://127.0.0.1:${port}/api/${p}`, init);
+  return { status: r.status, body: await r.json(), headers: r.headers };
 };
 
 // Host ヘッダを指定して /api を叩く（fetch では Host を差し替えにくい）
@@ -107,10 +114,68 @@ test("認証なし / 違うトークンは 401", async () => {
   assert.equal((await a("search?space=notes&q=x", { token: "bad" })).status, 401);
 });
 
-test("GET 以外は 405、未知のパスは 404", async () => {
+test("対応しないメソッドは 405 + Allow、未知のパスは 404", async () => {
   const a = api(OFF_PORT);
-  assert.equal((await a("search?space=notes&q=x", { method: "POST" })).status, 405);
+  const post = await a("search?space=notes&q=x", { method: "POST" });
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get("allow"), "GET");
+  const get = await a("ask?space=notes&q=x");
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get("allow"), "POST");
   assert.equal((await a("nothing?space=notes")).status, 404);
+});
+
+test("ask: 質問に関係する節が本文と ref つきで返る", async () => {
+  const { status, body } = await api(OFF_PORT)("ask", { body: { space: "notes", q: "demo launch campaign", k: 3 } });
+  assert.equal(status, 200);
+  assert.equal(body.question, "demo launch campaign");
+  assert.equal(body.mode, "lexical");
+  assert.equal(body.confidential, false);
+  assert.ok(body.warning, "MEMO_EMBED=off なので warning が付く");
+  assert.ok(body.sections.length >= 1 && body.sections.length <= 3);
+  const top = body.sections[0];
+  assert.equal(top.page, "Projects/Demo");
+  assert.ok(Array.isArray(top.heading_path) && top.heading_path.includes("Outcome"), JSON.stringify(top.heading_path));
+  assert.match(top.text, /demo launch campaign/);
+  assert.equal(top.ref, `Projects/Demo@L${top.heading_line}`);
+  for (const s of body.sections) {
+    assert.equal(typeof s.text, "string");
+    assert.ok(s.text.length > 0);
+    assert.match(s.ref, /^[^@]+(@L\d+)?$/);
+    assert.ok(Number.isInteger(s.line_start) && s.line_end >= s.line_start);
+  }
+  // space はクエリ文字列でも指定できる
+  const viaQuery = await api(OFF_PORT)("ask?space=notes", { body: { q: "newsletter", mode: "lexical" } });
+  assert.equal(viaQuery.status, 200);
+  assert.equal(viaQuery.body.warning, undefined);
+  assert.ok(viaQuery.body.sections.length >= 1);
+});
+
+test("ask: q 必須、k・mode の不正と壊れた JSON は 400", async () => {
+  const a = api(OFF_PORT);
+  assert.equal((await a("ask", { body: { space: "notes" } })).status, 400);
+  assert.equal((await a("ask", { body: { space: "notes", q: "x".repeat(501) } })).status, 400);
+  assert.equal((await a("ask", { body: { space: "notes", q: "x", k: 0 } })).status, 400);
+  assert.equal((await a("ask", { body: { space: "notes", q: "x", k: 21 } })).status, 400);
+  assert.equal((await a("ask", { body: { space: "notes", q: "x", k: "8" } })).status, 400);
+  assert.equal((await a("ask", { body: { space: "notes", q: "x", mode: "bogus" } })).status, 400);
+  const broken = await a("ask?space=notes", { body: "{not json" });
+  assert.equal(broken.status, 400);
+  assert.ok(broken.body.error);
+  assert.equal((await a("ask?space=notes", { body: "[1]" })).status, 400);
+  assert.equal((await a("ask", { body: { q: "x" } })).status, 400, "space なし");
+  assert.equal((await a("ask", { body: { space: "nope", q: "x" } })).status, 404);
+  // 4 MiB を超える body は 413（Content-Length で読む前に弾く）
+  const big = await a("ask", { body: JSON.stringify({ space: "notes", q: "x", pad: "p".repeat(4 * 1024 * 1024 + 1) }) });
+  assert.equal(big.status, 413);
+  assert.ok(big.body.error);
+});
+
+test("ask: work は confidential=true で返る", async () => {
+  const { status, body } = await api(OFF_PORT)("ask", { body: { space: "work", q: "会議メモ" } });
+  assert.equal(status, 200);
+  assert.equal(body.confidential, true);
+  assert.ok(body.sections.every((s) => s.page === "Areas/Team"));
 });
 
 test("space が無い / 未知のとき 400 / 404 と {error}", async () => {

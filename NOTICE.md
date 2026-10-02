@@ -7,8 +7,8 @@ Additions and modifications by HayatoShimada, Copyright (C) 2026, are licensed u
 - `plugs/db-view/`
 - `client/codemirror/block_editor/`
 - `client/navigator/ui/mediator/` and the drag/move changes around it
-- `plugs/object-graph/` (semantic edges, filters, hops, Mediator) and `libraries/Library/Std/Editor/Memo Search.md`
-- `libraries/Library/Std/Editor/Page Header.md`, `libraries/Library/Std/Editor/DB View.md`, `libraries/Library/Std/Docs/Fork Guide.md`
+- `plugs/object-graph/` (semantic edges, filters, hops, Mediator), `libraries/Library/Std/Editor/Memo Search.md` and `libraries/Library/Std/Editor/Memo Ask.md`
+- `libraries/Library/Std/Editor/Page Header.md`, `libraries/Library/Std/Editor/DB View.md`, `libraries/Library/Std/APIs/Database.md`, `libraries/Library/Std/Docs/Fork Guide.md`
 - `packages/memo-mcp/` (MCP server and REST sidecar; its dependencies keep their own licenses)
 - `deploy/`, `dev-docs/` (except where a file says otherwise), `scripts/fork-dev.sh`, `Dockerfile.fork*`
 

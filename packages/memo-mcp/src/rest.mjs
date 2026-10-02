@@ -10,6 +10,9 @@ import { searchSpace, neighbors, sectionVectors } from "./search.mjs";
 import { EMBED_ENABLED, cosine } from "./embed.mjs";
 
 const NO_EMBED_WARNING = "MEMO_EMBED=off のため意味検索は無効です";
+// POST の JSON body の上限。http.mjs の MCP 側と同じ 4 MiB
+const MAX_BODY = 4 * 1024 * 1024;
+const MODES = ["hybrid", "lexical", "semantic"];
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -45,14 +48,34 @@ const flag = (q, name) => ["1", "true"].includes(q.get(name));
 /** 0 始まりの内部順位を 1 始まりにして返す。無ければ null。 */
 const rank1 = (r) => (r === undefined ? null : r + 1);
 
+/** 検索語の検証（/api/search の q、/api/ask の body.q で共通）。 */
+function validQuery(raw) {
+  const query = (typeof raw === "string" ? raw : "").trim();
+  if (!query) throw new HttpError(400, "q が必要です");
+  if (query.length > 500) throw new HttpError(400, "q が長すぎます（500 字まで）");
+  return query;
+}
+
+function validMode(raw) {
+  const mode = raw ?? "hybrid";
+  if (!MODES.includes(mode)) throw new HttpError(400, "mode は hybrid / lexical / semantic のいずれかです");
+  return mode;
+}
+
+/** 意味検索が使えなかったときの説明。使えたときは undefined。 */
+function semanticWarning(mode, hits) {
+  if (mode === "lexical") return undefined;
+  if (!EMBED_ENABLED) return NO_EMBED_WARNING;
+  if (hits.semanticError) return `意味検索が今は使えません（${hits.semanticError}）。語彙検索で返しています`;
+  if (!hits.semanticUsed) return "セマンティック検索の結果がありません（埋め込み未生成の可能性）。語彙検索で返しています";
+  return undefined;
+}
+
 // ---------- /api/search ----------
 
 async function search(idx, q) {
-  const query = (q.get("q") ?? "").trim();
-  if (!query) throw new HttpError(400, "q が必要です");
-  if (query.length > 500) throw new HttpError(400, "q が長すぎます（500 字まで）");
-  const mode = q.get("mode") ?? "hybrid";
-  if (!["hybrid", "lexical", "semantic"].includes(mode)) throw new HttpError(400, "mode は hybrid / lexical / semantic のいずれかです");
+  const query = validQuery(q.get("q"));
+  const mode = validMode(q.get("mode"));
   const limit = intParam(q, "limit", 10, 1, 50);
 
   const hits = await searchSpace(idx, { query, mode, limit });
@@ -60,7 +83,8 @@ async function search(idx, q) {
     mode: hits.semanticUsed ? mode : "lexical",
     results: hits.map((h) => ({
       page: h.page,
-      heading_path: h.heading_path.split(" > "),
+      // 長い節の続き断片の " (2)" 接尾辞は表示用に落とす。" > " を含む見出しは分割される（ベストエフォート）。
+      heading_path: h.heading_path.replace(/ \([2-9]\d*\)$/, "").split(" > "),
       line_start: h.line_start,
       line_end: h.line_end,
       heading_line: h.heading_line,
@@ -69,10 +93,56 @@ async function search(idx, q) {
       ranks: { lexical: rank1(h.ranks.lexical), semantic: rank1(h.ranks.semantic) },
     })),
   };
-  if (!EMBED_ENABLED && mode !== "lexical") body.warning = NO_EMBED_WARNING;
-  else if (mode !== "lexical" && hits.semanticError) body.warning = `意味検索が今は使えません（${hits.semanticError}）。語彙検索で返しています`;
-  else if (mode !== "lexical" && !hits.semanticUsed) body.warning = "セマンティック検索の結果がありません（埋め込み未生成の可能性）。語彙検索で返しています";
+  const warning = semanticWarning(mode, hits);
+  if (warning) body.warning = warning;
   return body;
+}
+
+// ---------- /api/ask ----------
+
+const ASK_K_MAX = 20;
+
+/** JSON body の整数フィールド。未指定なら既定値、数値でない・範囲外は 400。 */
+function bodyInt(body, name, def, min, max) {
+  const v = body[name];
+  if (v === undefined || v === null) return def;
+  if (!Number.isInteger(v) || v < min || v > max) throw new HttpError(400, `${name} は ${min}〜${max} の整数で指定してください`);
+  return v;
+}
+
+/** 節を開く位置。見出し行があればそこ、無ければ本文の先頭行、それも無ければページだけ。 */
+function sectionRef(h) {
+  const line = h.heading_line ?? h.line_start;
+  return Number.isInteger(line) && line >= 1 ? `${h.page}@L${line}` : h.page;
+}
+
+/**
+ * 質問に関係する節を本文つきで返す（AI に渡す根拠）。回答の生成はブラウザ側で行う。
+ * ここは検索と同じヒットに、節の全文を足すだけ。
+ */
+async function ask(idx, _q, body) {
+  const query = validQuery(body.q);
+  const mode = validMode(body.mode);
+  const k = bodyInt(body, "k", 8, 1, ASK_K_MAX);
+
+  const hits = await searchSpace(idx, { query, mode, limit: k });
+  const out = {
+    question: query,
+    mode: hits.semanticUsed ? mode : "lexical",
+    sections: hits.map((h) => ({
+      page: h.page,
+      // 長い節の続き断片の " (2)" 接尾辞は表示用に落とす。" > " を含む見出しは分割される（ベストエフォート）。
+      heading_path: h.heading_path.replace(/ \([2-9]\d*\)$/, "").split(" > "),
+      heading_line: h.heading_line,
+      line_start: h.line_start,
+      line_end: h.line_end,
+      ref: sectionRef(h),
+      text: idx.rows("select text from sections where id = ?", [h.id])[0]?.text ?? "",
+    })),
+  };
+  const warning = semanticWarning(mode, hits);
+  if (warning) out.warning = warning;
+  return out;
 }
 
 // ---------- /api/related ----------
@@ -208,7 +278,37 @@ async function graph(idx, q) {
   return body;
 }
 
-const ROUTES = { "/api/search": search, "/api/related": related, "/api/graph": graph };
+// パスごとに、対応するメソッドとハンドラ (idx, searchParams, jsonBody) => body
+const ROUTES = {
+  "/api/search": { GET: search },
+  "/api/related": { GET: related },
+  "/api/graph": { GET: graph },
+  "/api/ask": { POST: ask },
+};
+
+/** POST の JSON body を読む。空なら {}。壊れた JSON は 400、大きすぎれば 413。 */
+async function readJsonBody(req) {
+  const tooLarge = () => new HttpError(413, "body が大きすぎます（4 MiB まで）");
+  // 読み始める前に Content-Length で弾く。読んでいる途中で中断すると接続ごと切れて 413 が届かない
+  if (Number(req.headers["content-length"]) > MAX_BODY) throw tooLarge();
+  const chunks = [];
+  let n = 0;
+  for await (const c of req) {
+    n += c.length;
+    if (n > MAX_BODY) throw tooLarge();
+    chunks.push(c);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw.trim()) return {};
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, "body を JSON として読めません");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "body は JSON オブジェクトで指定してください");
+  return body;
+}
 
 /**
  * /api/* を処理する。認証・Origin 検証は呼び出し側で済んでいること。
@@ -216,18 +316,24 @@ const ROUTES = { "/api/search": search, "/api/related": related, "/api/graph": g
  */
 export async function handleRest(req, res, url, { spaces, indexes }) {
   try {
-    if (req.method !== "GET") throw new HttpError(405, "GET のみ対応しています");
     const route = ROUTES[url.pathname];
     if (!route) throw new HttpError(404, "Not found");
-    const space = url.searchParams.get("space");
+    const handler = route[req.method];
+    if (!handler) {
+      const allowed = Object.keys(route).join(", ");
+      res.setHeader("Allow", allowed);
+      throw new HttpError(405, `${allowed} のみ対応しています`);
+    }
+    const json = req.method === "POST" ? await readJsonBody(req) : {};
+    // space はクエリでも body でも指定できる（POST は body が普通）
+    const space = url.searchParams.get("space") || (typeof json.space === "string" ? json.space : "");
     if (!space) throw new HttpError(400, "space が必要です");
     if (!spaces[space]) throw new HttpError(404, `未知のスペース: ${space}`);
     const idx = await indexes.get(space);
-    const body = await route(idx, url.searchParams);
+    const body = await handler(idx, url.searchParams, json);
     sendJson(res, 200, { ...body, confidential: Boolean(spaces[space].confidential) });
   } catch (e) {
     if (e instanceof HttpError) {
-      if (e.status === 405) res.setHeader("Allow", "GET");
       sendJson(res, e.status, { error: e.message });
       return;
     }
