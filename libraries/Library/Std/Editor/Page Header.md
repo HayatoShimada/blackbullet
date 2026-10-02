@@ -7,7 +7,9 @@ pageDecoration:
   icon: 📚
   cover: Images/desk.jpg   # a file in the space, or an https:// URL
 ```
-A page with neither shows no header. The icon is the same `pageDecoration.icon` the tree, the top bar and links already use, and it takes an emoji, a Feather name or an SVG; only an emoji is drawn large here.
+A page with neither shows no header, apart from the folder line on a phone (below). The icon is the same `pageDecoration.icon` the tree, the top bar and links already use, and it takes an emoji, a Feather name or an SVG; only an emoji is drawn large here.
+
+The cover is 180 px tall (120 px on a phone) with rounded corners; a large icon sits on its lower edge, overlapping it by 24 px. When the page lives in a folder, a quiet _Projects ›_ line sits above the header (a quick note, which the top bar titles _Quick note · 11:17_, gets its day: _2026-10-02 ›_). The top bar already shows that trail on a wide screen, so the line only appears on a phone, where the top bar leaves it out to give the page name the room.
 
 # Commands
 * ${widgets.commandButton("Page: Set Icon")}: asks for an emoji or a Feather icon name; an empty answer removes it.
@@ -143,15 +145,40 @@ local function isEmoji(s)
     and string.find(s, "^%s*<svg") == nil
 end
 
+-- "Projects/Plans/Spring Launch" -> "Projects › Plans ›", or nil for a page at the top level.
+-- A quick note ("Inbox/2026-10-02/11-17-18") is titled "Quick note · 11:17" by the top bar, with
+-- the day as the dim part: the trail here says the same, "2026-10-02 ›", not the path.
+function pageHeader.crumb(page)
+  page = tostring(page or "")
+  local day = string.match(page, "^.*/(%d%d%d%d%-%d%d%-%d%d)/%d%d%-%d%d%-%d%d$")
+  if day then
+    return day .. " ›"
+  end
+  local folder = string.match(page, "^(.*)/[^/]+$")
+  if not folder or folder == "" then
+    return nil
+  end
+  return string.gsub(folder, "/", " › ") .. " ›"
+end
+
 function pageHeader.markdown()
   -- Read from the text, not from the page's object: space.getPageMeta carries
   -- no frontmatter, and the index can lag behind an edit.
-  if not editor.getCurrentPage() then
+  local page = editor.getCurrentPage()
+  if not page then
     return nil
   end
   local decoration = pageHeader.decoration()
   local lines = {}
-  if type(decoration.cover) == "string" and decoration.cover != "" then
+  local crumb = pageHeader.crumb(page)
+  local hasCover = type(decoration.cover) == "string" and decoration.cover != ""
+  local hasIcon = isEmoji(decoration.icon)
+  -- Always written: the style below hides it from 601 px up, where the top bar carries the
+  -- trail, so a resize or a rotation needs no new render.
+  if crumb then
+    table.insert(lines, '<span class="sb-page-crumb">' .. crumb .. "</span>")
+  end
+  if hasCover then
     local src = decoration.cover
     if not isUrl(src) then
       -- The renderer resolves a space path itself (to /.fs/...): no leading slash.
@@ -159,7 +186,7 @@ function pageHeader.markdown()
     end
     table.insert(lines, "![cover](" .. src .. ")")
   end
-  if isEmoji(decoration.icon) then
+  if hasIcon then
     table.insert(lines, "# " .. decoration.icon)
   end
   if #lines == 0 then
@@ -209,18 +236,61 @@ The view is framed like any page widget. Here the frame is dropped: no border, a
   padding: 0;
 }
 
+/* The markdown renderer wraps each paragraph in span.p and separates them with <br>: the
+   spacing here is set by margins instead. */
+.sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) .wrapper > br {
+  display: none;
+}
+
+.sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) .wrapper > span.p {
+  display: block;
+}
+
 .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) img[alt="cover"] {
   display: block;
   width: 100%;
-  height: 200px;
+  height: 180px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--sb-radius-2, 8px);
 }
 
 /* #sb-main: the editor's own widget typography is scoped under it. */
 #sb-main .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) h1 {
   margin: 0.2em 0 0;
-  font-size: 3rem;
+  font-size: 64px;
   line-height: 1.1;
+}
+
+/* the icon sits on the cover's lower edge, 24 px of it over the picture */
+#sb-main .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) span.p:has(> img[alt="cover"]) ~ h1 {
+  position: relative;
+  margin-top: -24px;
+  margin-bottom: 12px;
+  padding-left: 16px;
+}
+
+/* the folder trail above the header: dim, small, and only where the top bar leaves it out */
+#sb-main .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) .sb-page-crumb {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--sb-ink-2, var(--subtle-color));
+}
+
+@media (max-width: 600px) {
+  .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) img[alt="cover"] {
+    height: 120px;
+  }
+}
+
+@media (min-width: 601px) {
+  #sb-main .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]) span.p:has(> .sb-page-crumb) {
+    display: none;
+  }
+
+  /* a header that is only the crumb has nothing left to show here: no empty frame */
+  #sb-main .sb-page-widget:has(.sb-page-widget-fold[title$=" Page header"]):not(:has(img[alt="cover"], h1)) {
+    display: none;
+  }
 }
 ```

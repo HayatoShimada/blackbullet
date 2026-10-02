@@ -1,6 +1,6 @@
 #meta
 
-Ask a question in plain language and get an answer grounded in your own notes, with citations. The memo search sidecar (`memo-mcp`, see [[Library/Std/Editor/Memo Search]]) picks the sections that match the question; those sections and the question are then sent to the Anthropic Messages API, which writes the answer. Nothing else leaves your machine (a follow-up also sends the earlier question and the start of the earlier answer, to rewrite the search query), and nothing is sent for a sidecar space that is marked `:confidential` unless you set `allowConfidential = true`.
+Ask a question in plain language and get an answer grounded in your own notes, with citations. The search service (`memo-mcp`, see [[Library/Std/Editor/Memo Search]]) picks the sections that match the question; those sections and the question are then sent to the Anthropic Messages API, which writes the answer. Nothing else leaves your machine (a follow-up also sends the earlier question and the start of the earlier answer, to rewrite the search query), and nothing is sent for a space that is marked `:confidential` unless you set `allowConfidential = true`.
 
 # Configuration
 Besides `memoSidecar` (see [[Library/Std/Editor/Memo Search]]), put this in your `CONFIG` page (use `space-lua` instead of `lua` in your actual page):
@@ -21,17 +21,17 @@ config.set("memoAsk", {
 })
 ```
 
-The request goes through SilverBullet's own `/.proxy/` route (`net.proxyFetch`) to `api.anthropic.com`, so the browser never calls the API directly: it sends the key to your SilverBullet server, which forwards it. The key never goes to the sidecar. `CONFIG` itself is never indexed by the sidecar, so the key cannot end up in a prompt.
+The request goes through the app's own `/.proxy/` route (`net.proxyFetch`) to `api.anthropic.com`, so the browser never calls the API directly: it sends the key to your app's server, which forwards it. The key never goes to the search service. `CONFIG` itself is never indexed, so the key cannot end up in a prompt.
 
-## First time: Memo: Set up Ask
-Run ${widgets.commandButton("Memo: Set up Ask")}: it asks for your Anthropic API key (get one at console.anthropic.com) and the model, then adds a `space-lua` block to your `CONFIG` page (or replaces the one it wrote earlier; your other `memoAsk` options are kept). The key is stored in plain text in `CONFIG`, which is never indexed by the sidecar. Until then, Memo: Ask answers "not configured" and names this command.
+## First time: Ask: Set up
+Run ${widgets.commandButton("Ask: Set up")}: it asks for your Anthropic API key (get one at console.anthropic.com) and the model, then adds a `space-lua` block to your `CONFIG` page (or replaces the one it wrote earlier; your other `memoAsk` options are kept). The key is stored in plain text in `CONFIG`, which is never indexed. Until then, _Ask_ opens a panel that says it needs a key and has a **Set up Ask** row that runs this command; with Search by meaning off, it says that instead (no red banner over your page).
 
 # Commands
-* ${widgets.commandButton("Memo: Ask")}: asks for a question, looks up the matching sections, and shows the answer in a modal. Citations like `[2]` in the answer link to the sections (`Page@L12`). Running the command again starts a new conversation; the view remembers the last answer.
-* ${widgets.commandButton("Memo: Ask - Follow-up")}: asks a follow-up in the same conversation ("and the deadline?"). The earlier questions and answers (not their notes) go to the model with the new notes, the follow-up is first rewritten into a standalone search query using the last turn, the scope of the last question carries over, and the view shows the whole thread. At most `maxTurns` earlier turns are sent. You can also continue an answer reopened from the history.
-* ${widgets.commandButton("Memo: Ask - New Conversation")}: forgets the conversation on screen.
-* ${widgets.commandButton("Memo: Ask - Save Answer")}: saves the answer shown as a page `Ask/<date> <question>` with the question, the answer and its sources, tagged `memo-answer` (the sidecar indexes it like any note; there is no way to exclude a tag or folder from a scope, so keep saved answers out of the index if you do not want them fed back into later questions).
-* ${widgets.commandButton("Memo: Ask - History")}: reopens one of the last 10 answers of this session.
+* ${widgets.commandButton("Ask: Notes")} (`Ctrl-q a`): asks for a question, looks up the matching sections, and shows the answer in a modal. Citations like `[2]` in the answer link to the sections (`Page@L12`). Running the command again starts a new conversation; the view remembers the last answer.
+* ${widgets.commandButton("Ask: Follow-up")}: asks a follow-up in the same conversation ("and the deadline?"). The earlier questions and answers (not their notes) go to the model with the new notes, the follow-up is first rewritten into a standalone search query using the last turn, the scope of the last question carries over, and the view shows the whole thread. At most `maxTurns` earlier turns are sent. You can also continue an answer reopened from the history.
+* ${widgets.commandButton("Ask: New Conversation")}: forgets the conversation on screen.
+* ${widgets.commandButton("Ask: Save Answer")}: saves the answer shown as a page `Ask/<date> <question>` with the question, the answer and its sources, tagged `memo-answer` (the search service indexes it like any note; there is no way to exclude a tag or folder from a scope, so keep saved answers out of the index if you do not want them fed back into later questions).
+* ${widgets.commandButton("Ask: History")}: reopens one of the last 10 answers of this session.
 
 ## Scoping a question
 Words at the start of the question narrow what is searched (and so what is sent to the API):
@@ -46,13 +46,13 @@ Words at the start of the question narrow what is searched (and so what is sent 
 | `status:active` | only pages with this status |
 | `since:2026-09-01` | only pages modified since this date |
 
-Example: `#project since:2026-09-01 when is the launch?`. `memoAsk.defaultScope` sets the same filters for every question; words in the question override it, but a default cannot be switched off for a single question (change `defaultScope` instead). Page and `asked:` dates use the time the question was asked. A sidecar that does not understand scopes is refused rather than searching everything.
+Example: `#project since:2026-09-01 when is the launch?`. `memoAsk.defaultScope` sets the same filters for every question; words in the question override it, but a default cannot be switched off for a single question (change `defaultScope` instead). Page and `asked:` dates use the time the question was asked. A service that does not understand scopes is refused rather than searching everything.
 
 ## Size and cost
-Before sending, the prompt size is estimated (about 1 token per 3 ASCII characters, which over-counts English, plus 1 token per Japanese or other non-ASCII character) and shown in the notification. Above `memoAsk.maxInputTokens` (default 50000) nothing is sent: narrow the scope or lower `k`. The answer ends with the estimate and the input/output tokens the API reported.
+Before sending, the prompt size is estimated (about 1 token per 3 ASCII characters, which over-counts English, plus 1 token per Japanese or other non-ASCII character) and shown in the notice. Above `memoAsk.maxInputTokens` (default 50000) nothing is sent: narrow the scope or lower `k`. The answer ends with the estimate and the input/output tokens the API reported.
 
 ## Retrieval
-The sidecar's scores are rank-fusion scores: the best possible one is a section ranked first by both keywords and meaning, and a section found by only one of the two tops out at about half of it. `minScoreRatio` (0.4) therefore drops weaker one-list matches (below about rank 15) that trail a double match; raise it to be stricter, set 0 to keep everything. With `expand` (on by default) the sections before and after the best hit are sent as well, labelled as context, so a long section's continuation is not lost. `instructions` is added after the fixed rules, which still say that note text is data. The system prompt and the last earlier answer carry `cache_control` breakpoints, so a model that caches prefixes of that size can reuse the thread on a follow-up; whether it does depends on the model's minimum cacheable length (check `usage.cache_read_input_tokens`). In a follow-up the scope of the previous question carries over; start a new conversation to drop it.
+The service's scores are rank-fusion scores: the best possible one is a section ranked first by both keywords and meaning, and a section found by only one of the two tops out at about half of it. `minScoreRatio` (0.4) therefore drops weaker one-list matches (below about rank 15) that trail a double match; raise it to be stricter, set 0 to keep everything. With `expand` (on by default) the sections before and after the best hit are sent as well, labelled as context, so a long section's continuation is not lost. `instructions` is added after the fixed rules, which still say that note text is data. The system prompt and the last earlier answer carry `cache_control` breakpoints, so a model that caches prefixes of that size can reuse the thread on a follow-up; whether it does depends on the model's minimum cacheable length (check `usage.cache_read_input_tokens`). In a follow-up the scope of the previous question carries over; start a new conversation to drop it.
 
 ## Sources
 The _Sources_ list splits into the sections the answer cites and those that were sent but not cited, each with an excerpt, so you can check an answer without opening every page.
@@ -65,14 +65,14 @@ The _Sources_ list splits into the sections the answer cites and those that were
 memo = memo or {}
 
 config.define("memoAsk", {
-  description = "Memo: Ask — answers a question from the matching notes through the Anthropic Messages API",
+  description = "Ask: Notes: answers a question from the matching notes through the Anthropic Messages API",
   type = "object",
   properties = {
     apiKey = { type = "string", description = "Anthropic API key; the matching sections of a question are sent with it" },
     model = { type = "string", description = "Model id, default claude-opus-5-5" },
     maxTokens = { type = "number", description = "Longest answer in tokens, default 4096" },
     k = { type = "number", description = "How many sections to send, 1–20, default 8" },
-    allowConfidential = { type = "boolean", description = "Also ask over a sidecar space marked :confidential (default false: confidential notes are not sent)" },
+    allowConfidential = { type = "boolean", description = "Also ask over a space marked :confidential (default false: confidential notes are not sent)" },
     maxInputTokens = { type = "number", description = "Refuse to send a prompt estimated above this many tokens, default 50000" },
     instructions = { type = "string", description = "Your own instructions (answer style, language, persona), appended to the system prompt; the rule that notes are data stays" },
     minScoreRatio = { type = "number", description = "Drop sections scoring below this fraction of the best one, 0–1, default 0.4 (0 keeps everything)" },
@@ -98,10 +98,10 @@ memo.askDefaults = ASK_DEFAULTS
 memo.askApiUrl = "api.anthropic.com/v1/messages"
 local API_VERSION = "2023-06-01"
 
--- Not NOT_CONFIGURED: the Lua tests load Memo Search and this page as one chunk, where
--- a second `local` of the same name rebinds Memo Search's message too.
-local ASK_NOT_CONFIGURED = "Memo: Ask is not configured\n" ..
-  "Run the command “Memo: Set up Ask” to add your Anthropic API key (or set memoAsk {apiKey, model} in CONFIG)"
+-- What the Ask panel says when it cannot ask yet (kept on `memo`, not as locals: the Lua
+-- tests load Memo Search and this page as one chunk).
+memo.ASK_NO_KEY = "Ask needs an Anthropic API key. It is stored in your CONFIG page and used only when you ask."
+memo.ASK_NO_SEARCH = "Ask reads your notes through Search by meaning, which is off."
 
 local ASK_SYSTEM = "You answer questions about the user's personal notes. " ..
   "Use only the notes given in the message; do not add outside knowledge. " ..
@@ -122,7 +122,7 @@ function memo.askSystem(cfg)
   return ASK_SYSTEM
 end
 
--- Scope words and the sidecar fields they become.
+-- Scope words and the search fields they become.
 local SCOPE_FIELDS = { tag = "tag", folder = "prefix", kind = "kind", area = "area", status = "status", since = "since" }
 local SCOPE_ORDER = { "tag", "folder", "kind", "area", "status", "since" }
 -- `in` is not a valid bare table key in Lua, so the parser maps it to `folder` after matching
@@ -230,7 +230,7 @@ end
 function memo.askConfig()
   local cfg = config.get("memoAsk", nil)
   if type(cfg) != "table" or type(cfg.apiKey) != "string" or cfg.apiKey == "" then
-    return nil, ASK_NOT_CONFIGURED
+    return nil, memo.ASK_NO_KEY, "off"
   end
   local function positive(v, default)
     if type(v) == "number" and v > 0 then
@@ -257,7 +257,7 @@ function memo.askConfig()
   }
 end
 
--- Where a cited section opens. The sidecar sends `ref` ("Page@L12"); older ones do not.
+-- Where a cited section opens. The service sends `ref` ("Page@L12"); older ones do not.
 -- A document's ref is the bare file; memo.navRef adds the PDF page when memoSidecar.pdfPages is on.
 function memo.askRef(section)
   if section.kind and section.kind != "md" then
@@ -365,7 +365,7 @@ function memo.askRewriteRequest(cfg, thread, question)
 end
 
 -- The query to search with: the model's rewrite when it gave one, else the earlier question
--- plus the follow-up. At most 500 characters (the sidecar's limit).
+-- plus the follow-up. At most 500 characters (the service's limit).
 function memo.askSearchQuery(rewrite, thread, question)
   local text = type(rewrite) == "string" and string.gsub(string.gsub(rewrite, "%s+", " "), "^ ", "") or ""
   text = string.gsub(text, " $", "")
@@ -378,13 +378,13 @@ function memo.askSearchQuery(rewrite, thread, question)
   return text
 end
 
--- A non-2xx reply from the API, as "title\ndetail".
+-- A non-2xx reply from the API, as one or two sentences.
 function memo.describeApiFailure(res)
   local status = tonumber(res.status) or 0
   if status == 401 then
-    return "memoAsk.apiKey rejected (HTTP 401)\nCheck the key in CONFIG"
+    return "Anthropic rejected the API key. Run Ask: Set up to enter it again."
   elseif status == 429 then
-    return "Anthropic API rate limited (HTTP 429)\nTry again in a moment"
+    return "Anthropic is rate limiting requests. Try again in a moment."
   end
   local detail
   if type(res.body) == "table" and type(res.body.error) == "table" and type(res.body.error.message) == "string" then
@@ -392,9 +392,9 @@ function memo.describeApiFailure(res)
   elseif type(res.body) == "string" and res.body != "" then
     detail = string.sub(res.body, 1, 120)
   end
-  local msg = "Anthropic API request failed (HTTP " .. tostring(res.status) .. ")"
+  local msg = "Anthropic request failed (HTTP " .. tostring(res.status) .. ")."
   if detail then
-    msg = msg .. "\n" .. detail
+    msg = msg .. " " .. detail
   end
   return msg
 end
@@ -415,11 +415,11 @@ end
 -- A 2xx reply -> the answer text, or nil plus a message.
 function memo.askAnswer(body)
   if type(body) != "table" or type(body.content) != "table" then
-    return nil, "Anthropic API returned an unexpected response"
+    return nil, "Anthropic returned an unexpected answer. Try again in a moment."
   end
   if body.stop_reason == "refusal" then
     local why = type(body.stop_details) == "table" and body.stop_details.explanation or nil
-    return nil, "The model declined to answer\n" .. tostring(why or "No explanation was given")
+    return nil, "The model declined to answer. " .. tostring(why or "No reason was given.")
   end
   local parts = {}
   for _, block in ipairs(body.content) do
@@ -431,14 +431,15 @@ function memo.askAnswer(body)
   -- Thinking counts against max_tokens too, so the budget can run out before any text.
   if body.stop_reason == "max_tokens" then
     local note = "The answer was cut off at memoAsk.maxTokens (" ..
-      tostring(body.usage and body.usage.output_tokens or "?") .. " tokens); raise it in CONFIG"
+      tostring(body.usage and body.usage.output_tokens or "?") .. " tokens). Raise it in CONFIG."
     if text == "" then
-      return nil, "No answer fit in memoAsk.maxTokens\n" .. note
+      return nil, "No answer fit in memoAsk.maxTokens (" .. tostring(body.usage and body.usage.output_tokens or "?") ..
+        " tokens). Raise it in CONFIG."
     end
-    return text .. "\n\n_" .. note .. "._"
+    return text .. "\n\n_" .. note .. "_"
   end
   if text == "" then
-    return nil, "The model returned no text"
+    return nil, "The model returned no text. Try asking again."
   end
   return text
 end
@@ -579,7 +580,9 @@ function memo.askNote(question, answer, sections, meta)
 end
 
 -- ---- Setup: write the memoAsk block into CONFIG ----
-local SETUP_MARKER = "-- memo-ask-setup: written by the command Memo: Set up Ask"
+-- Found by its first words, so a block an older version wrote (with its old command name) is replaced too.
+local SETUP_MARKER = "-- memo-ask-setup:"
+local SETUP_LINE = SETUP_MARKER .. " written by the command Ask: Set up"
 local FENCE = string.rep("`", 3)
 
 function memo.askLuaString(text)
@@ -590,7 +593,7 @@ end
 
 -- The space-lua block. It merges into an existing memoAsk table so other options survive.
 function memo.askSetupBlock(apiKey, model)
-  return FENCE .. "space-lua\n" .. SETUP_MARKER .. "\n" ..
+  return FENCE .. "space-lua\n" .. SETUP_LINE .. "\n" ..
     "local ask = {}\n" ..
     "for key, value in pairs(config.get(\"memoAsk\", {})) do ask[key] = value end\n" ..
     "ask.apiKey = " .. memo.askLuaString(apiKey) .. "\n" ..
@@ -642,7 +645,7 @@ end
 
 ## Ask
 ```space-lua
--- priority: -1
+-- priority: 9
 -- The last answer stays until the next question, so reopening the view shows it again.
 local lastAsk = nil
 -- Newest first, this session only.
@@ -652,45 +655,109 @@ local asking = false
 
 view.define {
   name = "memo.ask",
-  title = "Memo: Ask",
+  title = "Ask",
   dock = "modal",
   content = function()
     if lastAsk then
       return lastAsk.markdown
     end
-    return "Run **Memo: Ask** to ask a question about your notes."
+    return "Run **Ask: Notes** (`Ctrl-q a`) to ask a question about your notes."
   end,
 }
 
+-- What stands in the way of asking, as rows, or nil when Ask is ready. Shown in the panel itself:
+-- a missing key or a missing search service is a state to explain, not an error to flash.
+function memo.askOffRows()
+  local _, keyMessage = memo.askConfig()
+  local noKey = keyMessage != nil
+  local _, searchMessage = memo.sidecarConfig()
+  local noSearch = searchMessage != nil
+  if not noKey and not noSearch then
+    return nil
+  end
+  local rows = {}
+  if noKey then
+    table.insert(rows, memo.messageRow(memo.ASK_NO_KEY))
+  end
+  if noSearch then
+    table.insert(rows, memo.messageRow(memo.ASK_NO_SEARCH .. " Start it with ./setup.sh or set memoSidecar in CONFIG."))
+  end
+  if noKey then
+    table.insert(rows, { name = "memo-ask-setup", kind = "setup", title = "Set up Ask" })
+  end
+  return rows
+end
+
+view.define {
+  name = "memo.askSetup",
+  title = "Ask",
+  dock = "modal",
+  filter = false,
+  -- The navigator still draws an input for a view without a filter; say that it takes nothing.
+  placeholder = "Nothing to type here",
+  source = function()
+    return memo.askOffRows() or { memo.messageRow("Ask is ready. Run Ask: Notes to ask a question.") }
+  end,
+  presentation = {
+    row = {
+      primary = "title",
+      passive = function(obj)
+        return obj.passive == true
+      end,
+      cssClass = function(obj)
+        return obj.cssClass
+      end,
+      icon = function(obj)
+        if obj.kind == "setup" then
+          return "key"
+        end
+        return "info"
+      end,
+    },
+  },
+  onSelect = function(obj)
+    if obj.kind == "setup" then
+      system.invokeCommand("Ask: Set up")
+    end
+    return false
+  end,
+}
+
+-- Notices: what happened, then what to do, in at most two sentences. `say` is for the
+-- expected (nothing to fix on the user's side beyond the sentence itself), `fail` for a
+-- real failure.
+local function say(msg)
+  editor.flashNotification(msg, "info")
+end
+
 local function fail(msg)
-  editor.flashNotification(string.gsub(msg, "\n", " — "), "error")
+  editor.flashNotification(msg, "error")
 end
 
 -- followUp: continue the conversation of the answer on screen (its thread), else start a new one.
 local function askOnce(followUp)
-  local sidecar, sidecarErr = memo.sidecarConfig()
-  if not sidecar then
-    return fail(sidecarErr)
+  if followUp and not lastAsk then
+    return say("There is no conversation to continue. Run Ask: Notes first.")
   end
-  local cfg, cfgErr = memo.askConfig()
-  if not cfg then
-    return fail(cfgErr)
+  local offRows = memo.askOffRows()
+  if offRows then
+    view.open("memo.askSetup")
+    return
   end
+  local sidecar = memo.sidecarConfig()
+  local cfg = memo.askConfig()
   local thread = {}
   local prevScope = nil
   if followUp then
-    if not lastAsk then
-      return fail("Memo: Ask has no conversation to continue\nRun Memo: Ask first")
-    end
     if lastAsk.space != sidecar.space then
-      return fail("Memo: Ask — this conversation was about " .. tostring(lastAsk.space) .. ", not " ..
-        tostring(sidecar.space) .. "\nRun Memo: Ask to start a new one")
+      return say("This conversation was about " .. tostring(lastAsk.space) .. ", not " ..
+        tostring(sidecar.space) .. ". Run Ask: Notes to start a new one.")
     end
     thread = lastAsk.thread
     prevScope = lastAsk.scope
   end
   local input = editor.prompt(followUp and "Follow-up question (keeps this conversation)" or
-    "Ask your notes (optional: #tag folder:Dir/ area:x status:x since:2026-09-01)",
+    "Ask your notes… (optional: #tag in:Folder/ kind:pdf since:2026-09-01)",
     (not followUp and lastAsk and lastAsk.input) or "")
   if type(input) != "string" then
     return
@@ -716,38 +783,40 @@ local function askOnce(followUp)
   for field, value in pairs(fields) do
     body[field] = value
   end
-  local reply, failure = memo.requestJson("ask", body)
+  local reply, failure, failKind = memo.requestJson("ask", body)
   if not reply then
+    if failKind == "off" then
+      return say(failure)
+    end
     return fail(failure)
   end
-  -- A sidecar that predates scopes ignores them and would search everything.
+  -- A service that predates scopes ignores them and would search everything.
   if next(fields) != nil and type(reply.scope) != "table" then
-    return fail("Memo sidecar does not support scoped questions\nUpdate memo-mcp, or ask without a scope")
+    return fail("Search is too old to narrow a question. Update it, or ask without a scope.")
   end
   -- Confidential notes never go to the API unless the user opted in explicitly; a reply
   -- that does not say so counts as confidential.
   if reply.confidential != false and not cfg.allowConfidential then
-    return fail("Memo: Ask stopped: " .. sidecar.space .. " is a confidential space\n" ..
-      "Its notes are not sent to the API. Set memoAsk.allowConfidential = true to allow it")
+    return say(sidecar.space .. " is a confidential space, so its notes are not sent to the API. " ..
+      "Set memoAsk.allowConfidential = true to allow it.")
   end
   local sections = reply.sections
   if type(sections) != "table" then
-    return fail("Memo sidecar returned an unexpected response\nNo sections in the reply")
+    return fail("Search returned an unexpected answer. Try again in a moment.")
   end
   sections = memo.askFilterSections(sections, cfg.minScoreRatio)
   if #sections == 0 then
-    return fail("No notes match “" .. searched .. "”\nNothing to answer from")
+    return say("No notes match “" .. searched .. "”. Try other words, or widen the scope.")
   end
   local estimate = memo.askEstimateTokens(question, sections, thread, cfg)
   if estimate > cfg.maxInputTokens then
-    return fail("Memo: Ask stopped: the prompt is about " .. estimate .. " tokens, above memoAsk.maxInputTokens (" ..
-      cfg.maxInputTokens .. ")\nNarrow the question with a scope, lower memoAsk.k or raise the limit")
+    return say("This question would send about " .. estimate .. " tokens, above memoAsk.maxInputTokens (" ..
+      cfg.maxInputTokens .. "). Narrow it with a scope, lower memoAsk.k or raise the limit.")
   end
-  editor.flashNotification("Memo: Ask — asking " .. cfg.model .. " over " .. #sections ..
-    " sections (~" .. estimate .. " tokens)…", "info")
+  say("Asking " .. cfg.model .. " over " .. #sections .. " sections (~" .. estimate .. " tokens)…")
   local ok, res = pcall(net.proxyFetch, memo.askApiUrl, memo.askRequest(cfg, question, sections, thread))
   if not ok then
-    return fail("Anthropic API is unreachable\n" .. tostring(res))
+    return fail("Anthropic could not be reached. Check your connection and try again.")
   end
   local status = tonumber(res.status) or 0
   if not res.ok or status < 200 or status >= 300 then
@@ -787,46 +856,48 @@ end
 
 local function askNotes(followUp)
   if asking then
-    return editor.flashNotification("Memo: Ask is already running", "info")
+    return say("Ask is already running.")
   end
   asking = true
   local ok, err = pcall(askOnce, followUp)
   asking = false
   if not ok then
-    fail("Memo: Ask failed\n" .. tostring(err))
+    print("Ask failed:", tostring(err))
+    fail("Ask failed. Try again, or check the search service.")
   end
 end
 
 command.define {
-  name = "Memo: Ask",
+  name = "Ask: Notes",
+  key = "Ctrl-q a",
   run = function()
     askNotes(false)
   end,
 }
 
 command.define {
-  name = "Memo: Ask - Follow-up",
+  name = "Ask: Follow-up",
   run = function()
     askNotes(true)
   end,
 }
 
--- Forget the conversation on screen: the next Memo: Ask - Follow-up needs a new answer first.
+-- Forget the conversation on screen: the next Ask: Follow-up needs a new answer first.
 command.define {
-  name = "Memo: Ask - New Conversation",
+  name = "Ask: New Conversation",
   run = function()
     lastAsk = nil
-    editor.flashNotification("Memo: Ask — new conversation; run Memo: Ask for the first question", "info")
+    say("Started a new conversation. Run Ask: Notes for the first question.")
   end,
 }
 
 command.define {
-  name = "Memo: Set up Ask",
+  name = "Ask: Set up",
   run = function()
     local current = config.get("memoAsk", nil)
-    local key = memo.askCleanKey(editor.prompt("Anthropic API key (sk-ant-…); it is stored in your CONFIG page", ""))
+    local key = memo.askCleanKey(editor.prompt("Anthropic API key (sk-ant-…). It is stored in your CONFIG page.", ""))
     if not key then
-      return editor.flashNotification("Memo: Set up Ask cancelled — no key entered", "error")
+      return say("Set up cancelled. No key was entered.")
     end
     local model = memo.askDefaults.model
     if type(current) == "table" and type(current.model) == "string" and current.model != "" then
@@ -839,18 +910,18 @@ command.define {
     local text = space.pageExists("CONFIG") and space.readPage("CONFIG") or ""
     space.writePage("CONFIG", memo.askSetupApply(text, memo.askSetupBlock(key, model)))
     pcall(editor.reloadConfigAndCommands)
-    editor.flashNotification("Memo: Ask is set up with " .. model .. " — key saved in CONFIG. Try Memo: Ask", "info")
+    say("Ask is set up with " .. model .. ". Run Ask: Notes to try it.")
   end,
 }
 
 command.define {
-  name = "Memo: Ask - Save Answer",
+  name = "Ask: Save Answer",
   run = function()
     if not lastAsk then
-      return editor.flashNotification("Memo: Ask has no answer to save yet", "error")
+      return say("There is no answer to save yet. Run Ask: Notes first.")
     end
     if lastAsk.savedAs then
-      return editor.flashNotification("Memo: Ask — already saved as " .. lastAsk.savedAs, "info")
+      return say("Already saved as " .. lastAsk.savedAs .. ".")
     end
     local base = memo.askNoteName(lastAsk.question, lastAsk.date)
     local name = base
@@ -861,15 +932,15 @@ command.define {
     end
     space.writePage(name, lastAsk.note)
     lastAsk.savedAs = name
-    editor.flashNotification("Memo: Ask — saved as " .. name, "info")
+    say("Saved as " .. name .. ".")
   end,
 }
 
 command.define {
-  name = "Memo: Ask - History",
+  name = "Ask: History",
   run = function()
     if #history == 0 then
-      return editor.flashNotification("Memo: Ask has no answers yet this session", "info")
+      return say("No answers yet this session. Run Ask: Notes first.")
     end
     local options = {}
     for i, entry in ipairs(history) do

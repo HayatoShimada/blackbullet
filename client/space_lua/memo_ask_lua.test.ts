@@ -40,6 +40,7 @@ prompts = {}
 reloaded = 0
 pages = {}
 pickIndex = 1
+invoked = {}
 writtenPages = {}
 space = {
   pageExists = function(name) return writtenPages[name] ~= nil or pages[name] ~= nil end,
@@ -55,8 +56,18 @@ editor = {
   end,
   reloadConfigAndCommands = function() reloaded = reloaded + 1 end,
   filterBox = function(title, options) return options[pickIndex] end,
-  flashNotification = function(message, kind) table.insert(notifications, { message = message, kind = kind }) end,
+  -- Every notice must keep the one voice: what happened, then what to do, two sentences at most,
+  -- no product-internal prefix, no em dash.
+  flashNotification = function(message, kind)
+    assert(not string.find(message, "Memo", 1, true), "no 'Memo' prefix: " .. message)
+    assert(not string.find(message, "—", 1, true), "no em dash: " .. message)
+    assert(not string.find(message, "\\n", 1, true), "one line: " .. message)
+    local _, boundaries = string.gsub(message, "[%.%?!]%s", "")
+    assert(boundaries <= 1, "at most two sentences: " .. message)
+    table.insert(notifications, { message = message, kind = kind })
+  end,
 }
+system = { invokeCommand = function(name) table.insert(invoked, name) end }
 
 fetches = {}
 queue = {}
@@ -70,6 +81,10 @@ net = {
     return r
   end,
 }
+
+function lastNote()
+  return notifications[#notifications]
+end
 
 function errorMessages()
   local out = {}
@@ -108,6 +123,7 @@ end
 `;
 
 let librarySource = "";
+let askPageSource = "";
 
 beforeAll(async () => {
   const sources: string[] = [];
@@ -117,6 +133,7 @@ beforeAll(async () => {
       "utf8",
     );
     sources.push(extractSpaceLuaFromPageText(page));
+    if (file === "Memo Ask.md") askPageSource = page;
   }
   librarySource = sources.join("\n");
 });
@@ -125,7 +142,12 @@ async function runLua(testBody: string) {
   const env = new LuaEnv(luaBuildStandardEnv());
   const block = parseBlock(`${PRELUDE}\n${librarySource}\n${testBody}`);
   const frame = LuaStackFrame.createWithGlobalEnv(env, block.ctx);
-  await evalStatement(block, env, frame);
+  try {
+    await evalStatement(block, env, frame);
+  } catch (e: any) {
+    // A Lua error carries its stack frame, which vitest cannot serialise: report the text.
+    throw new Error(String(e?.message ?? e));
+  }
 }
 
 describe("Memo Ask library", () => {
@@ -154,10 +176,10 @@ describe("Memo Ask library", () => {
 
   test("defines the command, the modal view and the helpers", async () => {
     await runLua(`
-      assert(commands["Memo: Ask"] and type(commands["Memo: Ask"].run) == "function", "command")
+      assert(commands["Ask: Notes"] and type(commands["Ask: Notes"].run) == "function", "command")
       assert(views["memo.ask"].dock == "modal", "modal")
       assert(type(views["memo.ask"].content) == "function", "content view")
-      assert(string.find(views["memo.ask"].content({ dock = "modal" }), "Memo: Ask", 1, true), "empty state")
+      assert(string.find(views["memo.ask"].content({ dock = "modal" }), "Ask: Notes", 1, true), "empty state")
       assert(type(memo.requestJson) == "function" and type(memo.askConfig) == "function")
     `);
   });
@@ -165,10 +187,10 @@ describe("Memo Ask library", () => {
   test("askConfig applies the defaults and clamps k", async () => {
     await runLua(`
       local cfg, err = memo.askConfig()
-      assert(cfg == nil and string.find(err, "memoAsk", 1, true), err)
+      assert(cfg == nil and err == memo.ASK_NO_KEY, err)
       setConfig("memoAsk", { apiKey = "" })
       cfg, err = memo.askConfig()
-      assert(cfg == nil and string.find(err, "apiKey", 1, true), err)
+      assert(cfg == nil and string.find(err, "API key", 1, true), err)
       setConfig("memoAsk", { apiKey = "k" })
       cfg = memo.askConfig()
       assert(cfg.model == "claude-opus-5-5" and cfg.maxTokens == 4096 and cfg.k == 8, "defaults")
@@ -196,8 +218,9 @@ describe("Memo Ask library", () => {
       body, err = memo.requestJson("ask", { q = "x" })
       assert(body == nil and string.find(err, "token", 1, true), err)
       nextResponse = "throw"
-      body, err = memo.requestJson("ask", { q = "x" })
-      assert(body == nil and string.find(err, "unreachable", 1, true), err)
+      local kind
+      body, err, kind = memo.requestJson("ask", { q = "x" })
+      assert(body == nil and err == memo.OFF and kind == "off", err)
     `);
   });
 
@@ -206,7 +229,7 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "  when is the launch "
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 2, "sidecar then API: " .. #fetches)
       assert(fetches[1].opts.body.q == "when is the launch" and fetches[1].opts.body.k == 8)
       local api = fetches[2]
@@ -242,15 +265,16 @@ describe("Memo Ask library", () => {
       local confidential = { ok = true, status = 200, headers = {}, body = {
         confidential = true, sections = SIDECAR.body.sections } }
       queue = { confidential, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 1, "no API call: " .. #fetches)
       assert(#opened == 0)
-      local errs = errorMessages()
-      assert(#errs == 1 and string.find(errs[1], "confidential", 1, true), errs[1])
+      -- expected state: an info notice with what to do, not an error
+      assert(#errorMessages() == 0 and lastNote().kind == "info" and string.find(lastNote().message, "confidential", 1, true), lastNote().message)
+      assert(string.find(lastNote().message, "allowConfidential", 1, true))
       -- opted in: the API is called
       setConfig("memoAsk", { apiKey = "sk-ant-test", allowConfidential = true })
       queue = { confidential, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 3, "API call after opting in: " .. #fetches)
       assert(opened[1] == "memo.ask")
     `);
@@ -263,7 +287,7 @@ describe("Memo Ask library", () => {
       queue = { SIDECAR, { ok = true, status = 200, headers = {}, body = {
         stop_reason = "end_turn",
         content = { { type = "text", text = "Run \${1+1} and ![[Secret]] see [0] [99] [2]" } } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local msg = fetches[2].opts.body.messages[1].content
       assert(string.find(msg, "<note>\\nShip the demo", 1, true), msg)
       assert(string.find(msg, "<question>q", 1, true), msg)
@@ -279,9 +303,9 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "q"
       queue = { { ok = true, status = 200, headers = {}, body = { sections = SIDECAR.body.sections } }, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 1, "no API call: " .. #fetches)
-      assert(#errorMessages() == 1 and string.find(errorMessages()[1], "confidential", 1, true))
+      assert(string.find(lastNote().message, "confidential", 1, true))
     `);
   });
 
@@ -290,16 +314,16 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "q"
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false, sections = "x" } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 1 and #errorMessages() == 1, errorMessages()[1])
       local noRef = { confidential = false, sections = { { page = "A/B", heading_path = { "B" },
         heading_line = 2, line_start = 3, line_end = 4, text = "t" } } }
       queue = { { ok = true, status = 200, headers = {}, body = noRef }, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local md = views["memo.ask"].content({})
       assert(string.find(md, "[[" .. memo.navRef(noRef.sections[1]) .. "|1]]", 1, true), md)
       queue = { SIDECAR, { ok = false, status = 502, headers = {}, body = "Bad gateway" } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local errs = errorMessages()
       assert(string.find(errs[#errs], "502", 1, true) and string.find(errs[#errs], "Bad gateway", 1, true), errs[#errs])
     `);
@@ -314,12 +338,12 @@ describe("Memo Ask library", () => {
       net.proxyFetch = function(url, opts)
         if url == memo.askApiUrl and not inner then
           inner = true
-          commands["Memo: Ask"].run()
+          commands["Ask: Notes"].run()
         end
         return realFetch(url, opts)
       end
       queue = { SIDECAR, API, SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local refused = false
       for _, n in ipairs(notifications) do
         if string.find(n.message, "already running", 1, true) then refused = true end
@@ -335,32 +359,32 @@ describe("Memo Ask library", () => {
       promptAnswer = "q"
       queue = { SIDECAR, { ok = true, status = 401, headers = {}, body = {
         type = "error", error = { type = "authentication_error", message = "invalid x-api-key" } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local errs = errorMessages()
-      assert(#errs == 1 and string.find(errs[1], "memoAsk.apiKey rejected", 1, true), errs[1])
+      assert(#errs == 1 and errs[1] == "Anthropic rejected the API key. Run Ask: Set up to enter it again.", errs[1])
       assert(#opened == 0)
 
       queue = { SIDECAR, { ok = true, status = 200, headers = {}, body = {
         stop_reason = "refusal", stop_details = { type = "refusal", category = "cyber", explanation = "Not this one" },
         content = {} } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       errs = errorMessages()
       assert(#errs == 2 and string.find(errs[2], "Not this one", 1, true), errs[2])
       assert(#opened == 0)
 
       queue = { SIDECAR, { ok = true, status = 429, headers = {}, body = { error = { message = "slow down" } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       errs = errorMessages()
-      assert(#errs == 3 and string.find(errs[3], "rate limited", 1, true), errs[3])
+      assert(#errs == 3 and string.find(errs[3], "rate limiting", 1, true), errs[3])
 
       queue = { SIDECAR, { ok = true, status = 500, headers = {}, body = { error = { message = "overloaded" } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       errs = errorMessages()
       assert(#errs == 4 and string.find(errs[4], "overloaded", 1, true), errs[4])
 
       queue = { SIDECAR, { ok = true, status = 200, headers = {}, body = { stop_reason = "max_tokens",
         content = { { type = "text", text = "Partial" } }, usage = { output_tokens = 4096 } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#errorMessages() == 4)
       local md = views["memo.ask"].content({})
       assert(string.find(md, "Partial", 1, true) and string.find(md, "cut off", 1, true), md)
@@ -368,35 +392,68 @@ describe("Memo Ask library", () => {
       -- thinking alone can use up max_tokens: no text, but still a maxTokens hint
       queue = { SIDECAR, { ok = true, status = 200, headers = {}, body = { stop_reason = "max_tokens",
         content = { { type = "thinking", thinking = "" } }, usage = { output_tokens = 4096 } } } }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       errs = errorMessages()
       assert(#errs == 5 and string.find(errs[5], "maxTokens", 1, true), errs[5])
     `);
   });
 
-  test("missing configuration or an empty question makes no calls", async () => {
+  test("without a key or a search service the Ask panel says why, with no notice and no calls", async () => {
     await runLua(`
       promptAnswer = "q"
-      commands["Memo: Ask"].run()
-      assert(#fetches == 0)
-      local errs = errorMessages()
-      assert(#errs == 1 and string.find(errs[1], "memoSidecar", 1, true), errs[1])
+      -- nothing configured: the setup panel opens with both sentences and a Set up Ask row
+      commands["Ask: Notes"].run()
+      assert(#fetches == 0 and #notifications == 0 and #prompts == 0, "no flash, no prompt, no request")
+      assert(opened[1] == "memo.askSetup", tostring(opened[1]))
+      local rows = views["memo.askSetup"].source({})
+      assert(rows[1].title == "Ask needs an Anthropic API key. It is stored in your CONFIG page and used only when you ask.", rows[1].title)
+      assert(rows[2].title == "Ask reads your notes through Search by meaning, which is off. " ..
+        "Start it with ./setup.sh or set memoSidecar in CONFIG.", rows[2].title)
+      local actions = {}
+      for _, r in ipairs(rows) do
+        if not r.passive then table.insert(actions, r) end
+      end
+      assert(#actions == 1 and actions[1].title == "Set up Ask" and actions[1].kind == "setup", "only the action is selectable")
+      assert(#rows == 3 and rows[1].passive == true and rows[2].passive == true)
+      assert(views["memo.askSetup"].title == "Ask" and views["memo.askSetup"].filter == false)
+      local presentation = views["memo.askSetup"].presentation.row
+      assert(presentation.passive(rows[1]) == true and presentation.passive(actions[1]) == false)
+      -- choosing it runs the command
+      views["memo.askSetup"].onSelect(actions[1])
+      assert(invoked[1] == "Ask: Set up", tostring(invoked[1]))
+      views["memo.askSetup"].onSelect(rows[1])
+      assert(#invoked == 1, "a sentence does nothing")
+
+      -- search is on but there is no key: the key sentence and the action only
       setConfig("memoSidecar", { url = "127.0.0.1:3010", token = "t", space = "notes" })
-      commands["Memo: Ask"].run()
-      assert(#fetches == 0)
-      errs = errorMessages()
-      assert(#errs == 2 and string.find(errs[2], "memoAsk", 1, true), errs[2])
+      commands["Ask: Notes"].run()
+      assert(#fetches == 0 and #notifications == 0 and #opened == 2)
+      rows = views["memo.askSetup"].source({})
+      assert(#rows == 2 and rows[1].title == memo.ASK_NO_KEY and rows[2].kind == "setup")
+
+      -- a key but no search: the sentence, its fix, and nothing to select
+      setConfig("memoSidecar", nil)
       setConfig("memoAsk", { apiKey = "k" })
+      commands["Ask: Notes"].run()
+      assert(#fetches == 0 and #notifications == 0 and #opened == 3)
+      rows = views["memo.askSetup"].source({})
+      assert(#rows == 1 and string.find(rows[1].title, memo.ASK_NO_SEARCH, 1, true), rows[1].title)
+      for _, r in ipairs(rows) do assert(r.passive == true) end
+
+      -- both configured: the panel has nothing to say and Ask goes on to ask (a blank question stops there)
+      configureAll()
+      assert(memo.askOffRows() == nil)
       promptAnswer = nil
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       promptAnswer = "   "
-      commands["Memo: Ask"].run()
-      assert(#fetches == 0 and #errorMessages() == 2, "dismissed / blank prompt")
-      -- no matching notes: a message, no API call
+      commands["Ask: Notes"].run()
+      assert(#fetches == 0 and #opened == 3 and #prompts == 2, "dismissed / blank prompt")
+      -- no matching notes: a notice, no API call
       promptAnswer = "q"
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false, sections = {} } } }
-      commands["Memo: Ask"].run()
-      assert(#fetches == 1 and #errorMessages() == 3)
+      commands["Ask: Notes"].run()
+      assert(#fetches == 1 and #errorMessages() == 0)
+      assert(string.find(lastNote().message, "No notes match", 1, true), lastNote().message)
     `);
   });
 
@@ -419,7 +476,7 @@ describe("Memo Ask library", () => {
       local scoped = { ok = true, status = 200, headers = {}, body = { confidential = false,
         scope = { tag = "journal" }, sections = SIDECAR.body.sections } }
       queue = { scoped, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local sent = fetches[1].opts.body
       assert(sent.q == "when is the launch", sent.q)
       assert(sent.tag == "journal" and sent.since == "2026-09-01", "words")
@@ -427,7 +484,7 @@ describe("Memo Ask library", () => {
       local md = views["memo.ask"].content({})
       assert(string.find(md, "**Scope:** #journal folder:Areas/ status:active since:2026-09-01", 1, true), md)
       -- the prompt text offers the words and the next prompt starts from the last input
-      assert(string.find(prompts[1].message, "folder:", 1, true), prompts[1].message)
+      assert(string.find(prompts[1].message, "in:Folder/", 1, true), prompts[1].message)
     `);
   });
 
@@ -436,17 +493,17 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "#journal q"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 1 and #opened == 0, "no API call")
       assert(string.find(errorMessages()[1], "scope", 1, true), errorMessages()[1])
       promptAnswer = "q"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 3 and opened[1] == "memo.ask")
       assert(fetches[2].opts.body.tag == nil and fetches[2].opts.body.prefix == nil)
       -- only scope words and no question: cancelled
       promptAnswer = "#journal"
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 3)
     `);
   });
@@ -456,7 +513,7 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "q"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local md = views["memo.ask"].content({})
       local cited = string.find(md, "**Sources cited**", 1, true)
       assert(cited and not string.find(md, "not cited", 1, true), md)
@@ -496,21 +553,21 @@ describe("Memo Ask library", () => {
       setConfig("memoAsk", { apiKey = "k", maxInputTokens = est - 1 })
       promptAnswer = "q"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 1 and #opened == 0, "nothing sent")
-      assert(string.find(errorMessages()[1], "maxInputTokens", 1, true), errorMessages()[1])
+      assert(string.find(lastNote().message, "maxInputTokens", 1, true) and lastNote().kind == "info", lastNote().message)
       assert(memo.askConfig().maxInputTokens == est - 1)
       -- at the limit: sent, with the estimate in the notice and both counts in the view
       setConfig("memoAsk", { apiKey = "k", maxInputTokens = est })
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 3 and opened[1] == "memo.ask")
       local md = views["memo.ask"].content({})
       assert(string.find(md, "~" .. est .. " estimated", 1, true), md)
       assert(string.find(md, "100 in, 20 out", 1, true), md)
       local flash
       for _, n in ipairs(notifications) do
-        if string.find(n.message, "asking", 1, true) then flash = n.message end
+        if string.find(n.message, "Asking", 1, true) then flash = n.message end
       end
       assert(flash and string.find(flash, "~" .. est .. " tokens", 1, true), flash)
       assert(memo.askConfig().maxInputTokens == est)
@@ -522,13 +579,14 @@ describe("Memo Ask library", () => {
   test("Save Answer writes an Ask/ page once, with a unique name", async () => {
     await runLua(`
       configureAll()
-      commands["Memo: Ask - Save Answer"].run()
-      assert(next(writtenPages) == nil and #notifications == 1 and notifications[1].kind == "error", "nothing to save")
+      commands["Ask: Save Answer"].run()
+      assert(next(writtenPages) == nil and #notifications == 1 and notifications[1].kind == "info", "nothing to save")
+      assert(notifications[1].message == "There is no answer to save yet. Run Ask: Notes first.")
       promptAnswer = "folder:Projects when is the launch? / [x]"
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false,
         scope = { prefix = "Projects/" }, sections = SIDECAR.body.sections } }, API }
-      commands["Memo: Ask"].run()
-      commands["Memo: Ask - Save Answer"].run()
+      commands["Ask: Notes"].run()
+      commands["Ask: Save Answer"].run()
       local name = "Ask/" .. os.date("%Y-%m-%d") .. " when is the launch x"
       local text = writtenPages[name]
       assert(text, "page written: " .. tostring(next(writtenPages)))
@@ -537,15 +595,15 @@ describe("Memo Ask library", () => {
       assert(string.find(text, "**Scope:** folder:Projects/", 1, true), text)
       assert(string.find(text, "[[Projects/Demo@L5|1]]", 1, true) and string.find(text, "**Sources cited**", 1, true), text)
       -- a second save of the same answer does not write again
-      commands["Memo: Ask - Save Answer"].run()
+      commands["Ask: Save Answer"].run()
       local count = 0
       for _ in pairs(writtenPages) do count = count + 1 end
       assert(count == 1, "no duplicate")
       -- the same question again, saved: a numbered name
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false,
         scope = { prefix = "Projects/" }, sections = SIDECAR.body.sections } }, API }
-      commands["Memo: Ask"].run()
-      commands["Memo: Ask - Save Answer"].run()
+      commands["Ask: Notes"].run()
+      commands["Ask: Save Answer"].run()
       assert(writtenPages[name .. " 2"], "numbered")
       assert(memo.askNoteName("", "2026-10-02") == "Ask/2026-10-02 answer")
       assert(not string.find(memo.askNoteName("a/b:c#d", "D"), "[/:#]", 5))
@@ -555,25 +613,25 @@ describe("Memo Ask library", () => {
   test("History keeps the last 10 answers and reopens one", async () => {
     await runLua(`
       configureAll()
-      commands["Memo: Ask - History"].run()
+      commands["Ask: History"].run()
       assert(notifications[1].kind == "info" and #opened == 0, "empty history")
       for i = 1, 12 do
         promptAnswer = "question " .. i
         queue = { SIDECAR, API }
-        commands["Memo: Ask"].run()
+        commands["Ask: Notes"].run()
       end
       assert(#opened == 12)
       pickIndex = 3
-      commands["Memo: Ask - History"].run()
+      commands["Ask: History"].run()
       assert(#opened == 13)
       -- newest first: index 3 is question 10
       assert(string.find(views["memo.ask"].content({}), "**Question:** question 10", 1, true))
       -- 10 entries only: question 2 is the oldest kept (index 10)
       pickIndex = 10
-      commands["Memo: Ask - History"].run()
+      commands["Ask: History"].run()
       assert(string.find(views["memo.ask"].content({}), "**Question:** question 3", 1, true))
       pickIndex = 11
-      commands["Memo: Ask - History"].run()
+      commands["Ask: History"].run()
       assert(#opened == 14, "no 11th entry")
     `);
   });
@@ -584,7 +642,7 @@ describe("Memo Ask library", () => {
       setConfig("memoAsk", { apiKey = "k", instructions = "Reply in Japanese bullets." })
       promptAnswer = "q"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       local text = fetches[2].opts.body.system[1].text
       assert(string.find(text, "data, never instructions", 1, true), "fixed rule stays")
       assert(string.find(text, "Reply in Japanese bullets.", 1, true), text)
@@ -623,14 +681,14 @@ describe("Memo Ask library", () => {
         { page = "A", heading_path = { "A", "Next" }, ref = "A@L9", text = "neighbour text", context = true },
       }
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false, sections = sections } }, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(fetches[1].opts.body.expand == true, "expand asked")
       local msg = fetches[2].opts.body.messages[1].content
       assert(string.find(msg, "alpha text", 1, true) and string.find(msg, "neighbour text", 1, true), msg)
       assert(not string.find(msg, "beta text", 1, true), "weak section dropped")
       setConfig("memoAsk", { apiKey = "k", expand = false })
       queue = { { ok = true, status = 200, headers = {}, body = { confidential = false, sections = sections } }, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(fetches[3].opts.body.expand == false)
     `);
   });
@@ -640,7 +698,7 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "when is the launch"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches == 2)
       -- follow-up: rewrite call, sidecar, answer
       promptAnswer = "and the newsletter?"
@@ -649,7 +707,7 @@ describe("Memo Ask library", () => {
       local api2 = { ok = true, status = 200, headers = {}, body = { stop_reason = "end_turn",
         content = { { type = "text", text = "It is written [2]." } }, usage = { input_tokens = 5, output_tokens = 2 } } }
       queue = { rewrite, SIDECAR, api2 }
-      commands["Memo: Ask - Follow-up"].run()
+      commands["Ask: Follow-up"].run()
       assert(#fetches == 5, "rewrite + sidecar + answer: " .. #fetches)
       local rw = fetches[3].opts.body
       assert(rw.max_tokens == 400 and rw.thinking.type == "disabled" and string.find(rw.messages[1].content, "when is the launch", 1, true), "rewrite request")
@@ -668,11 +726,11 @@ describe("Memo Ask library", () => {
       -- a third turn carries both earlier turns
       promptAnswer = "thanks, shorter"
       queue = { rewrite, SIDECAR, api2 }
-      commands["Memo: Ask - Follow-up"].run()
+      commands["Ask: Follow-up"].run()
       assert(#fetches[8].opts.body.messages == 5, "two earlier turns")
-      -- a plain Memo: Ask starts over
+      -- a plain Ask: Notes starts over
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(#fetches[10].opts.body.messages == 1, "new conversation")
     `);
   });
@@ -694,13 +752,13 @@ describe("Memo Ask library", () => {
       local cut = { ok = true, status = 200, headers = {}, body = { stop_reason = "max_tokens",
         content = { { type = "text", text = "It ends in September" } }, usage = { output_tokens = 9 } } }
       queue = { SIDECAR, cut }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       assert(string.find(views["memo.ask"].content({}), "cut off", 1, true), "reader sees the note")
       promptAnswer = "and the newsletter?"
       local badRewrite = { ok = true, status = 200, headers = {}, body = { stop_reason = "max_tokens",
         content = { { type = "text", text = "launch news" } }, usage = { output_tokens = 400 } } }
       queue = { badRewrite, SIDECAR, API }
-      commands["Memo: Ask - Follow-up"].run()
+      commands["Ask: Follow-up"].run()
       assert(not string.find(fetches[4].opts.body.q, "cut off", 1, true), fetches[4].opts.body.q)
       local prior = fetches[5].opts.body.messages[2].content[1].text
       assert(prior == "It ends in September", prior)
@@ -712,10 +770,10 @@ describe("Memo Ask library", () => {
       configureAll()
       promptAnswer = "when is the launch"
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
+      commands["Ask: Notes"].run()
       promptAnswer = "and the newsletter?"
       queue = { "throw", SIDECAR, API }
-      commands["Memo: Ask - Follow-up"].run()
+      commands["Ask: Follow-up"].run()
       assert(fetches[4].opts.body.q == "when is the launch and the newsletter?", fetches[4].opts.body.q)
       assert(#errorMessages() == 0, table.concat(errorMessages(), "; "))
       assert(memo.askSearchQuery(nil, { { question = "a", answer = "b" } }, string.rep("x", 600)) ~= nil)
@@ -727,20 +785,19 @@ describe("Memo Ask library", () => {
     await runLua(`
       configureAll()
       promptAnswer = "q"
-      commands["Memo: Ask - Follow-up"].run()
-      local errs = errorMessages()
-      assert(#errs == 1 and string.find(errs[1], "conversation", 1, true), errs[1])
+      commands["Ask: Follow-up"].run()
+      assert(#errorMessages() == 0 and string.find(lastNote().message, "no conversation", 1, true), lastNote().message)
       assert(#fetches == 0 and #prompts == 0)
       queue = { SIDECAR, API }
-      commands["Memo: Ask"].run()
-      commands["Memo: Ask - New Conversation"].run()
-      commands["Memo: Ask - Follow-up"].run()
-      assert(#errorMessages() == 2 and #fetches == 2, "no conversation to continue")
+      commands["Ask: Notes"].run()
+      commands["Ask: New Conversation"].run()
+      commands["Ask: Follow-up"].run()
+      assert(#notifications == 4 and #fetches == 2, "no conversation to continue: " .. #notifications)
       -- the earlier answer can be reopened from the history and continued
       pickIndex = 1
-      commands["Memo: Ask - History"].run()
+      commands["Ask: History"].run()
       queue = { { ok = true, status = 200, headers = {}, body = { content = { { type = "text", text = "q2" } } } }, SIDECAR, API }
-      commands["Memo: Ask - Follow-up"].run()
+      commands["Ask: Follow-up"].run()
       assert(#fetches == 5 and #fetches[5].opts.body.messages == 3)
     `);
   });
@@ -757,31 +814,37 @@ describe("Memo Ask library", () => {
 
   test("Set up Ask writes the memoAsk block into CONFIG and tells how when not configured", async () => {
     await runLua(`
-      -- not configured: the message points at the command
+      -- not configured: the panel has a Set up Ask row that runs this command (see the panel test)
       local cfg, err = memo.askConfig()
-      assert(cfg == nil and string.find(err, "Memo: Set up Ask", 1, true), err)
-      -- no key: nothing is written
+      assert(cfg == nil and err == memo.ASK_NO_KEY, err)
+      -- no key: nothing is written, and it is not an error
       promptQueue = { "   " }
-      commands["Memo: Set up Ask"].run()
-      assert(writtenPages["CONFIG"] == nil and #errorMessages() == 1)
+      commands["Ask: Set up"].run()
+      assert(writtenPages["CONFIG"] == nil and #errorMessages() == 0)
+      assert(lastNote().message == "Set up cancelled. No key was entered.", lastNote().message)
       -- key + model are written after the existing CONFIG text
       pages["CONFIG"] = "# Config\\n\\nsome text"
       promptQueue = { " sk-ant-abc123 ", "claude-sonnet-5-5" }
-      commands["Memo: Set up Ask"].run()
+      commands["Ask: Set up"].run()
       local text = writtenPages["CONFIG"]
       assert(string.find(text, "# Config\\n\\nsome text\\n\\n\`\`\`space-lua\\n-- memo-ask-setup", 1, true), text)
       assert(string.find(text, 'ask.apiKey = "sk-ant-abc123"', 1, true), text)
       assert(string.find(text, 'ask.model = "claude-sonnet-5-5"', 1, true), text)
       assert(reloaded == 1, "config reloaded")
+      assert(lastNote().message == "Ask is set up with claude-sonnet-5-5. Run Ask: Notes to try it.", lastNote().message)
       -- running it again replaces the block instead of adding another one
       pages["CONFIG"] = text .. "\\nafter"
       writtenPages["CONFIG"] = nil
       promptQueue = { "sk-ant-new", "" }
-      commands["Memo: Set up Ask"].run()
+      commands["Ask: Set up"].run()
       local again = writtenPages["CONFIG"]
       assert(not string.find(again, "abc123", 1, true) and string.find(again, 'ask.apiKey = "sk-ant-new"', 1, true), again)
       assert(string.find(again, 'ask.model = "claude-opus-5-5"', 1, true), again)
       assert(string.find(again, "\\nafter", 1, true) and select(2, string.gsub(again, "memo%-ask%-setup", "")) == 1, again)
+      -- a block written by an older version (other command name in its marker line) is found too
+      local old = "# C\\n\\n\`\`\`space-lua\\n-- memo-ask-setup: written by the command something else\\nask.apiKey = \\"old\\"\\n\`\`\`\\ntail"
+      local replaced = memo.askSetupApply(old, memo.askSetupBlock("fresh", "m"))
+      assert(not string.find(replaced, "old", 1, true) and string.find(replaced, "fresh", 1, true) and string.find(replaced, "tail", 1, true), replaced)
     `);
   });
 
@@ -799,5 +862,39 @@ describe("Memo Ask library", () => {
 
 test("the library page has the shape the embedded build expects", () => {
   expect(librarySource).toContain('name = "memo.ask"');
-  expect(librarySource).toContain('name = "Memo: Ask"');
+  expect(librarySource).toContain('name = "Ask: Notes"');
+});
+
+describe("Ask page conventions", () => {
+  test("keys, names and early registration", async () => {
+    await runLua(`
+      assert(commands["Ask: Notes"].key == "Ctrl-q a" and commands["Ask: Notes"].mac == nil)
+      for _, name in ipairs({ "Ask: Follow-up", "Ask: New Conversation", "Ask: Save Answer", "Ask: History", "Ask: Set up" }) do
+        assert(commands[name], name)
+      end
+      for name in pairs(commands) do
+        assert(not string.find(name, "Memo", 1, true), name)
+      end
+      assert(views["memo.ask"].title == "Ask")
+      assert(#fetches == 0, "registering asks nobody")
+    `);
+  });
+
+  test("no Ctrl-Shift-f, no 'Memo:' and no configuration banner in the page", () => {
+    expect(askPageSource).not.toMatch(/Shift-f/i);
+    expect(askPageSource).not.toContain("Memo:");
+    // helpers (10), then the registration (9): both before the user's CONFIG, never -1
+    const priorities = askPageSource
+      .split("```space-lua")
+      .slice(1)
+      .map((block) =>
+        Number(block.split("\n")[1].replace("-- priority: ", "")),
+      );
+    expect(priorities).toEqual([10, 9]);
+    // notices are at most two sentences with no dash chains or product prefix (the stub of
+    // flashNotification in the tests above enforces it on every notice that is raised)
+    for (const line of askPageSource.split("\n")) {
+      if (line.includes("flashNotification")) expect(line).not.toMatch(/—.*—/);
+    }
+  });
 });
