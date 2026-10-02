@@ -22,6 +22,7 @@ config = {
       local t = tagsDefined[path[2]]
       return t and t.schema or default
     end
+    if #path == 1 then return databases end
     return databases[path[2]] or default
   end,
 }
@@ -47,6 +48,24 @@ async function runLua(testBody: string) {
 }
 
 describe("Database library", () => {
+  test("expandTemplate expands a text with the context in scope", async () => {
+    await runLua(`
+      -- template.new is the real one's shape: (text, stripIndent) -> fn(env)
+      local seen
+      template = { new = function(text, strip)
+        seen = strip
+        return function(env)
+          return (string.gsub(text, "%$%{(%w+)%}", function(k) return env[k] end))
+        end
+      end }
+      local out = database.expandTemplate("# \${title} in \${database}", { title = "Launch", database = "projects" })
+      assert(out == "# Launch in projects", out)
+      -- indentation is kept: a template's body is not a code block to dedent
+      assert(seen == false, "stripIndent must be off")
+      assert(database.expandTemplate("plain") == "plain")
+    `);
+  });
+
   test("declares the databases config and the define function", async () => {
     await runLua(`
       assert(schemas.databases.type == "object", "databases schema")
@@ -147,4 +166,38 @@ describe("Database library", () => {
 test("the library page has the shape the embedded build expects", () => {
   expect(librarySource).toContain("function database.define");
   expect(librarySource).toContain('config.define("databases"');
+});
+
+describe("Database library helpers", () => {
+  test("list names the databases, sorted", async () => {
+    await runLua(`
+      database.define { name = "b" }
+      database.define { name = "a" }
+      local names = database.list()
+      assert(#names == 2 and names[1] == "a" and names[2] == "b", table.concat(names, ","))
+    `);
+  });
+
+  test("viewBlock makes a db block, quoting what needs it", async () => {
+    await runLua(`
+      local f = string.rep("\`", 3)
+      assert(database.viewBlock("projects") == f .. "db\\ndatabase: projects\\nview: table\\n" .. f .. "\\n",
+        database.viewBlock("projects"))
+      assert(database.viewBlock("my-notes_2", "board"):find("view: board", 1, true))
+      assert(database.viewBlock("a b", "calendar"):find('database: "a b"', 1, true))
+      assert(not pcall(database.viewBlock, "x", "gantt"), "an unknown view is refused")
+    `);
+  });
+
+  test("defineSnippet is a space-lua block that defines the database", async () => {
+    await runLua(`
+      local snippet = database.defineSnippet("notes")
+      local f = string.rep("\`", 3)
+      assert(snippet:sub(1, 12) == f .. "space-lua", snippet)
+      assert(snippet:find('name = "notes"', 1, true), snippet)
+      assert(snippet:find("database.define {", 1, true))
+      assert(snippet:sub(-4) == f .. "\\n")
+      assert(database.defineSnippet('a"b'):find('name = "a\\\\"b"', 1, true), "quotes are escaped")
+    `);
+  });
 });

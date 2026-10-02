@@ -13,11 +13,27 @@ import {
 } from "@silverbulletmd/silverbullet/syscalls";
 import { syscall } from "@silverbulletmd/silverbullet/syscall";
 import { panelStyles } from "@silverbulletmd/silverbullet/lib/panel_styles";
-import { rowPageName, rowPatches } from "./create.ts";
+import {
+  copyName,
+  expandExpression,
+  inheritedFrontmatter,
+  type NewValues,
+  renamedPage,
+  rowPageName,
+  rowPatches,
+  valuePatches,
+} from "./create.ts";
 import { isoDate, matchesWhere } from "./derive.ts";
-import { isStale, parseCellInput, setTaskDone, setTaskDue } from "./edit.ts";
+import {
+  isStale,
+  parseCellInput,
+  parsePropertyInput,
+  setTaskDone,
+  setTaskDue,
+} from "./edit.ts";
 import type { CellKind, DatabaseSpec, DbRow, Spec } from "./model.ts";
 import { countTasks, pageRow, taskRow } from "./rows.ts";
+import { replaceBlock, patchBlockBody, type SavedView } from "./viewblock.ts";
 import { databaseFrom, databaseName, parseSpec } from "./spec.ts";
 
 const PLUG_NAME = "db-view";
@@ -30,15 +46,28 @@ export type ViewModel = {
   truncated: boolean;
   /** Today, in the reader's time zone. */
   today: string;
+  /** The ```db block that drew this view, for "Save view" (absent on a
+   * re-read: the panel already holds it). */
+  block?: { page: string; body: string };
 };
 
 async function tasksOf(): Promise<Record<string, any>[]> {
-  return await index.queryLuaObjects<Record<string, any>>("task", {
+  const tasks = await index.queryLuaObjects<Record<string, any>>("task", {
     objectVariable: "_",
   });
+  // Tasks of a trashed page are out of every view too.
+  return tasks.filter((t) => !String(t.page ?? "").startsWith(TRASH));
 }
 
+/** Where deleted rows go: a page there is out of every view. */
+export const TRASH = "Trash/";
+
 async function pagesTagged(tag: string): Promise<Record<string, any>[]> {
+  const found = await pagesWithTag(tag);
+  return found.filter((p) => !String(p.name).startsWith(TRASH));
+}
+
+async function pagesWithTag(tag: string): Promise<Record<string, any>[]> {
   return await index.queryLuaObjects<Record<string, any>>(
     "page",
     {
@@ -54,6 +83,7 @@ async function pagesTagged(tag: string): Promise<Record<string, any>[]> {
 /** The rows a spec asks for, filtered by its `where` and cut to its limit. */
 export async function loadRows(
   spec: Spec,
+  today: string = isoDate(new Date()),
 ): Promise<{ rows: DbRow[]; truncated: boolean }> {
   let rows: DbRow[];
   if (spec.source.kind === "tasks") {
@@ -75,7 +105,10 @@ export async function loadRows(
       ),
     );
   }
-  rows = rows.filter((r) => matchesWhere(r, spec.where));
+  // A `where` on `archived` is an explicit ask, so it is not filtered twice.
+  if (!spec.showArchived && !("archived" in spec.where))
+    rows = rows.filter((r) => r.values.archived !== true);
+  rows = rows.filter((r) => matchesWhere(r, spec.where, today));
   return {
     rows: rows.slice(0, spec.limit),
     truncated: rows.length > spec.limit,
@@ -83,8 +116,9 @@ export async function loadRows(
 }
 
 async function buildModel(spec: Spec): Promise<ViewModel> {
-  const { rows, truncated } = await loadRows(spec);
-  return { spec, rows, truncated, today: isoDate(new Date()) };
+  const today = isoDate(new Date());
+  const { rows, truncated } = await loadRows(spec, today);
+  return { spec, rows, truncated, today };
 }
 
 async function widgetOf(
@@ -113,7 +147,7 @@ function errorWidget(message: string): { html: string; script: string } {
 /** The code widget for a ```db block: the YAML in, an html + script out. */
 export async function render(
   body: string,
-  _pageName: string,
+  pageName: string,
 ): Promise<{ html: string; script: string }> {
   let raw: unknown;
   try {
@@ -126,7 +160,10 @@ export async function render(
   const parsed = parseSpec(raw, await databaseOf(databaseName(raw)));
   if (!parsed.ok) return errorWidget(parsed.error);
   try {
-    return await widgetOf(await buildModel(parsed.spec));
+    return await widgetOf({
+      ...(await buildModel(parsed.spec)),
+      block: { page: pageName, body },
+    });
   } catch (e) {
     return errorWidget(
       `読み込みに失敗しました: ${e instanceof Error ? e.message : e}`,
@@ -150,24 +187,52 @@ export type CreateResult =
       message: string;
     };
 
-/** The body of the database's template page, its frontmatter stripped. */
-async function templateBody(template: string): Promise<string> {
-  const text = await space.readPage(template);
-  const stripped: { text: string } = await system.invokeFunction(
+/**
+ * What a template gives a new row: its body with `${...}` expanded (title,
+ * page and database are in scope), and the frontmatter attributes it carries
+ * (a `frontmatter:` key is the page's own, as for page templates).
+ */
+async function expandedTemplate(
+  template: string,
+  ctx: { title: string; page: string; database: string },
+): Promise<{ body: string; inherited: Record<string, unknown> }> {
+  const expand = async (text: string): Promise<string> =>
+    text.includes("${")
+      ? String(await lua.evalExpression(expandExpression(text, ctx)))
+      : text;
+  const extracted: {
+    frontmatter?: Record<string, unknown>;
+    text: string;
+  } = await system.invokeFunction(
     "index.extractFrontmatter",
-    text,
+    await space.readPage(template),
     { removeFrontMatterSection: true },
   );
-  return stripped.text;
+  const fm = { ...(extracted.frontmatter ?? {}) };
+  let own: Record<string, unknown> = {};
+  const declared = fm.frontmatter;
+  if (typeof declared === "string") {
+    const parsed = await syscall("yaml.parse", await expand(declared));
+    if (parsed && typeof parsed === "object") own = parsed;
+  } else if (declared && typeof declared === "object") {
+    own = declared as Record<string, unknown>;
+  }
+  const inherited = inheritedFrontmatter({ ...fm, ...own });
+  for (const [k, v] of Object.entries(inherited)) {
+    if (typeof v === "string") inherited[k] = await expand(v);
+  }
+  return { body: await expand(extracted.text), inherited };
 }
 
 /**
  * Makes a new row of the spec's database: a page in its folder, tagged, with
- * every property's default, and the template's body when it has one.
+ * every property's default, and the template's body when it has one. `values`
+ * are set last (a board column's value, a calendar day).
  */
 export async function createRow(
   spec: Spec,
   title: string,
+  values?: NewValues,
 ): Promise<CreateResult> {
   // The iframe sends the spec back; what is written is decided by the config.
   const database = spec.database
@@ -184,6 +249,10 @@ export async function createRow(
   if (!page) {
     return { ok: false, reason: "invalid", message: "名前を入力してください" };
   }
+  const given = valuePatches(database, values, spec.date);
+  if (!given.ok) {
+    return { ok: false, reason: "invalid", message: given.error };
+  }
   try {
     if (await pageExists(page)) {
       return {
@@ -192,13 +261,20 @@ export async function createRow(
         message: `${page} はもうあります`,
       };
     }
-    const body = database.template
-      ? await templateBody(database.template)
-      : "\n";
+    const seed = database.template
+      ? await expandedTemplate(database.template, {
+          title: title.trim(),
+          page,
+          database: database.name,
+        })
+      : { body: "\n", inherited: {} };
     const text: string = await system.invokeFunction(
       "index.patchFrontmatter",
-      body,
-      rowPatches(database),
+      seed.body,
+      [
+        ...rowPatches(database, isoDate(new Date()), seed.inherited),
+        ...given.patches,
+      ],
     );
     const meta = await space.writePage(page, text);
     return { ok: true, page, modified: String(meta.lastModified ?? "") };
@@ -266,15 +342,23 @@ async function currentModified(page: string): Promise<string> {
 }
 
 /** Sets or clears one frontmatter attribute. Refuses if the page has changed
- * since the row was read. */
+ * since the row was read, or the value breaks what `database` declares. */
 export async function updatePageValue(
   page: string,
   key: string,
   kind: CellKind,
   input: string | boolean,
   modified: string,
+  database?: string,
 ): Promise<WriteResult> {
-  const parsed = parseCellInput(kind, input);
+  // A declared property is held to its type and options, whatever `kind` the
+  // caller sent.
+  const declared = (await databaseOf(database))?.properties.find(
+    (p) => p.key === key,
+  );
+  const parsed = declared
+    ? parsePropertyInput(declared, input)
+    : parseCellInput(kind, input);
   if (!parsed.ok)
     return { ok: false, reason: "invalid", message: parsed.error };
   try {
@@ -343,6 +427,325 @@ export async function updateTask(
     if (result.text === text) return { ok: true, modified };
     const meta = await space.writePage(page, result.text);
     return { ok: true, modified: String(meta.lastModified ?? "") };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+export type RowResult =
+  | {
+      ok: true;
+      /** The page that now holds the row (the same, or the new name). */
+      page: string;
+      /** Its modification time; null when the page is gone. */
+      modified: string | null;
+    }
+  | {
+      ok: false;
+      reason: "stale" | "exists" | "invalid" | "failed";
+      message: string;
+    };
+
+/** Whether `page` is a row of the spec's database or tag: the iframe names the
+ * page, so what is written to is checked here, not trusted. */
+async function isRowOf(spec: Spec, page: string): Promise<boolean> {
+  if (spec.source.kind === "tasks") return false;
+  const tag = spec.source.kind === "projects" ? "project" : spec.source.tag;
+  const folder = spec.database?.folder;
+  if (folder && !page.startsWith(folder)) return false;
+  return (await pagesTagged(tag)).some((p) => p.name === page);
+}
+
+const NOT_A_ROW = "この行は、この表の行ではなくなっています";
+
+/** Runs `action` on a page row once it is checked to belong to the view and
+ * not to have changed since it was read. */
+async function onRow(
+  spec: Spec,
+  page: string,
+  modified: string,
+  action: () => Promise<RowResult>,
+): Promise<RowResult> {
+  try {
+    if (!(await isRowOf(spec, page))) {
+      return { ok: false, reason: "invalid", message: NOT_A_ROW };
+    }
+    if (isStale(modified, await currentModified(page))) {
+      return { ok: false, reason: "stale", message: STALE };
+    }
+    return await action();
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** Renames `page` to `target` the way the row menu's rename does (links to
+ * it are updated); false when that did not happen. */
+async function renamePage(page: string, target: string): Promise<boolean> {
+  return await system.invokeFunction("index.renamePageCommand", {
+    oldPage: page,
+    page: target,
+  });
+}
+
+/** The first free name for `page` in the trash: `Trash/<page>`, then ` 2`... */
+export async function trashName(
+  page: string,
+  taken: (name: string) => Promise<boolean>,
+): Promise<string> {
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${TRASH}${page}` : `${TRASH}${page} ${n}`;
+    if (!(await taken(name))) return name;
+  }
+}
+
+/** "Deletes" a row: moves its page to `Trash/<name>`, recording where it came
+ * from (`trashedFrom`) and when (`trashedAt`) in its frontmatter. Nothing is
+ * lost: **Database: Restore From Trash** brings it back. The panel has asked
+ * the reader to confirm. */
+export function deleteRow(
+  spec: Spec,
+  page: string,
+  modified: string,
+): Promise<RowResult> {
+  return onRow(spec, page, modified, async () => {
+    const target = await trashName(page, pageExists);
+    const original = await space.readPage(page);
+    const marked: string = await system.invokeFunction(
+      "index.patchFrontmatter",
+      original,
+      [
+        { op: "set-key", path: "trashedFrom", value: page },
+        { op: "set-key", path: "trashedAt", value: isoDate(new Date()) },
+      ],
+    );
+    const markedMeta = await space.writePage(page, marked);
+    let done = false;
+    try {
+      done = await renamePage(page, target);
+    } catch {
+      done = false;
+    }
+    if (!done) {
+      // Not moved: put the page back as it was, so no mark is left behind.
+      // Only when the move left nothing at the target and the page is still
+      // the one just marked (no newer edit, no half-finished rename).
+      try {
+        if (
+          !(await pageExists(target)) &&
+          (await pageExists(page)) &&
+          (await currentModified(page)) ===
+            String(markedMeta.lastModified ?? "")
+        ) {
+          await space.writePage(page, original);
+        }
+      } catch {
+        // Leave it: the page is intact, only marked.
+      }
+      return {
+        ok: false,
+        reason: "failed",
+        message: "ゴミ箱へ移せませんでした",
+      };
+    }
+    return { ok: true, page, modified: null };
+  });
+}
+
+/** Moves a trashed page back to the name in its `trashedFrom`, and drops the
+ * two marks. Refused when that name is taken or the page was not trashed. */
+export async function restoreTrashed(page: string): Promise<RowResult> {
+  try {
+    if (!page.startsWith(TRASH)) {
+      return { ok: false, reason: "invalid", message: "ゴミ箱のページではありません" };
+    }
+    const text = await space.readPage(page);
+    const extracted: { frontmatter?: Record<string, unknown> } =
+      await system.invokeFunction("index.extractFrontmatter", text, {});
+    const from = extracted.frontmatter?.trashedFrom;
+    if (typeof from !== "string" || from === "") {
+      return { ok: false, reason: "invalid", message: "元の名前が分かりません" };
+    }
+    if (from.startsWith(TRASH)) {
+      return { ok: false, reason: "invalid", message: "元の名前が分かりません" };
+    }
+    if (await pageExists(from)) {
+      return { ok: false, reason: "exists", message: `${from} はもうあります` };
+    }
+    if (!(await renamePage(page, from))) {
+      return { ok: false, reason: "failed", message: "戻せませんでした" };
+    }
+    // The page is back: failing to drop the marks must not report failure.
+    try {
+      const moved = await space.readPage(from);
+      const clean: string = await system.invokeFunction(
+        "index.patchFrontmatter",
+        moved,
+        [
+          { op: "delete-key", path: "trashedFrom" },
+          { op: "delete-key", path: "trashedAt" },
+        ],
+      );
+      const modified =
+        clean === moved
+          ? await currentModified(from)
+          : String((await space.writePage(from, clean)).lastModified ?? "");
+      return { ok: true, page: from, modified };
+    } catch {
+      return { ok: true, page: from, modified: null };
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** Archives a row (`archived: true` in its frontmatter, which hides it from
+ * views) or brings it back (the key is removed). */
+export function archiveRow(
+  spec: Spec,
+  page: string,
+  archived: boolean,
+  modified: string,
+): Promise<RowResult> {
+  return onRow(spec, page, modified, async () => {
+    const text = await space.readPage(page);
+    const next: string = await system.invokeFunction(
+      "index.patchFrontmatter",
+      text,
+      [
+        archived
+          ? { op: "set-key", path: "archived", value: true }
+          : { op: "delete-key", path: "archived" },
+      ],
+    );
+    if (next === text) return { ok: true, page, modified };
+    const meta = await space.writePage(page, next);
+    return { ok: true, page, modified: String(meta.lastModified ?? "") };
+  });
+}
+
+/** Copies a row to `<page> copy` (or the first free number after it). */
+export function duplicateRow(
+  spec: Spec,
+  page: string,
+  modified: string,
+): Promise<RowResult> {
+  return onRow(spec, page, modified, async () => {
+    const source = await space.readPage(page);
+    // A copy of an archived row would vanish from the view: it starts live.
+    const text: string = await system.invokeFunction(
+      "index.patchFrontmatter",
+      source,
+      [{ op: "delete-key", path: "archived" }],
+    );
+    const target = await copyName(page, pageExists);
+    const meta = await space.writePage(target, text);
+    return {
+      ok: true,
+      page: target,
+      modified: String(meta.lastModified ?? ""),
+    };
+  });
+}
+
+/** Renames a row's page within its folder, updating the links to it. */
+export function renameRow(
+  spec: Spec,
+  page: string,
+  title: string,
+  modified: string,
+): Promise<RowResult> {
+  const target = renamedPage(page, title);
+  if (!target) {
+    return Promise.resolve({
+      ok: false,
+      reason: "invalid",
+      message: "名前を入力してください",
+    });
+  }
+  if (target === page) {
+    return Promise.resolve({ ok: true, page, modified });
+  }
+  return onRow(spec, page, modified, async () => {
+    if (await pageExists(target)) {
+      return {
+        ok: false,
+        reason: "exists",
+        message: `${target} はもうあります`,
+      };
+    }
+    const done = await renamePage(page, target);
+    if (!done) {
+      return {
+        ok: false,
+        reason: "failed",
+        message: "名前を変えられませんでした",
+      };
+    }
+    return { ok: true, page: target, modified: await currentModified(target) };
+  });
+}
+
+export type SaveViewResult =
+  | { ok: true; body: string }
+  | { ok: false; reason: "stale" | "invalid" | "failed"; message: string };
+
+/**
+ * Writes the reader's view (tab, sort, filter phrase) into the ```db block
+ * that drew it. Explicit: only called by the "Save view" button. If the block
+ * was edited since it was drawn, or cannot be told from another, nothing is
+ * written.
+ */
+export async function saveView(
+  page: string,
+  body: string,
+  saved: SavedView,
+): Promise<SaveViewResult> {
+  if (!["table", "board", "calendar"].includes(saved.view)) {
+    return { ok: false, reason: "invalid", message: "view が正しくありません" };
+  }
+  if (
+    typeof saved.filter !== "string" ||
+    saved.filter.length > 500 ||
+    (saved.sort !== undefined &&
+      (typeof saved.sort.key !== "string" ||
+        saved.sort.key === "" ||
+        typeof saved.sort.desc !== "boolean"))
+  ) {
+    return {
+      ok: false,
+      reason: "invalid",
+      message: "保存する内容が正しくありません",
+    };
+  }
+  try {
+    const text = await space.readPage(page);
+    const next = patchBlockBody(body, saved);
+    const result = replaceBlock(text, body, next);
+    if (!result.ok) {
+      return {
+        ok: false,
+        reason: result.reason === "missing" ? "stale" : "invalid",
+        message:
+          result.reason === "missing"
+            ? "ブロックが書き換わっています。ページを開き直してから保存してください"
+            : "同じ内容の db ブロックが複数あるため、保存先を決められません",
+      };
+    }
+    if (result.text !== text) await space.writePage(page, result.text);
+    return { ok: true, body: next };
   } catch (e) {
     return {
       ok: false,

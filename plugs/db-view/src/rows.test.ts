@@ -90,3 +90,12 @@ describe("countTasks", () => {
     expect(counts.get("C")).toBeUndefined();
   });
 });
+
+describe("pageRow created", () => {
+  test("keeps when the page was created, if the index knows", () => {
+    expect(
+      pageRow({ name: "A", created: "2026-01-01T00:00:00Z" }).created,
+    ).toBe("2026-01-01T00:00:00Z");
+    expect(pageRow({ name: "A" }).created).toBeUndefined();
+  });
+});

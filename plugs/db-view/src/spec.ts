@@ -2,8 +2,12 @@ import {
   type DatabaseProperty,
   type DatabaseSpec,
   DEFAULT_LIMIT,
+  OPERATOR_KEYS,
+  type Operators,
+  type Scalar,
   type PropertyType,
   type SourceSpec,
+  type WhereValue,
   type Spec,
   type ViewKind,
 } from "./model.ts";
@@ -119,6 +123,61 @@ function strings(raw: unknown, what: string): string[] | string | undefined {
   return raw as string[];
 }
 
+const isScalar = (v: unknown): v is Scalar =>
+  typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+
+const WHERE_HELP =
+  "文字列・数・真偽値、または {not, lt, lte, gt, gte, before, after, contains, empty} の条件(一覧にして複数も可)にしてください";
+
+function operators(input: Record<string, unknown>): Operators | string {
+  // YAML turns an unquoted `2026-10-05` into a Date: take it as its ISO day.
+  const v: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(input)) {
+    v[k] =
+      x instanceof Date && !Number.isNaN(x.getTime())
+        ? x.toISOString().slice(0, 10)
+        : x;
+  }
+  const keys = Object.keys(v);
+  if ("lt" in v && "before" in v) return "lt と before は同時に使えません";
+  if ("gt" in v && "after" in v) return "gt と after は同時に使えません";
+  if (keys.length === 0) return WHERE_HELP;
+  for (const k of keys) {
+    if (!(OPERATOR_KEYS as readonly string[]).includes(k)) {
+      return `条件 "${k}" は使えません(${OPERATOR_KEYS.join(" / ")})`;
+    }
+    if (k === "empty" ? typeof v[k] !== "boolean" : !isScalar(v[k])) {
+      return k === "empty"
+        ? "empty は true か false にしてください"
+        : `${k} の値は文字列・数・真偽値にしてください`;
+    }
+  }
+  return v as Operators;
+}
+
+/** One `where` value: a scalar, an operator object, or a non-empty list of
+ * them. A string is the error. */
+function whereValue(v: unknown): { value: WhereValue } | string {
+  if (isScalar(v)) return { value: v };
+  if (isRecord(v)) {
+    const ops = operators(v);
+    return typeof ops === "string" ? ops : { value: ops };
+  }
+  if (Array.isArray(v) && v.length > 0) {
+    const list: (Scalar | Operators)[] = [];
+    for (const item of v) {
+      if (isScalar(item)) list.push(item);
+      else if (isRecord(item)) {
+        const ops = operators(item);
+        if (typeof ops === "string") return ops;
+        list.push(ops);
+      } else return WHERE_HELP;
+    }
+    return { value: list };
+  }
+  return WHERE_HELP;
+}
+
 /** The `database:` a block names, or undefined when it names none. */
 export function databaseName(raw: unknown): string | undefined {
   if (!isRecord(raw) || typeof raw.database !== "string") return undefined;
@@ -201,17 +260,11 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
       return { ok: false, error: "where は「属性: 値」の形にしてください" };
     }
     for (const [key, value] of Object.entries(raw.where)) {
-      if (
-        typeof value !== "string" &&
-        typeof value !== "number" &&
-        typeof value !== "boolean"
-      ) {
-        return {
-          ok: false,
-          error: `where の ${key} は文字列・数・真偽値にしてください`,
-        };
+      const parsed = whereValue(value);
+      if (typeof parsed === "string") {
+        return { ok: false, error: `where の ${key}: ${parsed}` };
       }
-      where[key] = value;
+      where[key] = parsed.value;
     }
   }
 
@@ -227,6 +280,14 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
     sort = text.startsWith("-")
       ? { key: text.slice(1), desc: true }
       : { key: text, desc: false };
+  }
+
+  if (raw.filter !== undefined && typeof raw.filter !== "string") {
+    return { ok: false, error: "filter は文字列にしてください" };
+  }
+
+  if (raw.archived !== undefined && typeof raw.archived !== "boolean") {
+    return { ok: false, error: "archived は true か false にしてください" };
   }
 
   const group = raw.group ?? "status";
@@ -250,7 +311,14 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
       group,
       date,
       columns,
-      sort,
+      // A database lists by title unless told otherwise: a stable order, so
+      // an edited row does not jump to the top.
+      sort:
+        sort ?? (database && owns ? { key: "title", desc: false } : undefined),
+      ...(typeof raw.filter === "string" && raw.filter.trim() !== ""
+        ? { filter: raw.filter }
+        : {}),
+      ...(raw.archived === true ? { showArchived: true } : {}),
       order: order ?? database?.order,
       where,
       limit,

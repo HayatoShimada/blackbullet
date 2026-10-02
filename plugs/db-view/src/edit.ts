@@ -1,4 +1,4 @@
-import type { CellKind } from "./model.ts";
+import type { CellKind, DatabaseProperty } from "./model.ts";
 import { normalizeDate } from "./derive.ts";
 
 export type EditResult =
@@ -94,4 +94,33 @@ export function parseCellInput(
 /** A write is stale when the page changed after the row was read. */
 export function isStale(rowModified: string, currentModified: string): boolean {
   return rowModified !== currentModified;
+}
+
+/** The cell kind a declared property is edited as. */
+export function propertyKind(p: DatabaseProperty): CellKind {
+  return p.type === "page" ? "text" : p.type;
+}
+
+/**
+ * Like `parseCellInput`, for a declared property: its type is the kind, and a
+ * select takes only one of its options (or nothing, which clears it).
+ */
+export function parsePropertyInput(
+  p: DatabaseProperty,
+  input: string | boolean,
+): ParsedValue {
+  const parsed = parseCellInput(propertyKind(p), input);
+  if (
+    parsed.ok &&
+    p.type === "select" &&
+    typeof parsed.value === "string" &&
+    p.options &&
+    !p.options.includes(parsed.value)
+  ) {
+    return {
+      ok: false,
+      error: `${p.label ?? p.key} は ${p.options.join(" / ")} のどれかにしてください`,
+    };
+  }
+  return parsed;
 }

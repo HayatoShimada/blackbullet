@@ -39,6 +39,41 @@ export type DatabaseSpec = {
   order?: string[];
 };
 
+export type Scalar = string | number | boolean;
+
+/** One test on an attribute; every operator given must hold. `today` stands
+ * for today's date in a comparison. */
+export type Operators = {
+  not?: Scalar;
+  lt?: Scalar;
+  lte?: Scalar;
+  gt?: Scalar;
+  gte?: Scalar;
+  /** Alias of `lt` / `gt`: reads well with dates (`before: today`). */
+  before?: Scalar;
+  after?: Scalar;
+  /** Text contains (case-insensitive), or a list has an item containing. */
+  contains?: Scalar;
+  /** true: no value; false: has a value. */
+  empty?: boolean;
+};
+
+export const OPERATOR_KEYS = [
+  "not",
+  "lt",
+  "lte",
+  "gt",
+  "gte",
+  "before",
+  "after",
+  "contains",
+  "empty",
+] as const;
+
+/** A `where` value: equality, an operator object, or a list of either (all
+ * of which must hold: several conditions on one key). */
+export type WhereValue = Scalar | Operators | (Scalar | Operators)[];
+
 /** What a ```db block asks for, after validation and defaults. */
 export type Spec = {
   source: SourceSpec;
@@ -55,9 +90,13 @@ export type Spec = {
   sort?: { key: string; desc: boolean };
   /** Board: the order of the columns; whatever else is found follows. */
   order?: string[];
-  /** Only rows whose attributes equal these. */
-  where: Record<string, string | number | boolean>;
+  /** Only rows whose attributes satisfy these (see `WhereValue`). */
+  where: Record<string, WhereValue>;
+  /** The filter box's starting phrase (`filter:` in the block). */
+  filter?: string;
   limit: number;
+  /** Show archived rows too (`archived: true`); they are hidden otherwise. */
+  showArchived?: boolean;
   /** 0 = Sunday, 1 = Monday. */
   weekStart: 0 | 1;
 };
@@ -77,6 +116,8 @@ export type DbRow = {
   values: Record<string, unknown>;
   /** The page's last change when the row was read: to catch a stale write. */
   modified: string;
+  /** When the page was created, as the index has it (pages only). */
+  created?: string;
   /** A task's range in the page text, and its state character. */
   range?: [number, number];
   state?: string;

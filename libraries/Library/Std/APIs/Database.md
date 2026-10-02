@@ -9,14 +9,26 @@ Defines a database. Options:
 * `name` _(required)_: what a `db` block refers to it by (`database: projects`).
 * `tag`: the tag its pages carry; default: the name.
 * `folder`: where its pages live and where new rows are made, e.g. `Projects/`; default: `<name>/`. A trailing `/` is added when missing. Only pages under the folder are rows.
-* `template`: a page whose body (frontmatter stripped) seeds a new row.
+* `template`: a page that seeds a new row. Its body is expanded like a page template: `${...}` is evaluated, with `title`, `page` and `database` in scope (`${title}`, `${os.date("%Y-%m-%d")}`). Its own frontmatter is merged into the new row (also expanded), except keys that describe the template itself (`tags`, `command`, `key`, `mac`, `priority`, `suggestedName`, `confirmName`, `openIfExists`, `description`, `displayName`, `range`); a `frontmatter:` key, as in a page template, holds the page's own attributes. The row's tag and the properties' defaults win over the template's.
 * `title`: shown as the view's heading; default: the name.
-* `properties`: an ordered list of `{ key, type, label?, options?, default? }`. `type` is one of `text`, `select`, `date`, `number`, `boolean`, `page` (a link to another page). A `select` needs `options`. A `default` is written into every new row.
+* `properties`: an ordered list of `{ key, type, label?, options?, default? }`. `type` is one of `text`, `select`, `date`, `number`, `boolean`, `page` (a link to another page). A `select` needs `options`. A `default` is written into every new row; for a `date`, `default = "today"` is the day the row is made. The options and the type of a property are enforced when a view writes it: a `select` takes only one of its options. Enforcement applies to writes made through a database-backed view (which names the database), not to edits made by hand.
 * `order`: for a board, the order of its columns, e.g. `{"active", "someday", "done"}`.
 
 The definition is stored as `config.databases.<name>` and the tag's schema is declared with `tag.define`, so the properties are validated and completed in frontmatter. If the tag already has a schema (a builtin's, or another database's on the same tag), the properties are merged into it: the database's win on a clash, and its other keys are kept.
 
 A `default` must fit its property's type (and, for a `select`, be one of the options), keys must be unique, and `tags` is reserved; `database.define` fails otherwise.
+
+## database.expandTemplate(text, ctx)
+Expands the `${...}` in `text` with the fields of `ctx` in scope, as `template.new` does. The db view calls it to make a row from the database's `template`.
+
+## database.list()
+The names of the defined databases, sorted. Used by the commands in [[Library/Std/Editor/DB View]].
+
+## database.viewBlock(name, view)
+The Markdown of a `db` block that shows the database `name`, as a `table` (default), `board` or `calendar`. Insert it into a page to get the view.
+
+## database.defineSnippet(name)
+A `space-lua` block with a `database.define` call for a new database called `name`, with a `status` and a `due` property to start from. [[Library/Std/Editor/DB View]] appends it to `CONFIG` with the command **Database: Define in CONFIG**.
 
 # Example
 ```lua
@@ -186,5 +198,55 @@ function database.define(spec)
     name = tagName,
     schema = merged,
   }
+end
+
+-- The text of a template with its ${...} expanded; ctx's fields are in scope.
+function database.expandTemplate(text, ctx)
+  return template.new(text, false)(ctx or {})
+end
+
+-- The names of the defined databases, sorted.
+function database.list()
+  local names = {}
+  for name, _ in pairs(config.get({"databases"}, {})) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
+-- A string with backslashes and double quotes escaped, in double quotes.
+local function quote(text)
+  local escaped = string.gsub(text, "\\", "\\\\")
+  escaped = string.gsub(escaped, '"', '\\"')
+  return '"' .. escaped .. '"'
+end
+
+-- A YAML scalar: plain when it is plain, else double-quoted.
+local function yamlScalar(text)
+  if text:match("^[%w_%-]+$") then return text end
+  return quote(text)
+end
+
+local fence = string.rep("`", 3)
+
+function database.viewBlock(name, view)
+  view = view or "table"
+  assert(view == "table" or view == "board" or view == "calendar",
+    "database.viewBlock: view must be table, board or calendar")
+  return fence .. "db\ndatabase: " .. yamlScalar(name) .. "\nview: " .. view .. "\n" .. fence .. "\n"
+end
+
+function database.defineSnippet(name)
+  local quoted = quote(name)
+  return fence .. "space-lua\n"
+    .. "database.define {\n"
+    .. "  name = " .. quoted .. ",\n"
+    .. "  properties = {\n"
+    .. '    { key = "status", type = "select", options = {"active", "someday", "done"}, default = "active" },\n'
+    .. '    { key = "due", type = "date" },\n'
+    .. "  },\n"
+    .. "}\n"
+    .. fence .. "\n"
 end
 ```

@@ -1,5 +1,5 @@
 import { useRef } from "preact/hooks";
-import { dueState, normalizeDate } from "../../src/derive.ts";
+import { dueState, normalizeDate, shortStamp } from "../../src/derive.ts";
 import type { Column, DbRow } from "../../src/model.ts";
 import type { DbEvent } from "../mediator/db_mediator.ts";
 
@@ -73,6 +73,13 @@ export function CellValue({
   }
   if (value === undefined || value === null || value === "") {
     return <span class="db-empty">·</span>;
+  }
+  if (
+    column.key === "created" ||
+    column.key === "modified" ||
+    column.key === "lastModified"
+  ) {
+    return <span class="db-stamp">{shortStamp(value)}</span>;
   }
   if (column.kind === "date") {
     const state = dueState(value, today);

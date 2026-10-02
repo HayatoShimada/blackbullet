@@ -1,10 +1,14 @@
 import type {
   CreateResult,
+  RowResult,
+  SaveViewResult,
   TaskEdit,
   ViewModel,
   WriteResult,
 } from "../../src/functions.ts";
+import type { NewValues } from "../../src/create.ts";
 import type { CellKind, Spec } from "../../src/model.ts";
+import type { SavedView } from "../../src/viewblock.ts";
 import {
   type DbEffect,
   type DbEvent,
@@ -25,6 +29,7 @@ export type DbRunnerDeps = {
     kind: CellKind,
     input: string | boolean,
     modified: string,
+    database?: string,
   ): Promise<WriteResult>;
   updateTask(
     page: string,
@@ -34,8 +39,32 @@ export type DbRunnerDeps = {
     modified: string,
   ): Promise<WriteResult>;
   query(spec: Spec): Promise<ViewModel>;
-  /** A new row of the spec's database, named `title`. */
-  createRow(spec: Spec, title: string): Promise<CreateResult>;
+  /** A new row of the spec's database, named `title`, starting with `values`. */
+  createRow(
+    spec: Spec,
+    title: string,
+    values?: NewValues,
+  ): Promise<CreateResult>;
+  deleteRow(spec: Spec, page: string, modified: string): Promise<RowResult>;
+  archiveRow(
+    spec: Spec,
+    page: string,
+    archived: boolean,
+    modified: string,
+  ): Promise<RowResult>;
+  duplicateRow(spec: Spec, page: string, modified: string): Promise<RowResult>;
+  renameRow(
+    spec: Spec,
+    page: string,
+    title: string,
+    modified: string,
+  ): Promise<RowResult>;
+  /** Writes tab, sort and filter phrase into the block that drew the view. */
+  saveView(
+    page: string,
+    body: string,
+    saved: SavedView,
+  ): Promise<SaveViewResult>;
   /** The modification time the index holds for a page (null: none). */
   indexedModified(page: string): Promise<string | null>;
   navigate(target: string): Promise<void>;
@@ -51,6 +80,13 @@ export type DbRunner = {
   getState(): DbState;
 };
 
+const ROW_DONE = {
+  delete: "ゴミ箱へ移しました",
+  archive: "アーカイブを切り替えました",
+  duplicate: "複製しました",
+  rename: "名前を変えました",
+};
+
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -59,7 +95,7 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
   let state = initial;
   // The pages written since the last read, and the modification time each write
   // gave them: a read has to wait for the index to show these.
-  const written = new Map<string, string>();
+  const written = new Map<string, string | null>();
 
   function emit(event: DbEvent): void {
     const next = transition(state, event);
@@ -80,6 +116,7 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
           kind,
           value,
           row.modified,
+          ...(effect.database ? [effect.database] : []),
         );
       } else if (!row.range) {
         result = {
@@ -164,10 +201,58 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
     return true;
   }
 
-  async function create(title: string): Promise<void> {
+  async function rowAction(
+    effect: Extract<DbEffect, { type: "rowAction" }>,
+  ): Promise<void> {
+    const { row, action } = effect;
+    let result: RowResult;
+    try {
+      if (action === "delete") {
+        result = await deps.deleteRow(state.spec, row.page, row.modified);
+      } else if (action === "archive") {
+        result = await deps.archiveRow(
+          state.spec,
+          row.page,
+          effect.archived === true,
+          row.modified,
+        );
+      } else if (action === "duplicate") {
+        result = await deps.duplicateRow(state.spec, row.page, row.modified);
+      } else {
+        result = await deps.renameRow(
+          state.spec,
+          row.page,
+          effect.title ?? "",
+          row.modified,
+        );
+      }
+    } catch (e) {
+      result = { ok: false, reason: "failed", message: errorMessage(e) };
+    }
+    if (!result.ok) {
+      emit({
+        type: "row.failed",
+        reason: result.reason,
+        message: result.message,
+      });
+      return;
+    }
+    // The read that follows waits for the index to show it: the old name gone
+    // (null), the new page there.
+    if (result.page !== row.page) written.set(row.page, null);
+    if (action === "delete") written.set(row.page, null);
+    else written.set(result.page, result.modified);
+    emit({ type: "row.done", message: ROW_DONE[action] });
+  }
+
+  async function create(
+    effect: Extract<DbEffect, { type: "create" }>,
+  ): Promise<void> {
     let result: CreateResult;
     try {
-      result = await deps.createRow(state.spec, title);
+      result = effect.values
+        ? await deps.createRow(state.spec, effect.title, effect.values)
+        : await deps.createRow(state.spec, effect.title);
     } catch (e) {
       result = { ok: false, reason: "failed", message: errorMessage(e) };
     }
@@ -177,15 +262,47 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
     }
     // The read that follows waits for the index to show the new page.
     written.set(result.page, result.modified);
-    emit({ type: "create.done", page: result.page });
+    emit({ type: "create.done", page: result.page, open: effect.open });
+  }
+
+  async function save(
+    effect: Extract<DbEffect, { type: "saveView" }>,
+  ): Promise<void> {
+    const block = state.block;
+    if (!block) {
+      emit({
+        type: "view.save.failed",
+        message: "保存先のブロックがありません",
+      });
+      return;
+    }
+    let result: SaveViewResult;
+    try {
+      result = await deps.saveView(block.page, block.body, {
+        view: effect.view,
+        ...(effect.sort ? { sort: effect.sort } : {}),
+        filter: effect.filter,
+      });
+    } catch (e) {
+      result = { ok: false, reason: "failed", message: errorMessage(e) };
+    }
+    emit(
+      result.ok
+        ? { type: "view.saved", body: result.body }
+        : { type: "view.save.failed", message: result.message },
+    );
   }
 
   async function run(effect: DbEffect): Promise<void> {
     switch (effect.type) {
       case "write":
         return write(effect);
+      case "rowAction":
+        return rowAction(effect);
       case "create":
-        return create(effect.title);
+        return create(effect);
+      case "saveView":
+        return save(effect);
       case "reload":
         try {
           // Still behind after all that: keep what the write already showed.

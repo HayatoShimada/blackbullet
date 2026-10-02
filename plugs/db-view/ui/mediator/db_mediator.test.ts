@@ -4,6 +4,7 @@ import {
   type DbEvent,
   type DbState,
   initialState,
+  viewDirty,
   selectView,
   transition,
 } from "./db_mediator.ts";
@@ -465,6 +466,106 @@ describe("+ New", () => {
     expect(transition(editing, { type: "create.open" }).state).toBe(editing);
   });
 
+  test("Shift+Enter makes the row without opening it", () => {
+    const { effects } = run(
+      [
+        { type: "create.open" },
+        { type: "row.create", title: "Launch", stay: true },
+      ],
+      withDb(),
+    );
+    expect(effects).toEqual([{ type: "create", title: "Launch", open: false }]);
+    const done = transition(start(), {
+      type: "create.done",
+      page: "P/L",
+      open: false,
+    });
+    expect(done.effects).toEqual([{ type: "reload" }]);
+    expect(
+      transition(start(), { type: "create.done", page: "P/L" }).effects,
+    ).toEqual([{ type: "navigate", target: "P/L" }, { type: "reload" }]);
+  });
+
+  test("a board column's + makes a row with its value, and stays", () => {
+    const opened = run([{ type: "create.open", at: "someday" }], withDb());
+    expect(opened.state.mode).toEqual({
+      kind: "creating",
+      at: "someday",
+      values: { status: "someday" },
+    });
+    const { effects } = run(
+      [{ type: "row.create", title: "Idea" }],
+      opened.state,
+    );
+    expect(effects).toEqual([
+      {
+        type: "create",
+        title: "Idea",
+        values: { status: "someday" },
+        open: false,
+      },
+    ]);
+  });
+
+  test("the no-value column starts with nothing", () => {
+    const { state } = run([{ type: "create.open", at: "" }], withDb());
+    expect(state.mode).toEqual({ kind: "creating", at: "" });
+  });
+
+  test("a calendar day's + sets the date attribute", () => {
+    const from = start({
+      view: "calendar",
+      source: { kind: "tag", tag: "project" },
+      database,
+    });
+    const { state, effects } = run(
+      [
+        { type: "create.open", at: "2026-10-09" },
+        { type: "row.create", title: "Ship" },
+      ],
+      from,
+    );
+    expect(state.mode).toEqual({ kind: "writing" });
+    expect(effects).toEqual([
+      {
+        type: "create",
+        title: "Ship",
+        values: { due: "2026-10-09" },
+        open: false,
+      },
+    ]);
+  });
+
+  test("a + elsewhere moves the open input; a busy view refuses it", () => {
+    const a = run([{ type: "create.open", at: "active" }], withDb()).state;
+    expect(
+      transition(a, { type: "create.open", at: "done" }).state.mode,
+    ).toMatchObject({ at: "done" });
+    const writing = run(
+      [{ type: "create.open" }, { type: "row.create", title: "x" }],
+      withDb(),
+    ).state;
+    expect(transition(writing, { type: "create.open", at: "done" }).state).toBe(
+      writing,
+    );
+  });
+
+  test("a write names the database whose options it is held to", () => {
+    const { effects } = run(
+      [
+        { type: "card.drag", rowId: "A" },
+        { type: "card.drop", target: "done" },
+      ],
+      withDb(),
+    );
+    expect(effects[0]).toMatchObject({ type: "write", database: "projects" });
+    const bare = run([
+      { type: "card.drag", rowId: "A" },
+      { type: "card.drop", target: "done" },
+    ]);
+    expect(bare.effects[0]).not.toHaveProperty("database");
+  });
+
   test("cancelling closes the input", () => {
     const { state, effects } = run(
       [{ type: "create.open" }, { type: "create.cancel" }],
@@ -482,7 +583,7 @@ describe("+ New", () => {
       withDb(),
     );
     expect(state.mode).toEqual({ kind: "writing" });
-    expect(effects).toEqual([{ type: "create", title: "Launch" }]);
+    expect(effects).toEqual([{ type: "create", title: "Launch", open: true }]);
     expect(
       transition(state, { type: "row.create", title: "Again" }).effects,
     ).toEqual([]);
@@ -550,5 +651,213 @@ describe("+ New", () => {
       withDb(),
     );
     expect(effects[0]).toMatchObject({ column: "area", kind: "text" });
+  });
+});
+
+describe("row menu", () => {
+  const menuOn = (id = "A") => run([{ type: "row.menu", rowId: id }]).state;
+
+  test("the menu opens for a page, and the same button closes it", () => {
+    expect(menuOn().mode).toEqual({ kind: "menu", rowId: "A" });
+    const s = run([
+      { type: "row.menu", rowId: "A" },
+      { type: "row.menu", rowId: "A" },
+    ]).state;
+    expect(s.mode).toEqual({ kind: "idle" });
+  });
+  test("a task has no menu", () => {
+    const s = start({}, [row("T", {}, { kind: "task" })]);
+    expect(run([{ type: "row.menu", rowId: "T" }], s).state.mode).toEqual({
+      kind: "idle",
+    });
+  });
+  test("rename: start, then a new title writes; unchanged or empty does not", () => {
+    const r = run([
+      { type: "row.menu", rowId: "A" },
+      { type: "row.rename.start", rowId: "A" },
+      { type: "row.rename", rowId: "A", title: "  " },
+    ]);
+    expect(r.state.mode).toEqual({ kind: "renaming", rowId: "A" });
+    expect(r.effects).toEqual([]);
+    const same = run([{ type: "row.rename", rowId: "A", title: "A" }], r.state);
+    expect(same.state.mode).toEqual({ kind: "idle" });
+    expect(same.effects).toEqual([]);
+    const done = run(
+      [{ type: "row.rename", rowId: "A", title: " New " }],
+      r.state,
+    );
+    expect(done.state.mode).toEqual({ kind: "writing" });
+    expect(done.effects).toEqual([
+      { type: "rowAction", action: "rename", row: rows[0], title: "New" },
+    ]);
+  });
+  test("delete asks first, and only the confirmation deletes", () => {
+    const asked = run([
+      { type: "row.menu", rowId: "B" },
+      { type: "row.delete.ask", rowId: "B" },
+    ]);
+    expect(asked.state.mode).toEqual({ kind: "confirming", rowId: "B" });
+    expect(asked.effects).toEqual([]);
+    const cancelled = run([{ type: "row.menu.close" }], asked.state);
+    expect(cancelled.state.mode).toEqual({ kind: "idle" });
+    const done = run([{ type: "row.delete.confirm" }], asked.state);
+    expect(done.effects).toEqual([
+      { type: "rowAction", action: "delete", row: rows[1] },
+    ]);
+    // Without the ask, confirm does nothing.
+    expect(run([{ type: "row.delete.confirm" }]).effects).toEqual([]);
+  });
+  test("archive toggles by what the row has; duplicate copies", () => {
+    const s = start({}, [row("A"), row("Z", { archived: true })]);
+    const a = run(
+      [
+        { type: "row.menu", rowId: "A" },
+        { type: "row.archive", rowId: "A" },
+      ],
+      s,
+    );
+    expect(a.effects).toMatchObject([{ action: "archive", archived: true }]);
+    const z = run(
+      [
+        { type: "row.menu", rowId: "Z" },
+        { type: "row.archive", rowId: "Z" },
+      ],
+      s,
+    );
+    expect(z.effects).toMatchObject([{ action: "archive", archived: false }]);
+    const d = run([
+      { type: "row.menu", rowId: "A" },
+      { type: "row.duplicate", rowId: "A" },
+    ]);
+    expect(d.effects).toMatchObject([{ action: "duplicate" }]);
+    expect(d.state.mode).toEqual({ kind: "writing" });
+  });
+  test("actions need the menu to be open on that row", () => {
+    expect(run([{ type: "row.duplicate", rowId: "A" }]).effects).toEqual([]);
+    expect(
+      run([
+        { type: "row.menu", rowId: "A" },
+        { type: "row.duplicate", rowId: "B" },
+      ]).effects,
+    ).toEqual([]);
+  });
+  test("done reloads and says so; a stale failure reloads too", () => {
+    const writing = run([
+      { type: "row.menu", rowId: "A" },
+      { type: "row.duplicate", rowId: "A" },
+    ]).state;
+    const ok = transition(writing, {
+      type: "row.done",
+      message: "複製しました",
+    });
+    expect(ok.effects).toEqual([{ type: "reload" }]);
+    expect(ok.state.notice).toEqual({ level: "info", text: "複製しました" });
+    const stale = transition(writing, {
+      type: "row.failed",
+      reason: "stale",
+      message: "x",
+    });
+    expect(stale.effects).toEqual([{ type: "reload" }]);
+    expect(stale.state.notice?.level).toBe("error");
+    const failed = transition(writing, {
+      type: "row.failed",
+      reason: "failed",
+      message: "x",
+    });
+    expect(failed.effects).toEqual([]);
+    expect(failed.state.mode).toEqual({ kind: "idle" });
+  });
+});
+
+describe("save view", () => {
+  const block = { page: "Home", body: "source: projects" };
+  const withBlock = (over: Partial<Spec> = {}) => ({
+    ...start(over),
+    block,
+  });
+
+  test("the block's filter is the phrase to start with", () => {
+    expect(start({ filter: "app" }).phrase).toBe("app");
+  });
+  test("nothing to save until the view differs from the block", () => {
+    const s = withBlock({ view: "table" });
+    expect(viewDirty(s)).toBe(false);
+    expect(run([{ type: "view.save" }], s).effects).toEqual([]);
+    expect(viewDirty(run([{ type: "view.set", view: "board" }], s).state)).toBe(
+      true,
+    );
+    expect(viewDirty(run([{ type: "phrase.set", phrase: "x" }], s).state)).toBe(
+      true,
+    );
+    expect(viewDirty(run([{ type: "sort.toggle", key: "due" }], s).state)).toBe(
+      true,
+    );
+  });
+  test("saving sends the tab, sort and trimmed phrase, and waits", () => {
+    const { state, effects } = run(
+      [
+        { type: "view.set", view: "calendar" },
+        { type: "sort.toggle", key: "due" },
+        { type: "phrase.set", phrase: " app " },
+        { type: "view.save" },
+      ],
+      withBlock({ view: "table" }),
+    );
+    expect(effects).toEqual([
+      {
+        type: "saveView",
+        view: "calendar",
+        sort: { key: "due", desc: false },
+        filter: "app",
+      },
+    ]);
+    expect(state.mode).toEqual({ kind: "writing" });
+  });
+  test("without a block there is nowhere to save", () => {
+    const s = run([{ type: "view.set", view: "calendar" }]).state;
+    expect(run([{ type: "view.save" }], s).effects).toEqual([]);
+  });
+  test("once saved the view is clean and the block body is the new one", () => {
+    const { state } = run(
+      [
+        { type: "view.set", view: "calendar" },
+        { type: "phrase.set", phrase: "x" },
+        { type: "view.save" },
+        { type: "view.saved", body: "source: projects\nview: calendar" },
+      ],
+      withBlock({ view: "table" }),
+    );
+    expect(viewDirty(state)).toBe(false);
+    expect(state.mode).toEqual({ kind: "idle" });
+    expect(state.block?.body).toBe("source: projects\nview: calendar");
+    expect(state.notice?.level).toBe("info");
+  });
+  test("edits during a save stay dirty: spec records what was written", () => {
+    const { state } = run(
+      [
+        { type: "view.set", view: "calendar" },
+        { type: "view.save" },
+        { type: "view.set", view: "board" },
+        { type: "phrase.set", phrase: "later" },
+        { type: "view.saved", body: "source: projects\nview: calendar" },
+      ],
+      withBlock({ view: "table" }),
+    );
+    expect(state.spec.view).toBe("calendar");
+    expect(state.view).toBe("board");
+    expect(viewDirty(state)).toBe(true);
+  });
+  test("a refused save keeps the view dirty and says why", () => {
+    const { state } = run(
+      [
+        { type: "view.set", view: "calendar" },
+        { type: "view.save" },
+        { type: "view.save.failed", message: "changed" },
+      ],
+      withBlock({ view: "table" }),
+    );
+    expect(viewDirty(state)).toBe(true);
+    expect(state.notice).toEqual({ level: "error", text: "changed" });
+    expect(state.mode).toEqual({ kind: "idle" });
   });
 });

@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { createMockSystem } from "../../../plug-api/system_mock.ts";
 import { extractFrontmatter, patchFrontmatter } from "../../index/api.ts";
 import {
+  archiveRow,
   createRow,
+  deleteRow,
+  duplicateRow,
   loadRows,
+  renameRow,
+  restoreTrashed,
+  saveView,
   updatePageValue,
   updateTask,
 } from "./functions.ts";
@@ -12,7 +18,10 @@ import type { DatabaseSpec, Spec } from "./model.ts";
 const call = (name: string, ...args: unknown[]) =>
   (globalThis as any).syscall(name, ...args);
 
+let renameMode: "ok" | "refuse" | "throw-after-write" = "ok";
+
 beforeEach(() => {
+  renameMode = "ok";
   const mock = createMockSystem();
   // The index plug is not loaded here: stand in for the functions used.
   mock.system.registerSyscalls([], {
@@ -25,7 +34,24 @@ beforeEach(() => {
         return patchFrontmatter(args[0], args[1]);
       if (name === "index.extractFrontmatter")
         return extractFrontmatter(args[0], args[1]);
+      if (name === "index.renamePageCommand") {
+        if (renameMode === "refuse") return false;
+        const text = await call("space.readPage", args[0].oldPage);
+        await call("space.writePage", args[0].page, text);
+        if (renameMode === "throw-after-write") throw new Error("boom");
+        await call("space.deletePage", args[0].oldPage);
+        return true;
+      }
       throw new Error(`unexpected ${name}`);
+    },
+    // The Lua runtime is not loaded here: read the call the plug builds, and
+    // expand `${title}` / `${page}` in the text as `database.expandTemplate`.
+    "lua.evalExpression": async (_ctx: unknown, expression: string) => {
+      const long = /\[(=*)\[\n([\s\S]*?)\]\1\]/g;
+      const [text, title, page] = [...expression.matchAll(long)].map(
+        (m) => m[2],
+      );
+      return text.replaceAll("${title}", title).replaceAll("${page}", page);
     },
   });
 });
@@ -53,6 +79,46 @@ async function index(objects: Record<string, unknown>[], page = "Seed") {
 describe("updatePageValue", () => {
   const original =
     "---\nstatus: active\ndue: 2026-10-01\narea: 発信\ntags: project\n---\n\n# P\n";
+
+  test("a declared select takes only its options", async () => {
+    const db = projects();
+    await call("config.set", ["databases", db.name], db);
+    const modified = await writePage("Projects/A", original);
+    const bad = await updatePageValue(
+      "Projects/A",
+      "status",
+      "select",
+      "dnoe",
+      modified,
+      db.name,
+    );
+    expect(bad).toMatchObject({ ok: false, reason: "invalid" });
+    expect(await call("space.readPage", "Projects/A")).toBe(original);
+    const good = await updatePageValue(
+      "Projects/A",
+      "status",
+      "select",
+      "done",
+      modified,
+      db.name,
+    );
+    expect(good.ok).toBe(true);
+  });
+
+  test("a declared type wins over the kind the caller sent", async () => {
+    const db = projects();
+    await call("config.set", ["databases", db.name], db);
+    const modified = await writePage("Projects/A", original);
+    const r = await updatePageValue(
+      "Projects/A",
+      "count",
+      "text",
+      "many",
+      modified,
+      db.name,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "invalid" });
+  });
 
   test("sets one attribute and keeps the rest", async () => {
     const modified = await writePage("Projects/A", original);
@@ -363,7 +429,7 @@ describe("createRow", () => {
     }
   });
 
-  test("the template's body follows, its own frontmatter dropped", async () => {
+  test("the template's body follows; the tag and defaults win over its frontmatter", async () => {
     await writePage(
       "Templates/Project",
       "---\ntags: template\nstatus: ignored\n---\n# Goal\n\n- [ ] first step\n",
@@ -374,9 +440,71 @@ describe("createRow", () => {
     );
     expect(r.ok).toBe(true);
     const text = await call("space.readPage", "Projects/Launch");
-    expect(text).toContain("tags:\n  - project\nstatus: active\n");
+    // The template's `status: ignored` is overridden by the database's default.
+    expect(text).toContain("tags:\n  - project\n");
+    expect(text).toContain("status: active\n");
     expect(text).not.toContain("ignored");
     expect(text).toContain("# Goal\n\n- [ ] first step\n");
+  });
+
+  test("the template's ${...} is expanded and its frontmatter merged", async () => {
+    await writePage(
+      "Templates/Project",
+      "---\ntags: meta/template/page\narea: work\nnote: for ${title}\nstatus: done\n---\n# ${title}\n\nsee ${page}\n",
+    );
+    const r = await createRow(
+      await withDb({ template: "Templates/Project" }),
+      "Launch",
+    );
+    expect(r.ok).toBe(true);
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toContain("area: work\n");
+    expect(text).toContain("note: for Launch\n");
+    // The tag and the defaults win over the template's own values.
+    expect(text).toContain("tags:\n  - project\n");
+    expect(text).toContain("status: active\n");
+    expect(text).not.toContain("meta/template");
+    expect(text).toContain("# Launch\n\nsee Projects/Launch\n");
+  });
+
+  test("a template's frontmatter: key holds the page's own attributes", async () => {
+    await writePage(
+      "Templates/Project",
+      "---\ntags: meta/template/page\nfrontmatter:\n  area: ops\n---\nbody\n",
+    );
+    await createRow(await withDb({ template: "Templates/Project" }), "Launch");
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toContain("area: ops\n");
+    expect(text).not.toContain("frontmatter");
+  });
+
+  test("a date default of today is the day the row is made", async () => {
+    const s = await withDb({
+      properties: [{ key: "start", type: "date", default: "today" }],
+    });
+    await createRow(s, "Launch");
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toMatch(/start: \d{4}-\d{2}-\d{2}\n/);
+  });
+
+  test("values are set last, and checked against the property", async () => {
+    const s = await withDb();
+    const r = await createRow(s, "Launch", {
+      status: "done",
+      due: "2026-10-05",
+    });
+    expect(r.ok).toBe(true);
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toContain("status: done\n");
+    expect(text).toContain("due: 2026-10-05\n");
+    expect(text).not.toContain("status: active");
+  });
+
+  test("a value the property does not allow writes nothing", async () => {
+    const s = await withDb();
+    const r = await createRow(s, "Launch", { status: "bogus" });
+    expect(r).toMatchObject({ ok: false, reason: "invalid" });
+    await expect(call("space.readPage", "Projects/Launch")).rejects.toThrow();
   });
 
   test("a page that is there already is left alone", async () => {
@@ -458,5 +586,338 @@ describe("indexedModified", () => {
     ]);
     expect(await indexedModified("Idx/P")).toBe("2026-10-01T00:00:00Z");
     expect(await indexedModified("Idx/None")).toBeNull();
+  });
+});
+
+describe("row actions", () => {
+  const db = projects();
+  const view = (): Spec =>
+    spec({ source: { kind: "tag", tag: "project" }, database: db });
+  const seed = async (name = "Projects/A") => {
+    const modified = await writePage(
+      name,
+      "---\ntags: project\nstatus: active\n---\n# A\n",
+    );
+    await index([
+      {
+        ref: name,
+        tag: "page",
+        name,
+        tags: ["project"],
+        lastModified: modified,
+      },
+    ]);
+    return modified;
+  };
+  const exists = async (name: string) => {
+    try {
+      await call("space.getPageMeta", name);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  test("delete moves the page to Trash/, marked with where it was from", async () => {
+    const m = await seed();
+    expect(await deleteRow(view(), "Projects/A", m)).toEqual({
+      ok: true,
+      page: "Projects/A",
+      modified: null,
+    });
+    expect(await exists("Projects/A")).toBe(false);
+    const text: string = await call("space.readPage", "Trash/Projects/A");
+    expect(text).toContain("# A");
+    expect(text).toContain("trashedFrom: Projects/A");
+    expect(text).toMatch(/trashedAt: ['"]?\d{4}-\d{2}-\d{2}/);
+  });
+
+  test("a second delete of the same name gets a numbered trash page", async () => {
+    await writePage("Trash/Projects/A", "old");
+    await writePage("Trash/Projects/A 2", "older");
+    const m = await seed();
+    await deleteRow(view(), "Projects/A", m);
+    expect(await call("space.readPage", "Trash/Projects/A")).toBe("old");
+    expect(await exists("Trash/Projects/A 3")).toBe(true);
+  });
+
+  test("a trashed page is out of the view even if still indexed", async () => {
+    const m = await seed();
+    await deleteRow(view(), "Projects/A", m);
+    await index([
+      {
+        ref: "Trash/Projects/A",
+        tag: "page",
+        name: "Trash/Projects/A",
+        tags: ["project"],
+        lastModified: "x",
+      },
+    ]);
+    const noFolder = spec({ source: { kind: "tag", tag: "project" } });
+    const { rows } = await loadRows(noFolder);
+    expect(rows.map((r) => r.page)).not.toContain("Trash/Projects/A");
+  });
+
+  test("restore moves it back, drops the marks, and refuses a taken name", async () => {
+    const m = await seed();
+    await deleteRow(view(), "Projects/A", m);
+    await writePage("Projects/A", "someone else");
+    const refused = await restoreTrashed("Trash/Projects/A");
+    expect(refused).toMatchObject({ ok: false, reason: "exists" });
+    expect(await exists("Trash/Projects/A")).toBe(true);
+    await call("space.deletePage", "Projects/A");
+    const back = await restoreTrashed("Trash/Projects/A");
+    expect(back).toMatchObject({ ok: true, page: "Projects/A" });
+    expect(await exists("Trash/Projects/A")).toBe(false);
+    const text: string = await call("space.readPage", "Projects/A");
+    expect(text).toContain("# A");
+    expect(text).not.toContain("trashed");
+  });
+
+  test("a refused rename leaves the page unchanged, with no marks", async () => {
+    const m = await seed();
+    const before = await call("space.readPage", "Projects/A");
+    renameMode = "refuse";
+    expect(await deleteRow(view(), "Projects/A", m)).toMatchObject({
+      ok: false,
+      reason: "failed",
+    });
+    expect(await call("space.readPage", "Projects/A")).toBe(before);
+    expect(await exists("Trash/Projects/A")).toBe(false);
+  });
+
+  test("a rename that fails after writing the target makes no duplicate", async () => {
+    const m = await seed();
+    renameMode = "throw-after-write";
+    expect(await deleteRow(view(), "Projects/A", m)).toMatchObject({
+      ok: false,
+      reason: "failed",
+    });
+    expect(await exists("Trash/Projects/A")).toBe(true);
+    expect(await call("space.readPage", "Projects/A")).toContain("trashedFrom");
+  });
+
+  test("restore with a failing rename keeps the trashed page", async () => {
+    const m = await seed();
+    await deleteRow(view(), "Projects/A", m);
+    renameMode = "refuse";
+    expect(await restoreTrashed("Trash/Projects/A")).toMatchObject({
+      ok: false,
+      reason: "failed",
+    });
+    expect(await exists("Trash/Projects/A")).toBe(true);
+  });
+
+  test("restore refuses a trashedFrom inside the trash", async () => {
+    await writePage("Trash/Hand", "---\ntrashedFrom: Trash/x\n---\nx");
+    expect(await restoreTrashed("Trash/Hand")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+
+  test("tasks on a trashed page are out of a tasks view", async () => {
+    await index(
+      [
+        { ref: "Trash/P@1", tag: "task", name: "gone", page: "Trash/P", state: " " },
+        { ref: "Live@1", tag: "task", name: "kept", page: "Live", state: " " },
+      ],
+      "Seed",
+    );
+    const { rows } = await loadRows(spec({ source: { kind: "tasks" } }));
+    expect(rows.map((r) => r.page)).toEqual(["Live"]);
+  });
+
+  test("a project source skips trashed pages", async () => {
+    await index([
+      { ref: "Trash/Q", tag: "page", name: "Trash/Q", tags: ["project"], lastModified: "x" },
+    ]);
+    const { rows } = await loadRows(spec());
+    expect(rows.map((r) => r.page)).not.toContain("Trash/Q");
+  });
+
+  test("restore refuses pages that were not trashed", async () => {
+    await writePage("Trash/Plain", "x");
+    expect(await restoreTrashed("Trash/Plain")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+    expect(await restoreTrashed("Projects/A")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+
+  test("delete refuses a changed page and one that is not a row", async () => {
+    await seed();
+    const stale = await deleteRow(view(), "Projects/A", "old");
+    expect(stale).toMatchObject({ ok: false, reason: "stale" });
+    expect(await exists("Projects/A")).toBe(true);
+    await writePage("Other/X", "x");
+    const other = await deleteRow(view(), "Other/X", "m");
+    expect(other).toMatchObject({ ok: false, reason: "invalid" });
+    expect(await exists("Other/X")).toBe(true);
+    const tasks = await deleteRow(
+      spec({ source: { kind: "tasks" } }),
+      "Projects/A",
+      "m",
+    );
+    expect(tasks).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  test("archive sets the flag, restore removes it", async () => {
+    const m = await seed();
+    const r = await archiveRow(view(), "Projects/A", true, m);
+    expect(r.ok).toBe(true);
+    expect(await call("space.readPage", "Projects/A")).toContain(
+      "archived: true",
+    );
+    if (!r.ok || r.modified === null) throw new Error("expected ok");
+    const back = await archiveRow(view(), "Projects/A", false, r.modified);
+    expect(back.ok).toBe(true);
+    expect(await call("space.readPage", "Projects/A")).not.toContain(
+      "archived",
+    );
+  });
+
+  test("archived rows are hidden unless the spec asks", async () => {
+    await index([
+      { ref: "Projects/A", tag: "page", name: "Projects/A", tags: ["project"] },
+      {
+        ref: "Projects/B",
+        tag: "page",
+        name: "Projects/B",
+        tags: ["project"],
+        archived: true,
+      },
+    ]);
+    const shown = await loadRows(view());
+    expect(shown.rows.map((r) => r.id)).toEqual(["Projects/A"]);
+    const all = await loadRows({ ...view(), showArchived: true });
+    expect(all.rows.map((r) => r.id).sort()).toEqual([
+      "Projects/A",
+      "Projects/B",
+    ]);
+  });
+
+  test("duplicate copies to the first free name", async () => {
+    const m = await seed();
+    const one = await duplicateRow(view(), "Projects/A", m);
+    expect(one).toMatchObject({ ok: true, page: "Projects/A copy" });
+    const two = await duplicateRow(view(), "Projects/A", m);
+    expect(two).toMatchObject({ ok: true, page: "Projects/A copy 2" });
+    expect(await call("space.readPage", "Projects/A copy")).toContain("# A");
+  });
+
+  test("duplicating an archived row gives a live copy", async () => {
+    const m = await seed();
+    const a = await archiveRow(view(), "Projects/A", true, m);
+    if (!a.ok) throw new Error("archive failed");
+    await duplicateRow(view(), "Projects/A", a.modified ?? m);
+    const copy = await call("space.readPage", "Projects/A copy");
+    expect(copy).not.toContain("archived");
+    expect(copy).toContain("status: active");
+  });
+
+  test("a where on archived is not filtered twice", async () => {
+    await index([
+      {
+        ref: "Projects/B",
+        tag: "page",
+        name: "Projects/B",
+        tags: ["project"],
+        archived: true,
+      },
+    ]);
+    const r = await loadRows({ ...view(), where: { archived: true } });
+    expect(r.rows.map((x) => x.id)).toEqual(["Projects/B"]);
+  });
+
+  test("rename keeps the folder and refuses a taken or empty name", async () => {
+    const m = await seed();
+    await writePage("Projects/Taken", "x");
+    expect(await renameRow(view(), "Projects/A", "Taken", m)).toMatchObject({
+      ok: false,
+      reason: "exists",
+    });
+    expect(await renameRow(view(), "Projects/A", " / ", m)).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+    const r = await renameRow(view(), "Projects/A", "B/Renamed", m);
+    expect(r).toMatchObject({ ok: true, page: "Projects/BRenamed" });
+    expect(await exists("Projects/A")).toBe(false);
+    expect(await exists("Projects/BRenamed")).toBe(true);
+  });
+});
+
+describe("where operators against loaded rows", () => {
+  test("overdue and unassigned views", async () => {
+    await index([
+      {
+        ref: "Projects/A",
+        tag: "page",
+        name: "Projects/A",
+        tags: ["project"],
+        due: "2026-09-01",
+      },
+      {
+        ref: "Projects/B",
+        tag: "page",
+        name: "Projects/B",
+        tags: ["project"],
+        due: "2026-12-01",
+        owner: "me",
+      },
+      { ref: "Projects/C", tag: "page", name: "Projects/C", tags: ["project"] },
+    ]);
+    const names = async (where: Spec["where"]) =>
+      (await loadRows(spec({ where }), "2026-10-02")).rows
+        .map((r) => r.page)
+        .sort();
+    expect(await names({ due: { before: "today" } })).toEqual(["Projects/A"]);
+    expect(await names({ owner: { empty: true } })).toEqual([
+      "Projects/A",
+      "Projects/C",
+    ]);
+    expect(
+      await names({ due: { empty: false }, owner: { not: "you" } }),
+    ).toEqual(["Projects/A", "Projects/B"]);
+  });
+});
+
+describe("saveView", () => {
+  const body = "source: projects\nsort: title";
+  const text = `# Home\n\n\`\`\`db\n${body}\n\`\`\`\n\nafter\n`;
+
+  test("rewrites only the block", async () => {
+    await writePage("Home", text);
+    const r = await saveView("Home", body, {
+      view: "board",
+      sort: { key: "due", desc: true },
+      filter: "app",
+    });
+    expect(r).toEqual({
+      ok: true,
+      body: 'source: projects\nsort: -due\nview: board\nfilter: "app"',
+    });
+    expect(await call("space.readPage", "Home")).toBe(
+      `# Home\n\n\`\`\`db\nsource: projects\nsort: -due\nview: board\nfilter: "app"\n\`\`\`\n\nafter\n`,
+    );
+  });
+  test("a block edited meanwhile is left alone", async () => {
+    await writePage("Home", text.replace("sort: title", "sort: status"));
+    const r = await saveView("Home", body, { view: "board", filter: "" });
+    expect(r).toMatchObject({ ok: false, reason: "stale" });
+    expect(await call("space.readPage", "Home")).toContain("sort: status");
+  });
+  test("an unknown view is refused", async () => {
+    await writePage("Home", text);
+    const r = await saveView("Home", body, {
+      view: "gantt" as any,
+      filter: "",
+    });
+    expect(r).toMatchObject({ ok: false, reason: "invalid" });
+    expect(await call("space.readPage", "Home")).toBe(text);
   });
 });

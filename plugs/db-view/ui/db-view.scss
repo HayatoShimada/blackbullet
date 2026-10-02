@@ -162,11 +162,16 @@ body { margin: 0; }
 .db-drop { outline: 2px dashed var(--db-drop); outline-offset: -2px; }
 
 .db-card {
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
   background: var(--ui-surface-background-color);
   border: 1px solid var(--ui-surface-border-color);
   border-radius: 6px;
   padding: 6px 8px;
   cursor: grab;
+  // A press on a card is for moving it, not for selecting its text.
+  user-select: none;
+  -webkit-user-select: none;
 }
 .db-card:active { cursor: grabbing; }
 .db-dragging { opacity: 0.4; }
@@ -199,9 +204,43 @@ body { margin: 0; }
   gap: 3px;
 }
 .db-cal-day.db-out { background: var(--ui-surface-hover-background-color); color: var(--ui-surface-subtle-color); }
+.db-cal-top { display: flex; align-items: center; justify-content: space-between; }
+.db-plus { padding: 0 8px; line-height: 1.3; }
+.db-new-inline { width: 100%; min-width: 0; box-sizing: border-box; }
+.db-cal-day .db-plus { padding: 0 5px; font-size: 11px; }
 .db-cal-day.db-today .db-cal-num { background: var(--ui-accent-color, #3a6fd8); color: #fff; border-radius: 10px; }
 .db-cal-num { align-self: flex-start; padding: 0 6px; font-size: 12px; }
 .db-cal-day .db-card { padding: 2px 6px; }
 .db-cal-day .db-card-title { font-size: 12px; margin: 0; }
 .db-cal-day .db-card-meta { display: none; }
 .db-undated { margin-top: 10px; }
+
+.db-menu-col { width: 1%; white-space: nowrap; text-align: right; }
+.db-row-menu { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.db-row-menu-btn { padding: 0 8px; }
+.db-danger { color: #c33; border-color: #c33; }
+.db-confirm { font-size: 12px; }
+.db-rename { width: 160px; }
+.db-row-archived { opacity: 0.55; }
+.db-stamp { font-variant-numeric: tabular-nums; color: var(--ui-surface-subtle-color); }
+
+// Narrow screens: the header wraps, the board scrolls one column at a time,
+// and the calendar's days stack as a list.
+@media (max-width: 600px) {
+  .db-header { gap: 6px; }
+  .db-tabs { margin-left: 0; order: 1; width: 100%; }
+  .db-tab { flex: 1; }
+  .db-filter { flex: 1; min-width: 0; width: auto; }
+  .db-new-title { width: 100%; box-sizing: border-box; }
+  .db-btn, .db-tab { min-height: 36px; }
+  .db-board {
+    grid-auto-columns: 82%;
+    scroll-snap-type: x mandatory;
+  }
+  .db-column { scroll-snap-align: start; }
+  .db-cal-grid { display: block; border-left: 0; }
+  .db-cal-dow, .db-cal-day.db-out { display: none; }
+  .db-cal-day { min-height: 0; border-left: 1px solid var(--ui-surface-border-color); }
+  .db-cal-day .db-card-meta { display: flex; }
+  .db-cal-num { font-size: 13px; }
+}

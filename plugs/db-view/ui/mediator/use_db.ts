@@ -14,12 +14,21 @@ const call = (fn: string, ...args: unknown[]) =>
 /** The widget's real dependencies: the plug's functions, by syscall. */
 function widgetDeps(onState: (s: DbState) => void): DbRunnerDeps {
   return {
-    updatePageValue: (page, key, kind, input, modified) =>
-      call("updatePageValue", page, key, kind, input, modified),
+    updatePageValue: (page, key, kind, input, modified, database) =>
+      call("updatePageValue", page, key, kind, input, modified, database),
     updateTask: (page, pos, state, edit, modified) =>
       call("updateTask", page, pos, state, edit, modified),
     query: (spec) => call("query", spec),
-    createRow: (spec, title) => call("createRow", spec, title),
+    createRow: (spec, title, values) => call("createRow", spec, title, values),
+    deleteRow: (spec, page, modified) =>
+      call("deleteRow", spec, page, modified),
+    archiveRow: (spec, page, archived, modified) =>
+      call("archiveRow", spec, page, archived, modified),
+    duplicateRow: (spec, page, modified) =>
+      call("duplicateRow", spec, page, modified),
+    renameRow: (spec, page, title, modified) =>
+      call("renameRow", spec, page, title, modified),
+    saveView: (page, body, saved) => call("saveView", page, body, saved),
     indexedModified: (page) => call("indexedModified", page),
     navigate: (target) => syscall("editor.navigate", target),
     onState,

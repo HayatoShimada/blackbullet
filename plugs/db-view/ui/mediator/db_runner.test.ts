@@ -39,8 +39,10 @@ function setup(
 ) {
   const log: string[] = [];
   const deps: DbRunnerDeps = {
-    async updatePageValue(page, key, kind, input, modified) {
-      log.push(`page ${page} ${key}=${String(input)} (${kind}) @${modified}`);
+    async updatePageValue(page, key, kind, input, modified, database) {
+      log.push(
+        `page ${page} ${key}=${String(input)} (${kind}) @${modified}${database ? ` db=${database}` : ""}`,
+      );
       return write();
     },
     async updateTask(page, pos, state, edit, modified) {
@@ -61,6 +63,21 @@ function setup(
     },
     async createRow() {
       throw new Error("createRow was not expected");
+    },
+    async deleteRow() {
+      throw new Error("deleteRow was not expected");
+    },
+    async archiveRow() {
+      throw new Error("archiveRow was not expected");
+    },
+    async duplicateRow() {
+      throw new Error("duplicateRow was not expected");
+    },
+    async renameRow() {
+      throw new Error("renameRow was not expected");
+    },
+    async saveView() {
+      throw new Error("saveView was not expected");
     },
     async indexedModified() {
       // The index has caught up with the write ("m2") by the time it is asked.
@@ -449,6 +466,29 @@ describe("+ New", () => {
     expect(runner.getState().reloading).toBe(false);
   });
 
+  test("a row made in place carries its values and does not open", async () => {
+    const seen: unknown[] = [];
+    const { runner, log } = setup(
+      [row("A")],
+      undefined,
+      {
+        async createRow(_s, title, values) {
+          seen.push(values);
+          return { ok: true, page: `Projects/${title}`, modified: "m2" };
+        },
+        async indexedModified() {
+          return "m2";
+        },
+      },
+      { ...withDb, view: "board" },
+    );
+    runner.emit({ type: "create.open", at: "someday" });
+    runner.emit({ type: "row.create", title: "Idea" });
+    await settle();
+    expect(seen).toEqual([{ status: "someday" }]);
+    expect(log).toEqual(["query"]);
+  });
+
   test("a refused row is shown, nothing opens", async () => {
     const { runner, log } = setup(
       [row("A")],
@@ -490,5 +530,200 @@ describe("+ New", () => {
     await settle();
     expect(runner.getState().notice?.text).toBe("disk full");
     expect(runner.getState().mode).toEqual({ kind: "idle" });
+  });
+});
+
+describe("db runner row actions", () => {
+  const withDb: Spec = {
+    ...spec,
+    source: { kind: "tag", tag: "project" },
+  };
+  test("delete calls the plug, waits for the page to be gone, reloads", async () => {
+    const asked: string[] = [];
+    const { runner, log } = setup(
+      [row("A")],
+      undefined,
+      {
+        async deleteRow(_s, page, modified) {
+          log2.push(`delete ${page} @${modified}`);
+          return { ok: true, page, modified: null };
+        },
+        async indexedModified(page) {
+          asked.push(page);
+          return null;
+        },
+      },
+      withDb,
+    );
+    const log2: string[] = [];
+    runner.emit({ type: "row.menu", rowId: "A" });
+    runner.emit({ type: "row.delete.ask", rowId: "A" });
+    runner.emit({ type: "row.delete.confirm" });
+    await settle();
+    expect(log2).toEqual(["delete A @m1"]);
+    expect(log).toEqual(["query"]);
+    expect(asked).toEqual(["A"]);
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
+    expect(runner.getState().notice?.text).toBe("ゴミ箱へ移しました");
+  });
+  test("rename waits for the old name to go and the new one to show", async () => {
+    const asked: string[] = [];
+    const { runner } = setup(
+      [row("Projects/A")],
+      undefined,
+      {
+        async renameRow(_s, _page, title) {
+          return { ok: true, page: `Projects/${title}`, modified: "m9" };
+        },
+        async indexedModified(page) {
+          asked.push(page);
+          return page === "Projects/A" ? null : "m9";
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "row.menu", rowId: "Projects/A" });
+    runner.emit({ type: "row.rename.start", rowId: "Projects/A" });
+    runner.emit({ type: "row.rename", rowId: "Projects/A", title: "B" });
+    await settle();
+    expect(asked.sort()).toEqual(["Projects/A", "Projects/B"]);
+    expect(runner.getState().reloading).toBe(false);
+  });
+  test("archive and duplicate pass what the plug needs; a refusal is shown", async () => {
+    const calls: string[] = [];
+    const { runner } = setup(
+      [row("A")],
+      undefined,
+      {
+        async archiveRow(_s, page, archived, modified) {
+          calls.push(`archive ${page} ${archived} @${modified}`);
+          return { ok: true, page, modified: "m2" };
+        },
+        async duplicateRow() {
+          return { ok: false, reason: "failed", message: "disk full" };
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "row.menu", rowId: "A" });
+    runner.emit({ type: "row.archive", rowId: "A" });
+    await settle();
+    expect(calls).toEqual(["archive A true @m1"]);
+    runner.emit({ type: "row.menu", rowId: "A" });
+    runner.emit({ type: "row.duplicate", rowId: "A" });
+    await settle();
+    expect(runner.getState().notice).toEqual({
+      level: "error",
+      text: "disk full",
+    });
+  });
+  test("a throwing action is a failure, not a crash", async () => {
+    const { runner } = setup(
+      [row("A")],
+      undefined,
+      {
+        async duplicateRow() {
+          throw new Error("boom");
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "row.menu", rowId: "A" });
+    runner.emit({ type: "row.duplicate", rowId: "A" });
+    await settle();
+    expect(runner.getState().notice?.text).toBe("boom");
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
+  });
+});
+
+describe("save view", () => {
+  test("the view goes to the block that drew it", async () => {
+    const log: string[] = [];
+    const rows = [row("A")];
+    const runner = createDbRunner(
+      initialState({
+        spec,
+        rows,
+        truncated: false,
+        today: "2026-10-02",
+        block: { page: "Home", body: "source: projects" },
+      }),
+      {
+        async saveView(page: string, body: string, saved: unknown) {
+          log.push(`${page}|${body}|${JSON.stringify(saved)}`);
+          return { ok: true, body: "NEW" };
+        },
+        onState: () => {},
+      } as unknown as DbRunnerDeps,
+    );
+    runner.emit({ type: "view.set", view: "board" });
+    runner.emit({ type: "phrase.set", phrase: "x" });
+    runner.emit({ type: "view.save" });
+    await settle();
+    expect(log).toEqual([
+      'Home|source: projects|{"view":"board","filter":"x"}',
+    ]);
+    expect(runner.getState().block?.body).toBe("NEW");
+    expect(runner.getState().spec.view).toBe("board");
+  });
+
+  test("a refusal is shown, and a throw too", async () => {
+    for (const saveView of [
+      async () => ({
+        ok: false as const,
+        reason: "stale" as const,
+        message: "changed",
+      }),
+      async () => {
+        throw new Error("changed");
+      },
+    ]) {
+      const runner = createDbRunner(
+        initialState({
+          spec,
+          rows: [],
+          truncated: false,
+          today: "2026-10-02",
+          block: { page: "Home", body: "b" },
+        }),
+        { saveView, onState: () => {} } as unknown as DbRunnerDeps,
+      );
+      runner.emit({ type: "phrase.set", phrase: "x" });
+      runner.emit({ type: "view.save" });
+      await settle();
+      expect(runner.getState().notice?.text).toBe("changed");
+      expect(runner.getState().mode).toEqual({ kind: "idle" });
+    }
+  });
+});
+
+describe("db runner write enforcement", () => {
+  test("a page write tells the plug which database it belongs to", async () => {
+    const s: Spec = {
+      ...spec,
+      view: "table",
+      source: { kind: "tag", tag: "project" },
+      database: {
+        name: "projects",
+        tag: "project",
+        folder: "Projects/",
+        properties: [],
+      },
+    };
+    const { runner, log } = setup(
+      [row("A", { status: "active" })],
+      undefined,
+      {},
+      s,
+    );
+    runner.emit({ type: "cell.edit", rowId: "A", column: "status" });
+    runner.emit({
+      type: "cell.commit",
+      rowId: "A",
+      column: "status",
+      value: "done",
+    });
+    await settle();
+    expect(log[0]).toContain("db=projects");
   });
 });

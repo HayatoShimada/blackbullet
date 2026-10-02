@@ -50,6 +50,7 @@ export function pageRow(
     title: String(obj.displayName ?? lastSegment(name)),
     values: attributes(obj),
     modified: String(obj.lastModified ?? ""),
+    ...(obj.created ? { created: String(obj.created) } : {}),
     ...(counts ? { openTasks: counts.open, doneTasks: counts.done } : {}),
   };
 }

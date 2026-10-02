@@ -20,3 +20,15 @@ functions:
     path: ./src/functions.ts:updateTask
   createRow:
     path: ./src/functions.ts:createRow
+  deleteRow:
+    path: ./src/functions.ts:deleteRow
+  restoreTrashed:
+    path: ./src/functions.ts:restoreTrashed
+  archiveRow:
+    path: ./src/functions.ts:archiveRow
+  duplicateRow:
+    path: ./src/functions.ts:duplicateRow
+  saveView:
+    path: ./src/functions.ts:saveView
+  renameRow:
+    path: ./src/functions.ts:renameRow

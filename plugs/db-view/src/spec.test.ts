@@ -168,6 +168,13 @@ describe("parseSpec", () => {
     [{ source: "projects", where: "x" }, "where"],
     [{ source: "projects", where: { a: [] } }, "where"],
     [{ source: "projects", sort: "" }, "sort"],
+    [{ source: "projects", where: { a: {} } }, "where"],
+    [{ source: "projects", where: { a: { near: 1 } } }, "near"],
+    [{ source: "projects", where: { a: { empty: "yes" } } }, "empty"],
+    [{ source: "projects", where: { a: { lt: [1] } } }, "lt"],
+    [{ source: "projects", where: { a: [{ nope: 1 }] } }, "nope"],
+    [{ source: "projects", where: { a: [null] } }, "where"],
+    [{ source: "projects", filter: 3 }, "filter"],
     [{ source: "projects", group: 1 }, "group"],
   ])("rejects %j", (raw, message) => {
     expect(err(raw)).toContain(message);
@@ -252,5 +259,56 @@ describe("databaseFrom", () => {
     for (const bad of [null, "projects", {}, { name: "" }, { name: 1 }]) {
       expect(databaseFrom(bad)).toBeUndefined();
     }
+  });
+});
+
+describe("database defaults and archived", () => {
+  test("a database sorts by title, a stable order, unless told", () => {
+    expect(ok({ database: "projects" }, projects).sort).toEqual({
+      key: "title",
+      desc: false,
+    });
+    expect(ok({ database: "projects", sort: "due" }, projects).sort).toEqual({
+      key: "due",
+      desc: false,
+    });
+    expect(ok({ source: "projects" }).sort).toBeUndefined();
+  });
+  test("-created and -modified are sort keys like any other", () => {
+    expect(ok({ source: "projects", sort: "-created" }).sort).toEqual({
+      key: "created",
+      desc: true,
+    });
+  });
+  test("archived: true shows archived rows; other values are refused", () => {
+    expect(ok({ source: "projects", archived: true }).showArchived).toBe(true);
+    expect(ok({ source: "projects" }).showArchived).toBeUndefined();
+    expect(parseSpec({ source: "projects", archived: "yes" }).ok).toBe(false);
+  });
+});
+
+describe("where operators and filter", () => {
+  test("operator objects and lists are accepted as written", () => {
+    const r = parseSpec({
+      source: "tasks",
+      where: {
+        due: { before: "today" },
+        owner: { empty: true },
+        status: [{ not: "done" }, { not: "someday" }],
+        area: "x",
+      },
+      filter: "urgent",
+    });
+    expect(r.ok && r.spec.where).toEqual({
+      due: { before: "today" },
+      owner: { empty: true },
+      status: [{ not: "done" }, { not: "someday" }],
+      area: "x",
+    });
+    expect(r.ok && r.spec.filter).toBe("urgent");
+  });
+  test("a blank filter is none", () => {
+    const r = parseSpec({ source: "tasks", filter: "  " });
+    expect(r.ok && r.spec.filter).toBeUndefined();
   });
 });

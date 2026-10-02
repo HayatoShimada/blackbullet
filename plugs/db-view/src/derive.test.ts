@@ -11,7 +11,9 @@ import {
   rowsByDate,
   selectOptions,
   shiftMonth,
+  shortStamp,
   sortRows,
+  valueOf,
 } from "./derive.ts";
 import type { DatabaseSpec, DbRow, Spec } from "./model.ts";
 
@@ -136,6 +138,66 @@ describe("filterRows and matchesWhere", () => {
     expect(matchesWhere(rows[1], { tags: "app" })).toBe(false);
     expect(matchesWhere(row("x", { done: false }), { done: false })).toBe(true);
     expect(matchesWhere(row("x"), {})).toBe(true);
+  });
+});
+
+describe("matchesWhere operators", () => {
+  const r = (v: Record<string, unknown>) => row("x", v);
+  const today = "2026-10-02";
+  const m = (v: Record<string, unknown>, where: Spec["where"]) =>
+    matchesWhere(r(v), where, today);
+
+  test("not", () => {
+    expect(m({ status: "active" }, { status: { not: "done" } })).toBe(true);
+    expect(m({ status: "done" }, { status: { not: "done" } })).toBe(false);
+    expect(m({}, { status: { not: "done" } })).toBe(true);
+    expect(m({ tags: ["a", "b"] }, { tags: { not: "a" } })).toBe(false);
+  });
+  test("before / after today, and lt / gte on dates", () => {
+    const overdue: Spec["where"] = { due: { before: "today" } };
+    expect(m({ due: "2026-10-01" }, overdue)).toBe(true);
+    expect(m({ due: "2026-10-02" }, overdue)).toBe(false);
+    expect(m({}, overdue)).toBe(false);
+    expect(m({ due: "2026-10-03" }, { due: { after: "today" } })).toBe(true);
+    expect(m({ due: "2026-10-02" }, { due: { gte: "today" } })).toBe(true);
+    expect(m({ due: "2026-10-02" }, { due: { lt: "2026-10-03" } })).toBe(true);
+  });
+  test("numbers compare as numbers", () => {
+    expect(m({ n: 10 }, { n: { gt: 9 } })).toBe(true);
+    expect(m({ n: "10" }, { n: { lte: 9 } })).toBe(false);
+  });
+  test("contains is case-insensitive and looks inside lists", () => {
+    expect(m({ area: "Product Dev" }, { area: { contains: "dev" } })).toBe(
+      true,
+    );
+    expect(m({ tags: ["alpha", "beta"] }, { tags: { contains: "bet" } })).toBe(
+      true,
+    );
+    expect(m({}, { area: { contains: "x" } })).toBe(false);
+  });
+  test("empty and not-empty", () => {
+    expect(m({}, { owner: { empty: true } })).toBe(true);
+    expect(m({ owner: "" }, { owner: { empty: true } })).toBe(true);
+    expect(m({ owner: [] }, { owner: { empty: true } })).toBe(true);
+    expect(m({ owner: "me" }, { owner: { empty: true } })).toBe(false);
+    expect(m({ owner: "me" }, { owner: { empty: false } })).toBe(true);
+  });
+  test("several operators in one object, and a list of conditions, all must hold", () => {
+    const range: Spec["where"] = {
+      due: { gte: "2026-10-01", lt: "2026-10-10" },
+    };
+    expect(m({ due: "2026-10-05" }, range)).toBe(true);
+    expect(m({ due: "2026-10-10" }, range)).toBe(false);
+    const list: Spec["where"] = {
+      status: [{ not: "done" }, { not: "someday" }],
+    };
+    expect(m({ status: "active" }, list)).toBe(true);
+    expect(m({ status: "someday" }, list)).toBe(false);
+    expect(m({ tags: ["a", "b"] }, { tags: ["a", "b"] })).toBe(true);
+    expect(m({ tags: ["a"] }, { tags: ["a", "b"] })).toBe(false);
+  });
+  test("a scalar stays plain equality (today is not special there)", () => {
+    expect(m({ due: "today" }, { due: "today" })).toBe(true);
   });
 });
 
@@ -374,5 +436,66 @@ describe("a database's declared properties", () => {
         (c) => c.key,
       ),
     ).toEqual(["title", "extra"]);
+  });
+});
+
+describe("created and modified", () => {
+  const r = (created: string | undefined, modified: string) =>
+    ({
+      id: "A",
+      kind: "page",
+      page: "A",
+      title: "A",
+      values: {},
+      modified,
+      created,
+    }) as DbRow;
+  test("they read from the row, and an empty one is no value", () => {
+    expect(valueOf(r("c1", "m1"), "created")).toBe("c1");
+    expect(valueOf(r("c1", "m1"), "modified")).toBe("m1");
+    expect(valueOf(r("c1", "m1"), "lastModified")).toBe("m1");
+    expect(valueOf(r(undefined, ""), "modified")).toBeUndefined();
+  });
+  test("a declared modified property wins over the index time", () => {
+    const row = { ...r("c1", "m1"), values: { modified: "mine" } } as DbRow;
+    expect(valueOf(row, "modified")).toBe("mine");
+    expect(valueOf(row, "lastModified")).toBe("m1");
+  });
+  test("they sort, newest first with desc", () => {
+    const rows = [
+      { ...r("2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z"), id: "old" },
+      { ...r("2026-02-01T00:00:00Z", "2026-05-01T00:00:00Z"), id: "new" },
+      { ...r(undefined, ""), id: "none" },
+    ];
+    expect(
+      sortRows(rows, { key: "modified", desc: true }).map((x) => x.id),
+    ).toEqual(["new", "old", "none"]);
+    expect(
+      sortRows(rows, { key: "created", desc: false }).map((x) => x.id),
+    ).toEqual(["old", "new", "none"]);
+  });
+  test("they are read-only columns with labels", () => {
+    const cols = columnsFor([r("c", "m")], {
+      source: { kind: "tag", tag: "x" },
+      view: "table",
+      group: "status",
+      date: "due",
+      where: {},
+      limit: 1,
+      weekStart: 0,
+      columns: ["title", "created", "modified"],
+    });
+    expect(cols.map((c) => [c.label, c.editable])).toEqual([
+      ["名前", false],
+      ["作成", false],
+      ["更新", false],
+    ]);
+  });
+  test("a stamp shows to the minute; other text is left as it is", () => {
+    expect(shortStamp("2026-10-02T12:34:56.000Z")).toMatch(
+      /^2026-10-0[1-3] \d\d:\d\d$/,
+    );
+    expect(shortStamp("hello")).toBe("hello");
+    expect(shortStamp(undefined)).toBe("");
   });
 });

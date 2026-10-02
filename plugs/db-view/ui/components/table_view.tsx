@@ -2,6 +2,7 @@ import { valueOf } from "../../src/derive.ts";
 import type { DbRow } from "../../src/model.ts";
 import type { DbEvent, DbState, DbView } from "../mediator/db_mediator.ts";
 import { CellEditor, CellValue } from "./cell.tsx";
+import { hasMenu, RowMenu } from "./row_menu.tsx";
 
 export function TableView({
   state,
@@ -12,6 +13,7 @@ export function TableView({
   view: DbView;
   emit: (event: DbEvent) => void;
 }) {
+  const withMenu = view.rows.some(hasMenu);
   const busy = state.mode.kind === "writing";
   const editing = state.mode.kind === "editing" ? state.mode : null;
   return (
@@ -40,13 +42,14 @@ export function TableView({
                 </th>
               );
             })}
+            {withMenu && <th class="db-menu-col" />}
           </tr>
         </thead>
         <tbody>
           {view.rows.map((row: DbRow) => (
             <tr
               key={row.id}
-              class={row.values.done === true ? "db-row-done" : ""}
+              class={`${row.values.done === true ? "db-row-done" : ""}${row.values.archived === true ? " db-row-archived" : ""}`}
             >
               {view.columns.map((c) => {
                 const isEditing =
@@ -103,6 +106,11 @@ export function TableView({
                   </td>
                 );
               })}
+              {withMenu && (
+                <td class="db-cell db-menu-col">
+                  <RowMenu row={row} state={state} emit={emit} />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

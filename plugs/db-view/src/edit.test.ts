@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { isStale, parseCellInput, setTaskDone, setTaskDue } from "./edit.ts";
+import {
+  isStale,
+  parseCellInput,
+  parsePropertyInput,
+  propertyKind,
+  setTaskDone,
+  setTaskDue,
+} from "./edit.ts";
 
 const page =
   "# Plan\n\n- [ ] first #next\n  - [x] nested [due: 2026-10-01]\n1. [ ] numbered\nplain text\n";
@@ -135,5 +142,31 @@ describe("isStale", () => {
   test("a changed page is stale", () => {
     expect(isStale("a", "a")).toBe(false);
     expect(isStale("a", "b")).toBe(true);
+  });
+});
+
+describe("parsePropertyInput", () => {
+  const status = {
+    key: "status",
+    type: "select" as const,
+    options: ["active", "done"],
+  };
+  test("a select takes its options, or nothing", () => {
+    expect(parsePropertyInput(status, "done")).toEqual({
+      ok: true,
+      value: "done",
+    });
+    expect(parsePropertyInput(status, "")).toEqual({ ok: true, value: null });
+    expect(parsePropertyInput(status, "dnoe")).toMatchObject({ ok: false });
+  });
+  test("the declared type decides how it is read", () => {
+    expect(parsePropertyInput({ key: "n", type: "number" }, "4")).toEqual({
+      ok: true,
+      value: 4,
+    });
+    expect(parsePropertyInput({ key: "d", type: "date" }, "x")).toMatchObject({
+      ok: false,
+    });
+    expect(propertyKind({ key: "p", type: "page" })).toBe("text");
   });
 });

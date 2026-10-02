@@ -5,6 +5,8 @@ import {
   type DatabaseSpec,
   DEFAULT_STATUS_ORDER,
   type DbRow,
+  type Operators,
+  type Scalar,
   type Spec,
 } from "./model.ts";
 
@@ -46,10 +48,27 @@ export function dueState(due: unknown, today: string): DueState {
   return days <= 3 ? "soon" : "later";
 }
 
+/** An index timestamp as `2026-10-02 12:34` (the reader's zone); what it is
+ * not a timestamp is returned as it came. */
+export function shortStamp(value: unknown): string {
+  const text = String(value ?? "");
+  const t = Date.parse(text);
+  if (Number.isNaN(t) || !/^\d{4}-\d{2}-\d{2}T/.test(text)) return text;
+  const d = new Date(t);
+  return `${isoDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** The value of an attribute, from a row (`title` and the counts included). */
 export function valueOf(row: DbRow, key: string): unknown {
   if (key === "title" || key === "name") return row.title;
   if (key === "page") return row.page;
+  if (key === "created") return row.created;
+  if (key === "modified" || key === "lastModified") {
+    // A property of that name (database.define allows it) wins.
+    if (key === "modified" && row.values.modified !== undefined)
+      return row.values.modified;
+    return row.modified === "" ? undefined : row.modified;
+  }
   if (key === "openTasks") return row.openTasks;
   if (key === "doneTasks") return row.doneTasks;
   return row.values[key];
@@ -101,13 +120,62 @@ export function filterRows(rows: readonly DbRow[], phrase: string): DbRow[] {
   });
 }
 
-/** Rows whose attributes equal what `where` asked for. */
-export function matchesWhere(row: DbRow, where: Spec["where"]): boolean {
+const isNumeric = (v: unknown) =>
+  typeof v === "number" ||
+  (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)));
+
+/** Order of two values: numbers as numbers, anything else as text (which
+ * is right for ISO dates). */
+function compareLoose(a: unknown, b: unknown): number {
+  if (isNumeric(a) && isNumeric(b)) return Number(a) - Number(b);
+  const x = String(a);
+  const y = String(b);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+const equalsLoose = (actual: unknown, wanted: unknown): boolean =>
+  Array.isArray(actual)
+    ? actual.map(String).includes(String(wanted))
+    : String(actual) === String(wanted);
+
+function isOperators(c: unknown): c is Operators {
+  return typeof c === "object" && c !== null && !Array.isArray(c);
+}
+
+function holds(actual: unknown, cond: Scalar | Operators, today: string) {
+  if (!isOperators(cond)) return equalsLoose(actual, cond);
+  const arg = (v: Scalar) => (v === "today" ? today : v);
+  const empty = isEmpty(actual);
+  // A comparison needs a value to compare; a missing one fails it.
+  const cmp = (v: Scalar | undefined, ok: (c: number) => boolean) =>
+    v === undefined || (!empty && ok(compareLoose(actual, arg(v))));
+  const items = Array.isArray(actual) ? actual : [actual];
+  return (
+    (cond.not === undefined || !equalsLoose(actual, arg(cond.not))) &&
+    cmp(cond.lt ?? cond.before, (c) => c < 0) &&
+    cmp(cond.lte, (c) => c <= 0) &&
+    cmp(cond.gt ?? cond.after, (c) => c > 0) &&
+    cmp(cond.gte, (c) => c >= 0) &&
+    (cond.contains === undefined ||
+      (!empty &&
+        items.some((i) =>
+          String(i).toLowerCase().includes(String(cond.contains).toLowerCase()),
+        ))) &&
+    (cond.empty === undefined || empty === cond.empty)
+  );
+}
+
+/** Rows whose attributes satisfy what `where` asked for: equality, operator
+ * objects, or lists of them. `today` is what the word `today` stands for. */
+export function matchesWhere(
+  row: DbRow,
+  where: Spec["where"],
+  today: string = isoDate(new Date()),
+): boolean {
   return Object.entries(where).every(([key, wanted]) => {
     const actual = valueOf(row, key);
-    if (Array.isArray(actual))
-      return actual.map(String).includes(String(wanted));
-    return String(actual) === String(wanted);
+    const conds = Array.isArray(wanted) ? wanted : [wanted];
+    return conds.every((c) => holds(actual, c, today));
   });
 }
 
@@ -273,6 +341,9 @@ const LABELS: Record<string, string> = {
   done: "完了",
   tags: "タグ",
   page: "ページ",
+  created: "作成",
+  modified: "更新",
+  lastModified: "更新",
 };
 
 /** The columns of a table: the spec's, else the database's properties, else
@@ -299,6 +370,9 @@ export function columnsFor(rows: readonly DbRow[], spec: Spec): Column[] {
       key === "title" ||
       key === "name" ||
       key === "page" ||
+      key === "created" ||
+      key === "modified" ||
+      key === "lastModified" ||
       key === "tags" ||
       key === "openTasks" ||
       key === "doneTasks";
