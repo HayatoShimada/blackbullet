@@ -13,7 +13,7 @@ tailnet device ─► dedicated tailnet node (tag:blackbullet), port 443
 
 - **Tailscale ACL** limits who can reach the node's port 443.
 - The **auth service** asks `tailscaled` who is on the other end (`whois`) and lets only the logins in `ALLOWED_LOGINS` through. A second, independent check.
-- Caddy **always drops** any `Tailscale-User-*` header sent by the client before adding the auth service's answer, so the app can trust `Tailscale-User-Login`. Tagged devices (no person) and anything outside the tailnet are refused.
+- Caddy **always drops** the client's `Tailscale-User-Login` and `Tailscale-User-Name` headers before adding the auth service's answer, so the app can trust those two. Do not rely on any other `Tailscale-User-*` header. Tagged devices (no person) and anything outside the tailnet are refused.
 - Certificates come from Let's Encrypt using the DNS-01 challenge (Cloudflare), so no inbound port is needed.
 
 ## Requirements
@@ -41,6 +41,14 @@ Docker + Docker Compose, a Tailscale account, a domain on Cloudflare, and an app
    ```
 5. **Point the name at it** — in Cloudflare add an `A` record `app → $IP`, **DNS only** (grey cloud). Switch `ACME_CA` back to production and `docker compose up -d --force-recreate caddy` (from the repository root with the `tailnet` profile: `docker compose --profile tailnet up -d --force-recreate caddy`).
 6. Remove the app's own login, if you want Tailscale to be the only login.
+
+## The search/MCP sidecar behind the same name
+`/mcp` and `/api/*` are routed to the BlackBullet search/MCP sidecar (`MCP_UPSTREAM`, `app:3010` by default; in the root compose it follows `MEMO_PORT`) after the same Tailscale check; the sidecar still requires its bearer token. SilverBullet itself serves neither path (its router only knows `/.fs`, `/.config`, `/.shell`, `/.proxy`, `/.runtime`, `/.revisions`, ... and falls back to the client bundle), so no SilverBullet route is shadowed. Caveat: pages are addressed by URL path, so a page named `mcp` or any page under an `api/` folder (any letter case) cannot be opened by direct link or reload through this name; rename such pages. In the root compose `MEMO_MCP_PUBLIC_HOST` defaults to `SITE_DOMAIN`, so the sidecar accepts that Host. From another tailnet device:
+```bash
+claude mcp add --transport http memo https://app.example.com/mcp \
+  --header "Authorization: Bearer $MEMO_MCP_TOKEN"
+```
+`./setup.sh --tailnet` prints this command with your values. Hosted connectors (claude.ai) run outside your tailnet and cannot reach this name. Standalone use without the sidecar: `/mcp` and `/api/*` return 502, point `MCP_UPSTREAM` at your app if it uses those paths.
 
 ## Things to know
 - **Name clashes between Docker networks** (standalone use). If `tailscale` joins several networks, a service name that exists in more than one resolves to the wrong container. Give your app a unique network alias and use it in `UPSTREAM`. (The root compose avoids this: everything is in one project and the upstream is fixed to `app:3000`.)

@@ -55,3 +55,7 @@ __pycache__/
 # memo-mcp derived data (embeddings, model cache) - rebuildable
 .memo-index
 *.embeddings.json
+
+# ./setup.sh --backup output
+/backups/
+*.pre-restore-*

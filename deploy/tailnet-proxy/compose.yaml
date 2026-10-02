@@ -53,6 +53,8 @@ services:
       - ACME_CA=${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
       - SITE_DOMAIN=${SITE_DOMAIN}
       - UPSTREAM=${UPSTREAM}
+      # where /mcp and /api/* go (the search/MCP sidecar)
+      - MCP_UPSTREAM=${MCP_UPSTREAM:-app:3010}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

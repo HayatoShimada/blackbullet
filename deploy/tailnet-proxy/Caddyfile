@@ -26,6 +26,13 @@
 			copy_headers Tailscale-User-Login Tailscale-User-Name
 		}
 
+		# The search/MCP sidecar (/mcp and /api/*) lives behind the same name. The Tailscale check above
+		# applies to it too, and the sidecar still demands its own bearer token (Authorization is passed
+		# through untouched). SilverBullet itself serves neither, but its client-bundle fallback
+		# means pages named "mcp" or under "api/" (any case) are unreachable through this name.
+		@sidecar path /mcp /mcp/* /api/*
+		reverse_proxy @sidecar {$MCP_UPSTREAM:app:3010}
+
 		reverse_proxy {$UPSTREAM}
 	}
 }
