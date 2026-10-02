@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 HayatoShimada
+# BlackBullet: the notes app + the search/MCP sidecar. Start with ./setup.sh (or `docker compose up -d --build`).
+#   app       : the editor, http://127.0.0.1:${BB_PORT:-3000}
+#   memo-mcp  : hybrid search, related notes, graph (REST) and MCP for AI clients, 127.0.0.1:${MEMO_PORT:-3010}
+#               It shares app's network namespace, so the app reaches it at 127.0.0.1:3010.
+#   tailnet   : optional profile, a tailnet-only HTTPS front door (see deploy/tailnet-proxy/README.md)
+name: blackbullet
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.fork
+    image: blackbullet:latest
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - ${SPACE_DIR:-./space}:/data
+    ports:
+      - "127.0.0.1:${BB_PORT:-3000}:3000"
+      # memo-mcp only accepts Host: 127.0.0.1:<its own port>, so the host port and the container port must match.
+      - "127.0.0.1:${MEMO_PORT:-3010}:${MEMO_PORT:-3010}"
+
+  memo-mcp:
+    build: packages/memo-mcp
+    image: blackbullet-memo-mcp:latest
+    restart: unless-stopped
+    network_mode: service:app
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - MEMO_SPACES=${MEMO_SPACE_NAME:-notes}=/data
+      - MEMO_MCP_PORT=${MEMO_PORT:-3010}
+      - MEMO_MCP_TOKEN=${MEMO_MCP_TOKEN:?run ./setup.sh to create .env}
+      - MEMO_EMBED=${MEMO_EMBED:-on}
+      - MEMO_EMBED_MODEL=${MEMO_EMBED_MODEL:-Xenova/multilingual-e5-small}
+    volumes:
+      - ${SPACE_DIR:-./space}:/data
+      - ${MEMO_INDEX_DIR:-./.memo-index}:/cache
+    depends_on: [app]
+
+  # ---- optional: docker compose --profile tailnet up -d ----
+  tailscale:
+    profiles: [tailnet]
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-blackbullet}
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - TS_HOSTNAME=${TS_HOSTNAME:-blackbullet}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+      - TS_USERSPACE=false
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ts-sock:/var/run/tailscale
+
+  auth:
+    profiles: [tailnet]
+    image: python:3.12-alpine
+    restart: unless-stopped
+    network_mode: service:tailscale
+    environment:
+      - ALLOWED_LOGINS=${ALLOWED_LOGINS:-}
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+    volumes:
+      - ./deploy/tailnet-proxy/auth:/app:ro
+      - ts-sock:/var/run/tailscale:ro
+    command: ["python", "/app/tailnet_auth.py"]
+    depends_on: [tailscale]
+
+  caddy:
+    profiles: [tailnet]
+    image: ghcr.io/caddybuilds/caddy-cloudflare:latest
+    restart: unless-stopped
+    network_mode: service:tailscale
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN:-}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+      - ACME_CA=${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      - SITE_DOMAIN=${SITE_DOMAIN:-}
+      - UPSTREAM=app:3000
+    volumes:
+      - ./deploy/tailnet-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [tailscale, auth]
+
+volumes:
+  ts-state:
+  ts-sock:
+  caddy-data:

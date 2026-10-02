@@ -1,4 +1,3 @@
-.env
 .chrome-data
 .DS_Store
 .obsidian
@@ -37,6 +36,22 @@ AGENTS.md
 # workspace produces binaries)
 /target
 
-# Local secrets (never commit)
-.env.local
-.env.*.local
+# Secrets and local config (never commit); templates stay tracked
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editor / Python / local-run leftovers
+*.swp
+*.swo
+__pycache__/
+*.log
+
+# Local data created by setup.sh / compose
+/space/
+# memo-mcp derived data (embeddings, model cache) - rebuildable
+.memo-index
+*.embeddings.json

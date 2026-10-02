@@ -6,3 +6,8 @@ target/
 node_modules/
 dist/
 *.log
+# Local data created by setup.sh / compose: never part of an image
+/space/
+/.memo-index/
+.env
+.env.*

@@ -2,7 +2,9 @@
 
 A tailnet-only front door for a web app. Only people who are on your [Tailscale](https://tailscale.com) network **and** on an allowlist can open it, and the app itself needs no login screen. You get a normal HTTPS name (`https://app.example.com`) with a real certificate, but the name resolves to a private tailnet address, so nothing is reachable from the public internet.
 
-BlackBullet was written to sit in front of a self-hosted notes app such as [SilverBullet](https://silverbullet.md), but it works for any HTTP app in a Docker network. It is not affiliated with SilverBullet and contains none of its code.
+**Running BlackBullet itself?** You do not need this directory on its own: fill in the `TS_AUTHKEY` … `SITE_DOMAIN` keys in the repository's `.env` and run `./setup.sh --tailnet` from the repository root. That starts the same three services (as the `tailnet` compose profile) with the `Caddyfile` and `auth/` from here.
+
+This directory is for putting the same front door in front of **another** HTTP app that is already on a Docker network. The rest of this page describes that standalone use.
 
 ```
 tailnet device ─► dedicated tailnet node (tag:blackbullet), port 443
@@ -37,12 +39,12 @@ Docker + Docker Compose, a Tailscale account, a domain on Cloudflare, and an app
    IP=$(tailscale ip -4 blackbullet)
    curl -sk --resolve app.example.com:443:$IP https://app.example.com/ -o /dev/null -w "%{http_code}\n"
    ```
-5. **Point the name at it** — in Cloudflare add an `A` record `app → $IP`, **DNS only** (grey cloud). Switch `ACME_CA` back to production and `docker compose up -d --force-recreate caddy`.
+5. **Point the name at it** — in Cloudflare add an `A` record `app → $IP`, **DNS only** (grey cloud). Switch `ACME_CA` back to production and `docker compose up -d --force-recreate caddy` (from the repository root with the `tailnet` profile: `docker compose --profile tailnet up -d --force-recreate caddy`).
 6. Remove the app's own login, if you want Tailscale to be the only login.
 
 ## Things to know
-- **Name clashes between Docker networks.** If `tailscale` joins several networks, a service name that exists in more than one resolves to the wrong container. Give your app a unique network alias and use it in `UPSTREAM`.
-- Anything that can reach the app directly (a published port, another `tailscale serve`) bypasses this check. Publish the app on `127.0.0.1` only.
+- **Name clashes between Docker networks** (standalone use). If `tailscale` joins several networks, a service name that exists in more than one resolves to the wrong container. Give your app a unique network alias and use it in `UPSTREAM`. (The root compose avoids this: everything is in one project and the upstream is fixed to `app:3000`.)
+- Anything that can reach the app directly (a published port, another `tailscale serve`) bypasses this check. Publish the app on `127.0.0.1` only (the root compose already does, for the app and for the MCP sidecar).
 - This protects *who can open the site*, not what they can do inside it. Every allowed login gets the same access.
 - A free Tailscale plan has a small user limit; each person in `ALLOWED_LOGINS` must be a user in your tailnet.
 

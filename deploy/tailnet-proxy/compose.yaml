@@ -5,7 +5,7 @@
 #   caddy     : TLS (Let's Encrypt, DNS-01 via Cloudflare) + a question to the auth service.
 #   auth      : asks tailscaled who the caller is; lets only ALLOWED_LOGINS through.
 # caddy and auth share tailscale's network namespace (ports appear on the tailnet address).
-name: blackbullet
+name: tailnet-proxy
 
 services:
   tailscale:
