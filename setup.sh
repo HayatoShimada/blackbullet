@@ -72,6 +72,12 @@ fi
 set -a; . ./.env; set +a
 
 mkdir -p "$SPACE_DIR" "$MEMO_INDEX_DIR"
+# The server seeds the welcome page only into a folder without any .md file, and CONFIG.md below
+# would count as one; so put the welcome page there ourselves when the folder is new.
+if [ -z "$(find "$SPACE_DIR" -name '*.md' -print -quit)" ]; then
+  cp bin/silverbullet/space_template/index.md "$SPACE_DIR/index.md"
+  echo "created the welcome page in $SPACE_DIR"
+fi
 CONFIG="$SPACE_DIR/CONFIG.md"
 if [ ! -f "$CONFIG" ] || ! grep -q 'memoSidecar' "$CONFIG"; then
   [ -f "$CONFIG" ] && printf '\n' >> "$CONFIG"
