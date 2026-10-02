@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 HayatoShimada
+# A tailnet-only front door for a web app.
+#   tailscale : a dedicated tailnet node (tagged). ACLs can then allow only its port 443.
+#   caddy     : TLS (Let's Encrypt, DNS-01 via Cloudflare) + a question to the auth service.
+#   auth      : asks tailscaled who the caller is; lets only ALLOWED_LOGINS through.
+# caddy and auth share tailscale's network namespace (ports appear on the tailnet address).
+name: blackbullet
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: blackbullet-tailscale
+    hostname: ${TS_HOSTNAME:-blackbullet}
+    restart: unless-stopped
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_HOSTNAME=${TS_HOSTNAME:-blackbullet}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+      - TS_USERSPACE=false
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ts-sock:/var/run/tailscale
+    networks:
+      - default
+      - app   # the Docker network your app is on, so UPSTREAM can name it
+
+  auth:
+    image: python:3.12-alpine
+    container_name: blackbullet-auth
+    restart: unless-stopped
+    network_mode: service:tailscale
+    environment:
+      - ALLOWED_LOGINS=${ALLOWED_LOGINS}
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+    volumes:
+      - ./auth:/app:ro
+      - ts-sock:/var/run/tailscale:ro
+    command: ["python", "/app/tailnet_auth.py"]
+    depends_on: [tailscale]
+
+  caddy:
+    image: ghcr.io/caddybuilds/caddy-cloudflare:latest
+    container_name: blackbullet-caddy
+    restart: unless-stopped
+    network_mode: service:tailscale
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - ACME_EMAIL=${ACME_EMAIL}
+      - ACME_CA=${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      - SITE_DOMAIN=${SITE_DOMAIN}
+      - UPSTREAM=${UPSTREAM}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [tailscale, auth]
+
+volumes:
+  ts-state:
+  ts-sock:
+  caddy-data:
+
+networks:
+  app:
+    name: ${APP_NETWORK}
+    external: true

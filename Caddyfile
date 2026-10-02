@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 HayatoShimada
+{
+	email {$ACME_EMAIL}
+	# To try things out, set ACME_CA in .env to the Let's Encrypt staging URL
+	# (it does not use up the production rate limits).
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+}
+
+{$SITE_DOMAIN} {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+
+	# The order matters: drop any Tailscale-User-* header the client sent, then
+	# add the ones the auth service answers with.
+	route {
+		request_header -Tailscale-User-Login
+		request_header -Tailscale-User-Name
+
+		forward_auth 127.0.0.1:9180 {
+			uri /auth
+			header_up Remote-Addr {remote_host}
+			header_up Remote-Port {remote_port}
+			copy_headers Tailscale-User-Login Tailscale-User-Name
+		}
+
+		reverse_proxy {$UPSTREAM}
+	}
+}
