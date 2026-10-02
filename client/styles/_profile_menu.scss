@@ -1,0 +1,112 @@
+// Rendered via portal into document.body, same reason as .sb-notifications above.
+.sb-anchored-menu {
+  font-family: var(--ui-font);
+  font-size: 14px;
+  line-height: 1.45;
+  position: fixed;
+  box-sizing: border-box;
+  width: 232px;
+  z-index: 21;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  background: var(--modal-background-color);
+  color: var(--modal-color);
+  border: 1px solid var(--modal-border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+
+  .sb-anchored-menu-header {
+    display: flex;
+    flex-direction: column;
+    padding: 10px 10px 14px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--modal-border-color);
+  }
+
+  .sb-anchored-menu-title {
+    font-weight: 600;
+  }
+
+  .sb-anchored-menu-subtitle {
+    font-size: 12px;
+    margin-top: 3px;
+    color: var(--subtle-color);
+  }
+
+  button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    min-height: 38px;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    font-family: var(--ui-font);
+    font-size: 13px;
+    line-height: 1.6;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: none;
+      background: var(--modal-selected-option-background-color);
+      color: var(--modal-selected-option-color);
+    }
+
+    &:last-child:not(:first-of-type) {
+      border-top: 1px solid var(--ui-surface-border-color);
+      border-radius: 0;
+      margin-top: 6px;
+      padding-top: 14px;
+      padding-bottom: 10px;
+    }
+
+    &:hover {
+      background: var(--subtle-background-color);
+    }
+  }
+}
+
+// The reserved "profile" action button icon, rendered in place of a feather
+// icon (see client/components/profile_button.tsx).
+.sb-profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  font-family: var(--ui-font);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.sb-profile-avatar-signed-in {
+  background-color: transparent;
+  border: 1px solid var(--ui-accent-text-color);
+  color: var(--ui-accent-text-color);
+}
+
+.sb-profile-avatar-signed-out {
+  border: 1px solid var(--subtle-color);
+  color: var(--subtle-color);
+}
+@media (max-width: 600px) {
+  .sb-anchored-menu button { min-height: 44px; font-size: 16px; }
+}
+
+.sb-actions button:has(.sb-profile-avatar) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  margin-top: 4px;
+}

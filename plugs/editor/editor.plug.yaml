@@ -1,0 +1,430 @@
+name: editor
+requiredPermissions:
+  - fetch
+functions:
+  setEditorMode:
+    path: "./editor.ts:setEditorMode"
+    events:
+      - editor:init
+  toggleDarkMode:
+    path: "./editor.ts:toggleDarkMode"
+    command:
+      name: "Editor: Toggle Dark Mode"
+      menu: { location: view, group: "1_toggle", order: 1, label: "Toggle Dark Mode" }
+  toggleMarkdownSyntaxRendering:
+    path: "./editor.ts:toggleMarkdownSyntaxRendering"
+    command:
+      name: "Editor: Toggle Markdown Syntax Rendering"
+  toggleKeyboardBar:
+    path: "./editor.ts:toggleKeyboardBar"
+    command:
+      name: "Editor: Toggle Keyboard Bar"
+  openTagNavigator:
+    path: editor.ts:openTagNavigator
+    command:
+      name: "Navigate: Tag Picker"
+      key: "Ctrl-Alt-t"
+      priority: 2
+      menu: { location: navigate, group: "2_picker", order: 3, label: "Tag..." }
+
+  # Page operations
+  deletePage:
+    path: "./page.ts:deletePage"
+    command:
+      name: "Page: Delete"
+      requireMode: rw
+      requireEditor: page
+      priority: 1
+      menu: { location: file, group: "4_page", order: 2, label: "Delete Page" }
+  copyPage:
+    path: "./page.ts:copyPage"
+    command:
+      name: "Page: Copy"
+      requireMode: rw
+      requireEditor: page
+
+  # Completion
+  pageComplete:
+    path: "./complete.ts:pageComplete"
+    events:
+      - editor:complete
+
+  luaComplete:
+    path: "./lua.ts:luaComplete"
+    events:
+      - editor:complete
+
+  reloadSystem:
+    path: editor.ts:reloadSystem
+    command:
+      name: "System: Reload"
+      key: Ctrl-Alt-r
+      menu: { location: space, group: "4_system", order: 1, label: "System Reload" }
+
+  footnoteComplete:
+    path: complete.ts:footnoteComplete
+    events:
+      - editor:complete
+
+  languageComplete:
+    path: complete.ts:languageComplete
+    events:
+      - editor:complete
+
+  # Create page under cursor
+  createPageUnderCursorCommand:
+    path: "./navigate.ts:createPageUnderCursorCommand"
+    command:
+      name: "Page: Create Under Cursor"
+      key: "Ctrl-Shift-Enter"
+      mac: "Cmd-Shift-Enter"
+      requireEditor: page
+      requireMode: rw
+      menu: { location: navigate, group: "3_jump", order: 2, label: "Create Page Under Cursor" }
+
+  # Navigation
+  linkNavigate:
+    path: "./navigate.ts:linkNavigate"
+    command:
+      name: "Navigate: To This Page"
+      key: Ctrl-Enter
+      mac: Cmd-Enter
+      requireEditor: page
+      menu: { location: navigate, group: "3_jump", order: 1, label: "Go to Page Under Cursor" }
+
+  clickNavigate:
+    path: "./navigate.ts:clickNavigate"
+    events:
+      - page:click
+
+  luaNavigate:
+    path: "./lua.ts:luaNavigate"
+    events:
+      - page:click
+
+  navigateHome:
+    path: "./navigate.ts:navigateCommand"
+    command:
+      name: "Navigate: Home"
+      key: "Ctrl-Shift-h"
+      mac: "Cmd-Shift-h"
+      page: ""
+      menu: { location: navigate, group: "1_home", order: 1, label: "Home" }
+
+  moveToPos:
+    path: "./editor.ts:moveToPosCommand"
+    command:
+      name: "Navigate: To Position"
+      requireEditor: page
+
+  copyRefCommand:
+    path: "./editor.ts:copyRefCommand"
+    command:
+      name: "Navigate: Copy Ref To Current Position"
+      requireEditor: page
+
+  copyLinkCommand:
+    path: "./editor.ts:copyLinkCommand"
+    command:
+      name: "Navigate: Copy Link To Current Position"
+      requireEditor: page
+
+  moveToLine:
+    path: "./editor.ts:moveToLineCommand"
+    command:
+      name: "Navigate: To Line"
+      requireEditor: page
+      menu: { location: navigate, group: "3_jump", order: 3, label: "Go to Line..." }
+
+  navigateToPage:
+    path: "./navigate.ts:navigateToPage"
+    command:
+      name: "Navigate: To Page"
+      hide: true
+
+  navigateToURL:
+    path: "./navigate.ts:navigateToURL"
+    command:
+      name: "Navigate: To URL"
+      hide: true
+
+  navigateBack:
+    path: "./navigate.ts:navigateBack"
+    command:
+      name: "Navigate: Back in History"
+      key: "Alt-ArrowLeft"
+      mac: "Cmd-["
+      menu: { location: navigate, group: "1_home", order: 2, label: "Back" }
+
+  navigateForward:
+    path: "./navigate.ts:navigateForward"
+    command:
+      name: "Navigate: Forward in History"
+      key: "Alt-ArrowRight"
+      mac: "Cmd-]"
+      menu: { location: navigate, group: "1_home", order: 3, label: "Forward" }
+
+  # Text editing commands
+  quoteSelectionCommand:
+    path: ./text.ts:quoteSelection
+    command:
+      name: "Text: Quote Selection"
+      key: "Ctrl-Shift-."
+      mac: "Cmd-Shift-."
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "2_block", order: 3, label: "Quote" }
+  listifySelection:
+    path: ./text.ts:listifySelection
+    command:
+      name: "Text: Listify Selection"
+      key: "Ctrl-Shift-8"
+      mac: "Cmd-Shift-8"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "2_block", order: 1, label: "Bullet List" }
+  taskifyLine:
+    path: ./text.ts:taskifyLine
+    command:
+      name: "Text: Taskify Line"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "2_block", order: 4, label: "Task" }
+  wikiLinkSelection:
+    path: ./text.ts:wikiLinkSelection
+    command:
+      name: "Text: Wiki Link"
+      requireMode: rw
+      requireEditor: page
+  numberListifySelection:
+    path: ./text.ts:numberListifySelection
+    command:
+      name: "Text: Number Listify Selection"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "2_block", order: 2, label: "Numbered List" }
+  linkSelection:
+    path: ./text.ts:linkSelection
+    command:
+      name: "Text: Link Selection"
+      requireMode: rw
+      requireEditor: page
+  bold:
+    path: ./text.ts:wrapSelection
+    command:
+      name: "Text: Bold"
+      key: "Ctrl-b"
+      mac: "Cmd-b"
+      wrapper: "**"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "1_inline", order: 1, label: "Bold" }
+  italic:
+    path: ./text.ts:wrapSelection
+    command:
+      name: "Text: Italic"
+      key: "Ctrl-i"
+      mac: "Cmd-i"
+      wrapper: "_"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "1_inline", order: 2, label: "Italic" }
+  strikethrough:
+    path: ./text.ts:wrapSelection
+    command:
+      name: "Text: Strikethrough"
+      key: "Ctrl-Shift-s"
+      wrapper: "~~"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "1_inline", order: 3, label: "Strikethrough" }
+  marker:
+    path: ./text.ts:wrapSelection
+    command:
+      name: "Text: Marker"
+      key: "Ctrl-Alt-m"
+      wrapper: "=="
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.format, group: "1_inline", order: 4, label: "Highlight" }
+  centerCursor:
+    path: "./editor.ts:centerCursorCommand"
+    command:
+      name: "Navigate: Center Cursor"
+      key: "Ctrl-Alt-l"
+      requireMode: rw
+      requireEditor: page
+  # Comments
+  addComment:
+    path: "./comments.ts:addComment"
+    command:
+      name: "Comment: Add"
+      key: "Ctrl-Alt-c"
+      mac: "Cmd-Alt-c"
+      requireMode: rw
+      requireEditor: page
+    slashCommand:
+      name: comment
+      description: "Add a comment"
+      exceptContexts: ["FencedCode"]
+  commentSelection:
+    path: "./comments.ts:commentSelection"
+    command:
+      name: "Comment: Selection"
+      requireMode: rw
+      requireEditor: page
+
+  # Debug commands
+  parseCommand:
+    path: ./system.ts:parsePageCommand
+    command:
+      name: "Debug: Parse Document"
+      requireEditor: page
+
+  # Vim
+  toggleVimMode:
+    path: "./vim.ts:toggleVimMode"
+    command:
+      name: "Editor: Toggle Vim Mode"
+      requireEditor: page
+      menu: { location: view, group: "1_toggle", order: 3, label: "Toggle Vim Mode" }
+  loadVimConfig:
+    path: "./vim.ts:loadVimConfig"
+    command:
+      name: "Editor: Vim: Load Vim Config"
+      requireEditor: page
+    events:
+      - editor:modeswitch
+
+  # Random stuff
+  statsCommand:
+    path: ./stats.ts:statsCommand
+    command:
+      name: "Stats: Show"
+      requireEditor: page
+      menu: { location: view, group: "5_info", label: "Statistics" }
+
+  # Client commands
+  reloadUICommand:
+    path: ./system.ts:reloadUICommand
+    command:
+      name: "Client: Reload UI"
+
+  reloadPlugsCommand:
+    path: ./system.ts:reloadPlugsCommand
+    command:
+      name: "Plugs: Reload"
+
+  wipeClientCommand:
+    path: ./system.ts:wipeClientCommand
+    command:
+      name: "Client: Wipe"
+
+  wipeAndLogoutCommand:
+    path: ./system.ts:wipeAndLogoutCommand
+    command:
+      name: "Client: Logout"
+
+  versionCommand:
+    path: ./help.ts:versionCommand
+    command:
+      name: "Client: Version"
+
+  uploadFileCommand:
+    path: ./upload.ts:uploadFile
+    command:
+      name: "File: Upload"
+      requireMode: rw
+      menu: { location: file, group: "5_insert", label: "Insert File..." }
+
+  downloadFileCommand:
+    path: ./download.ts:downloadCurrentFile
+    command:
+      name: "File: Download"
+      menu: { location: file, group: "5_insert", label: "Download File..." }
+
+  # Outline commands
+  outlineMoveUp:
+    path: ./outline.ts:moveItemUp
+    command:
+      name: "Outline: Move Up"
+      key:
+        - "Alt-ArrowUp"
+        - "Mod-. k"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.outline, group: "1_move", order: 1, label: "Move Up" }
+
+  outlineMoveDown:
+    path: ./outline.ts:moveItemDown
+    command:
+      name: "Outline: Move Down"
+      key:
+        - "Alt-ArrowDown"
+        - "Mod-. j"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.outline, group: "1_move", order: 2, label: "Move Down" }
+
+  outlineIndent:
+    path: ./outline.ts:indentItem
+    command:
+      name: "Outline: Move Right"
+      key: "Mod-. l"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.outline, group: "1_move", order: 4, label: "Move Right (Indent)" }
+
+  outlineOutdent:
+    path: ./outline.ts:outdentItem
+    command:
+      name: "Outline: Move Left"
+      key: "Mod-. h"
+      requireMode: rw
+      requireEditor: page
+      menu: { location: edit.outline, group: "1_move", order: 3, label: "Move Left (Outdent)" }
+
+  # Outline folding commands
+  foldCommand:
+    path: ./outline.ts:foldCommand
+    command:
+      name: "Outline: Fold"
+      requireEditor: page
+  unfoldCommand:
+    path: ./outline.ts:unfoldCommand
+    command:
+      name: "Outline: Unfold"
+      requireEditor: page
+  toggleFoldCommand:
+    path: ./outline.ts:toggleFoldCommand
+    command:
+      name: "Outline: Toggle Fold"
+      key: "Mod-. Mod-."
+      requireEditor: page
+  foldAllCommand:
+    path: ./outline.ts:foldAllCommand
+    command:
+      name: "Outline: Fold All"
+      requireEditor: page
+      menu: { location: edit.outline, group: "2_fold", order: 1, label: "Fold All" }
+  unfoldAllCommand:
+    path: ./outline.ts:unfoldAllCommand
+    command:
+      name: "Outline: Unfold All"
+      requireEditor: page
+      menu: { location: edit.outline, group: "2_fold", order: 2, label: "Unfold All" }
+  # Demo
+  customFlashMessage:
+    path: editor.ts:customFlashMessage
+    command:
+      name: "Flash: Custom Message"
+      hide: true
+      contexts:
+        - internal
+
+  deleteDocument:
+    path: "./document.ts:deleteDocument"
+    command:
+      name: "Document: Delete"
+      requireMode: rw
+      requireEditor: notpage

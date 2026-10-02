@@ -1,0 +1,248 @@
+import {
+  config,
+  editor,
+  space,
+  system,
+} from "@silverbulletmd/silverbullet/syscalls";
+import { compareCollated } from "@silverbulletmd/silverbullet/lib/collation";
+import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
+import type { QueryCollationConfig } from "@silverbulletmd/silverbullet/type/config";
+import { isHiddenPage, isMetaPage, spaceContents } from "./pages.ts";
+import { emitToTree } from "../ui/mediator/tree_host.ts";
+import { isPinned } from "./pin.ts";
+import {
+  baseMeta,
+  type BuiltinView,
+  INDEX_REFRESH_EVENTS,
+  type Segment,
+} from "./types.ts";
+
+type TreeObj = Partial<ObjectValue<Record<string, any>>> & {
+  name: string;
+  isFolder?: boolean;
+};
+
+function treeIcon(obj: TreeObj): string {
+  // Only a pure folder gets the folder icon. A dual has a page behind it and
+  // reads as that page, so it falls through to the icons below like any other.
+  if (obj.isFolder && obj.ref == null) return "folder";
+  const decorated = obj.pageDecoration?.icon;
+  if (typeof decorated === "string" && decorated !== "") return decorated;
+  if (obj.isAspiring) return "file-plus";
+  if (obj.perm === "ro") return "lock";
+  if (obj.tag === "document") {
+    return String(obj.contentType ?? "").startsWith("image/")
+      ? "image"
+      : "file";
+  }
+  return "file-text";
+}
+
+const spaceTreeSegments: Segment<TreeObj>[] = [
+  {
+    label: "All",
+    icon: "layers",
+    default: true,
+    placeholder: "Page or document",
+    // Meta pages are reachable only via the Meta segment.
+    where: (obj) => !isMetaPage(obj),
+  },
+  {
+    label: "Pages",
+    icon: "file-text",
+    placeholder: "Page",
+    where: (obj) => obj.tag === "page" && !isMetaPage(obj),
+  },
+  {
+    label: "Documents",
+    icon: "file",
+    placeholder: "Document",
+    where: (obj) => obj.tag === "document",
+  },
+  {
+    label: "Meta",
+    icon: "settings",
+    placeholder: "Meta page",
+    where: isMetaPage,
+  },
+];
+
+/** Unlike the picker, the tree has no segment that keeps hidden pages: a page
+ * hidden from navigation is hidden here too, and `tree.hide` hides it from
+ * here alone. A hidden page with children still leaves its folder behind --
+ * the folder is synthesized from the children's names. */
+function isTreeHidden(obj: TreeObj): boolean {
+  return isHiddenPage(obj) || obj.pageDecoration?.tree?.hide === true;
+}
+
+async function spaceTreeSource(): Promise<TreeObj[]> {
+  const contents = await spaceContents();
+  const collation = await config.get<QueryCollationConfig>(
+    "queryCollation",
+    {},
+  );
+  const collator = Intl.Collator(collation?.locale, collation?.options);
+  return (contents as TreeObj[])
+    .filter((obj) => !isTreeHidden(obj))
+    .sort((a, b) =>
+      compareCollated(String(a.name), String(b.name), collation, collator),
+    );
+}
+
+async function moveByRename(obj: TreeObj, newName: string): Promise<void> {
+  if (obj.isFolder) {
+    // Covers documents as well as pages under the prefix.
+    await system.invokeFunction("index.renamePrefixCommand", {
+      oldPrefix: `${obj.name}/`,
+      newPrefix: `${newName}/`,
+      disableConfirmation: true,
+    });
+  }
+  // A page that also has children is both: renamePrefixCommand only touches
+  // files under "name/", so the page itself still needs its own rename.
+  if (!obj.isFolder || obj.ref) {
+    if (obj.tag === "document") {
+      // A document's name carries its extension and is the file name itself,
+      // so the page rename (which appends ".md") would rename the wrong file.
+      await system.invokeFunction("index.renameDocumentCommand", {
+        oldDocument: obj.name,
+        document: newName,
+      });
+    } else {
+      await system.invokeFunction("index.renamePageCommand", {
+        oldPage: obj.name,
+        page: newName,
+      });
+    }
+  }
+}
+
+/** Renaming means something different for each of the three kinds of row a
+ * space tree has, and only the folder case needs a prompt of its own (the
+ * other two are the same commands the editor's own rename commands run). */
+async function renameTreeRow(obj: TreeObj): Promise<void> {
+  if (obj.isFolder) {
+    const newName = await editor.prompt(`Rename ${obj.name} to:`, obj.name);
+    if (newName == null) return;
+    const trimmed = newName.trim();
+    if (trimmed === "" || trimmed === obj.name) return;
+    await moveByRename(obj, trimmed);
+  } else if (obj.tag === "document") {
+    await system.invokeFunction("index.renameDocumentCommand", {
+      oldDocument: obj.name,
+    });
+  } else {
+    await system.invokeFunction("index.renamePageCommand", {
+      oldPage: obj.name,
+    });
+  }
+}
+
+async function deleteTreeRow(obj: TreeObj): Promise<void> {
+  if (!(await editor.confirm(`Delete ${obj.name}?`))) return;
+  if (obj.tag === "document") {
+    await space.deleteDocument(obj.name);
+  } else {
+    await space.deletePage(obj.name);
+  }
+}
+
+async function newPageUnder(obj: TreeObj): Promise<void> {
+  const prefill = `${obj.name}/`;
+  const name = await editor.prompt("New page name:", prefill);
+  if (name == null) return;
+  const trimmed = name.trim();
+  // Confirming the prefill unedited means "never mind": navigating to a bare
+  // "Folder/" would try to open a page with an empty last segment.
+  if (trimmed === "" || trimmed === prefill) return;
+  // SilverBullet creates the page on the first edit; navigating there is the
+  // whole of "new page".
+  await editor.navigate(trimmed);
+}
+
+// A pure folder has no object behind it, so it has nothing to delete (and
+// deleting a whole subtree is not a job for a hover button). A page that also
+// heads a folder keeps its own delete: it has a page to remove.
+function isDeletable(obj: TreeObj): boolean {
+  return !obj.isFolder || obj.ref != null;
+}
+
+// Only a page carries frontmatter: a pure folder has no file, a document no
+// Markdown.
+function isPinnable(obj: TreeObj): boolean {
+  return obj.tag === "page" && obj.ref != null;
+}
+
+export const spaceTreeView: BuiltinView<TreeObj> = {
+  meta: baseMeta({
+    title: "Space",
+    label: "Open",
+    dock: "lhs",
+    supportedDocks: ["lhs", "rhs", "bhs", "modal"],
+    mode: "tree",
+    followEditor: true,
+    hasCreate: true,
+    uploadFiles: true,
+    foldersFirst: false,
+    // Every folder here names a page, whether or not one exists yet, so
+    // clicking one opens that page as well as expanding the row.
+    selectableFolders: true,
+    refreshOn: INDEX_REFRESH_EVENTS,
+  }),
+  row: {
+    icon: treeIcon,
+    priority: (obj) => obj.pageDecoration?.tree?.priority,
+  },
+  segments: spaceTreeSegments,
+  actions: [
+    {
+      icon: "plus",
+      label: "New page here",
+      requireMode: "rw",
+      when: (obj) => obj.isFolder === true,
+      run: newPageUnder,
+    },
+    { icon: "edit-3", label: "Rename", requireMode: "rw", run: renameTreeRow },
+    {
+      icon: "trash-2",
+      label: "Delete",
+      requireMode: "rw",
+      when: isDeletable,
+      run: deleteTreeRow,
+    },
+    {
+      icon: "corner-down-right",
+      label: "Move to…",
+      requireMode: "rw",
+      // An aspiring page has no file behind it to move.
+      when: (obj) => obj.isFolder === true || obj.ref != null,
+      run: (obj) => void emitToTree({ type: "move.pick", path: obj.name }),
+    },
+    {
+      icon: "bookmark",
+      label: "Pin",
+      requireMode: "rw",
+      when: (obj) => isPinnable(obj) && !isPinned(obj.pageDecoration),
+      run: (obj) =>
+        void emitToTree({ type: "pin.request", path: obj.name, pinned: true }),
+    },
+    {
+      icon: "x-circle",
+      label: "Unpin",
+      requireMode: "rw",
+      when: (obj) => isPinnable(obj) && isPinned(obj.pageDecoration),
+      run: (obj) =>
+        void emitToTree({ type: "pin.request", path: obj.name, pinned: false }),
+    },
+  ],
+  keymap: {
+    // Peek: open the row without leaving the panel, so the next arrow keeps
+    // browsing. `editor.navigate` focuses the editor; the panel takes focus
+    // back on its own afterwards.
+    " ": (obj) => editor.navigate(obj.ref ?? obj.name),
+  },
+  onMove: moveByRename,
+  source: spaceTreeSource,
+  onSelect: (obj) => editor.navigate(obj.ref ?? obj.name),
+  onCreate: (name) => editor.navigate(name),
+};

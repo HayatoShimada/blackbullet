@@ -1,0 +1,562 @@
+// Scope the reset with :where to avoid overriding .sb-nav-* padding by
+// specificity and source order.
+:where(.sb-nav-root,
+  .sb-nav-root *,
+  .sb-nav-root *::before,
+  .sb-nav-root *::after) {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.sb-nav-root {
+  --sb-nav-muted: var(--subtle-color);
+  // One row, top padding to bottom padding (see `.sb-nav-row`). The modal's
+  // list cap is a multiple of it, so the cap lands between rows.
+  --sb-nav-row-height: 36px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  // Scrolling stays inside .sb-nav-body; a scrollbar on the panel itself
+  // would read as a stray one down the side of the dock.
+  overflow: hidden;
+  font-family: var(--ui-font);
+  font-size: 16px;
+  background: var(--modal-background-color);
+  color: var(--modal-color);
+}
+
+// Let the modal follow its content; the list cap below bounds its height.
+.sb-nav-root-modal {
+  height: auto;
+}
+
+// Round the shared 250px list cap to whole 36px rows to avoid a clipped row.
+.sb-nav-root-modal .sb-nav-body {
+  flex: 0 1 auto;
+  max-height: calc(7 * var(--sb-nav-row-height));
+}
+
+.sb-nav-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.sb-nav-close:hover {
+  color: var(--modal-header-label-color);
+}
+
+// Keep the drag handle beside classic scrollbars, not on top of them.
+.sb-nav-root-lhs.sb-nav-resizable .sb-nav-body {
+  margin-right: 6px;
+}
+
+.sb-nav-root-rhs.sb-nav-resizable .sb-nav-body {
+  margin-left: 6px;
+}
+
+.sb-nav-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 13px 10px 10px 10px;
+  border-bottom: 1px solid var(--ui-surface-border-color);
+}
+
+.sb-nav-help {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ui-surface-border-color);
+  background-color: var(--modal-help-background-color);
+  color: var(--modal-help-color);
+  font-size: 0.8em;
+}
+
+.sb-nav-header-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  // A dock this narrow can still shrink the input (min-width: 0 below); the
+  // row itself must not overflow it.
+  min-width: 0;
+}
+
+.sb-nav-segment-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sb-nav-segment-row-actions .sb-segments-wrap {
+  flex: 1 1 auto;
+}
+
+.sb-nav-tree-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.sb-nav-tree-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--subtle-color);
+  cursor: pointer;
+}
+
+.sb-nav-tree-actions button:hover:not(:disabled) {
+  background: var(--ui-surface-hover-background-color);
+  color: var(--modal-color);
+}
+
+.sb-nav-tree-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (pointer: coarse) {
+  .sb-nav-tree-actions button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.sb-nav-spinner {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--subtle-color);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: sb-nav-spin 0.7s linear infinite;
+}
+
+@keyframes sb-nav-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-nav-spinner {
+    animation-duration: 2.5s;
+  }
+}
+
+.sb-nav-title {
+  color: var(--modal-header-label-color);
+  white-space: nowrap;
+}
+
+.sb-nav-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 1em;
+  background-color: transparent;
+  color: inherit;
+  border: 0;
+  outline: none;
+  padding: 0;
+}
+
+// A filterless view (`filter = false`): the input stays in the DOM as the
+// panel's focus home -- the whole keyboard pipeline hangs off it -- but shows
+// nothing and takes no space.
+.sb-nav-no-filter .sb-nav-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sb-nav-no-filter .sb-nav-input + * {
+  margin-left: auto;
+}
+
+.sb-nav-copy,
+.sb-dock-button,
+.sb-page-widget-tools .sb-nav-close,
+.sb-nav-header-row .sb-nav-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sb-nav-copy {
+  color: var(--subtle-color);
+}
+
+.sb-nav-copy:hover {
+  color: var(--modal-header-label-color);
+}
+
+.sb-nav-root-content.sb-nav-root-modal .sb-nav-body {
+  max-height: min(60vh, 640px);
+}
+
+.sb-nav-dropdown {
+  max-width: 100%;
+  align-self: flex-start;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sb-nav-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sb-nav-row {
+  height: var(--sb-nav-row-height);
+  --sb-nav-band: transparent;
+}
+
+.sb-nav-row:has(> .sb-nav-text) {
+  height: auto;
+  min-height: var(--sb-nav-row-height);
+}
+
+.sb-nav-selected {
+  background-color: var(--modal-selected-option-background-color);
+  color: var(--modal-selected-option-color);
+  --sb-nav-muted: var(--modal-selected-option-color);
+}
+
+.sb-nav-row.sb-nav-selected .sb-row-actions {
+  background-color: var(--modal-selected-option-background-color);
+  background-image: none;
+}
+
+.sb-row-action {
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-selected .sb-row-action:hover {
+  color: var(--modal-selected-option-color);
+}
+
+.sb-nav-row.sb-nav-folder {
+  --sb-nav-band: color-mix(in srgb,
+      var(--ui-surface-section-background-color) 60%,
+      transparent);
+  font-weight: 600;
+  background-image: none;
+}
+
+.sb-nav-row.sb-nav-folder.sb-nav-selected {
+  background-image: none;
+}
+
+.sb-nav-row.sb-nav-folder.sb-nav-noband {
+  background-image: none;
+}
+
+.sb-nav-icon {
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-more {
+  cursor: default;
+  pointer-events: none;
+  justify-content: center;
+  font-size: 0.8em;
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-create {
+  border-top: 1px solid var(--ui-surface-border-color);
+}
+
+.sb-nav-create-pinned {
+  position: sticky;
+  bottom: 0;
+  background-color: var(--modal-background-color);
+}
+
+.sb-nav-create-pinned.sb-nav-selected {
+  background-color: var(--modal-selected-option-background-color);
+}
+
+.sb-nav-description {
+  color: var(--modal-description-color);
+}
+
+.sb-nav-selected .sb-nav-description {
+  color: var(--modal-selected-option-description-color);
+}
+
+.sb-nav-chip.sb-hashtag {
+  color: var(--editor-hashtag-color);
+  background-color: var(--editor-hashtag-background-color);
+  border: 1px solid var(--editor-hashtag-border-color);
+  border-radius: 6px;
+  padding: 0 3px;
+  font-size: 0.8em;
+}
+
+.sb-nav-chip-inactive {
+  background-color: transparent;
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-chip-hint {
+  margin-left: auto;
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-size: inherit;
+  background-color: var(--modal-hint-background-color);
+  color: var(--modal-hint-color);
+}
+
+.sb-nav-chip-key {
+  font-family: var(--ui-font);
+}
+
+.sb-nav-selected .sb-nav-chip:not(.sb-hashtag) {
+  background-color: color-mix(in srgb,
+      var(--modal-selected-option-color) 22%,
+      transparent);
+  color: var(--modal-selected-option-color);
+}
+
+.sb-nav-aspiring .sb-nav-primary {
+  font-style: italic;
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-error {
+  padding: 12px 10px;
+  font-size: 0.9em;
+  color: var(--alert-error-color);
+  background-color: var(--alert-error-background-color);
+}
+
+.sb-nav-error-inline {
+  padding: 6px 10px;
+  font-size: 0.8em;
+  border-bottom: 1px solid var(--ui-surface-border-color);
+}
+
+// Softer than an error: the view still works, one affordance doesn't.
+.sb-nav-notice {
+  padding: 6px 10px;
+  font-size: 0.8em;
+  color: var(--subtle-color);
+  border-bottom: 1px solid var(--ui-surface-border-color);
+}
+
+.sb-tree .sb-nav-row {
+  position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+
+// The drag handle sits on the row's left edge and shows on hover or selection;
+// touch has no HTML5 drag, so it is not offered there.
+.sb-nav-grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sb-tree-grip-width, 1.1rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sb-nav-muted);
+  cursor: grab;
+  opacity: 0;
+  user-select: none;
+}
+
+.sb-nav-row:hover > .sb-nav-grip,
+.sb-nav-row.sb-nav-selected > .sb-nav-grip,
+.sb-nav-grip:focus-visible {
+  opacity: 1;
+}
+
+.sb-nav-grip:active {
+  cursor: grabbing;
+}
+
+@media (pointer: coarse) {
+  .sb-nav-grip {
+    display: none;
+  }
+}
+
+.sb-nav-chevron {
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-row.sb-nav-droptarget {
+  outline: 2px solid var(--modal-selected-option-background-color);
+  outline-offset: -2px;
+  background-color: var(--ui-surface-hover-background-color);
+}
+
+// Reordering: a line where the dragged page will land, on the edge of the row
+// it is dropped beside.
+.sb-nav-row.sb-nav-drop-before {
+  box-shadow: inset 0 2px 0 0 var(--modal-selected-option-background-color);
+}
+
+.sb-nav-row.sb-nav-drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--modal-selected-option-background-color);
+}
+
+.sb-tree.sb-nav-droptarget {
+  outline: 2px solid var(--modal-selected-option-background-color);
+  outline-offset: -2px;
+}
+
+.sb-tree {
+  position: relative;
+}
+
+.sb-tree:empty {
+  min-height: var(--sb-nav-row-height);
+}
+
+.sb-nav-upload-target {
+  position: sticky;
+  top: 0;
+  height: 0;
+  z-index: 1;
+  pointer-events: none;
+  list-style: none;
+}
+
+.sb-nav-upload-target span {
+  display: flex;
+  align-items: center;
+  min-height: var(--sb-nav-row-height);
+  padding: 0 10px;
+  color: var(--modal-selected-option-color);
+  background: var(--modal-selected-option-background-color);
+  border-bottom: 1px solid var(--ui-surface-border-color);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 12%);
+  font-size: 0.8em;
+}
+
+.sb-nav-root-lhs,
+.sb-nav-root-rhs,
+.sb-nav-root-bhs {
+  background: var(--panel-background-color);
+}
+
+.sb-nav-input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -1px var(--text-field-focus-color);
+}
+
+.sb-nav-row[aria-current="page"] {
+  position: relative;
+  border-radius: 0;
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--ui-accent-color);
+    pointer-events: none;
+  }
+}
+
+.sb-nav-row:hover:not(.sb-nav-selected) {
+  background-color: var(--subtle-background-color);
+}
+
+.sb-nav-root .sb-nav-row.sb-nav-passive:hover:not(.sb-nav-selected) {
+  background-color: transparent;
+}
+
+:is(#sb-main, .sb-nav-root) .sb-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+
+  .sb-view-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: inherit;
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--ui-surface-border-color);
+    }
+
+    th { font-weight: 600; }
+    td { min-width: 6rem; }
+    p { margin: 0; }
+    [data-type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+    .sb-table-actions { min-width: 0; width: 1%; white-space: nowrap; }
+  }
+
+  .sb-table-selectable { cursor: pointer; }
+  .sb-table-selectable:hover { background-color: var(--ui-surface-hover-background-color); }
+  .sb-table-passive { cursor: auto; }
+
+  .sb-row-actions {
+    position: static;
+    display: flex;
+    flex-wrap: nowrap;
+    opacity: 0;
+    padding: 0;
+    background: none;
+    mask-image: none;
+    pointer-events: none;
+  }
+
+  .sb-row-action { pointer-events: none; }
+
+  tr:hover .sb-row-actions, tr:focus-within .sb-row-actions {
+    opacity: 1;
+    .sb-row-action { pointer-events: auto; }
+  }
+
+  @media (hover: none) and (pointer: coarse) {
+    .sb-row-actions { opacity: 1; }
+    .sb-row-action { pointer-events: auto; min-width: 44px; height: 44px; }
+  }
+}
+
+.sb-view-table .sb-checkbox:disabled {
+  cursor: default;
+}

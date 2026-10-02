@@ -1,0 +1,622 @@
+---
+description: Defines the schemas and built-in values of built-in configuration options
+tags: meta
+---
+
+SilverBullet uses the [config APIs](https://docs.silverbullet.md/API/config) to manage its runtime configuration. You can set most of these anywhere in your space, but the convention is to use your `CONFIG` page for this purpose.
+
+This meta page defines the JSON Schema of all built-in configuration settings, as well as their default values. You can override them by e.g. putting the following in your CONFIG page (use `space-lua` instead of `lua` in your actual page):
+
+```lua
+config.set("sync.documents", true)
+```
+
+# Built-in options (schema)
+
+This defines the [JSON schema](https://json-schema.org/) for built-in configuration.
+
+```space-lua
+-- priority: 100
+
+-- UI categories for the configuration manager, listed in display order.
+config.defineCategory {
+  name = "Editor",
+  description = "Behavior of the page editor: brackets, wiki link rendering, emoji aliases, and similar editing affordances.",
+  priority = 50,
+}
+config.defineCategory {
+  name = "Smart Quotes",
+  description = "Replace straight quotes with typographic ones as you type, and pick which characters are used.",
+  priority = 40,
+}
+config.defineCategory {
+  name = "Sync",
+  description = "Control how this client synchronizes pages and documents with the server.",
+  priority = 30,
+}
+config.defineCategory {
+  name = "Indexing",
+  description = "Choose which kinds of content (paragraphs, items, tasks) are indexed for queries.",
+  priority = 20,
+}
+config.defineCategory {
+  name = "Query",
+  description = "Configure how queries collate and compare strings, including locale-aware sorting.",
+  priority = 10,
+}
+
+config.define("sync", {
+  description = "Configure sync",
+  type = "object",
+  properties = {
+    documents = {
+      type = "boolean",
+      default = false,
+      description = "Sync document files (non-markdown) locally from the server. Allows access to document files while offline.",
+      ui = { category = "Sync", label = "Sync documents", priority = 1 },
+    },
+    -- In .gitignore format, either in a single string, or as a list of strings
+    ignore = {
+      oneOf = {
+        schema.array "string",
+        schema.string()
+      }
+    }
+  },
+  additionalProperties = false
+})
+
+config.define("index", {
+  description = "Configure individual indexers",
+  type = "object",
+  properties = {
+    paragraph = {
+      type = "object",
+      properties = {
+        all = {
+          type = "boolean",
+          default = false,
+          description = "Index paragraphs without a hashtag",
+          ui = { category = "Indexing", label = "Index all paragraphs", priority = 3 },
+        },
+      },
+    },
+    item = {
+      type = "object",
+      properties = {
+        all = {
+          type = "boolean",
+          default = true,
+          description = "Index items without a hashtag",
+          ui = { category = "Indexing", label = "Index all items", priority = 2 },
+        },
+      },
+    },
+    task = {
+      type = "object",
+      properties = {
+        all = {
+          type = "boolean",
+          default = true,
+          description = "Index tasks without a hashtag",
+          ui = { category = "Indexing", label = "Index all tasks", priority = 1 },
+        },
+      },
+    },
+  },
+  additionalProperties = true
+})
+
+config.define("autoCloseBrackets", {
+  description = "List of opening bracket characters to auto-close",
+  type = "string",
+  default = "([{",
+})
+
+config.define("shortWikiLinks", {
+  description = "Render wiki links to just the last segment, e.g. Person/John becomes John",
+  type = "boolean",
+  default = true,
+  ui = { category = "Editor", label = "Short wiki links", priority = 1 },
+})
+
+config.define("linkWriteFormat", {
+  description = "How SilverBullet writes wiki links it generates: 'shortest' uses the bare page name when that name is unique in the space and the full path when it is not, 'shortest-suffix' writes the shortest path suffix that still uniquely identifies the page instead of the full path, 'full-path' always writes the full path",
+  type = "string",
+  enum = { "shortest", "shortest-suffix", "full-path" },
+  default = "full-path",
+  ui = { category = "Editor", label = "Link write format", priority = 2 },
+})
+
+config.define("frontmatterFolding", {
+  description = "Configure folding behavior for YAML frontmatter at the top of pages",
+  type = "object",
+  properties = {
+    foldByDefault = {
+      type = "string",
+      enum = { "never", "long", "always" },
+      default = "long",
+      description = "When to automatically fold frontmatter when opening a page",
+      ui = { category = "Editor", label = "Auto-fold frontmatter", priority = 0 },
+    },
+    foldByDefaultLines = {
+      type = "number",
+      default = 5,
+      minimum = 1,
+      multipleOf = 1,
+      description = "Fold frontmatter automatically when it has more than this positive whole number of lines and auto-fold is set to long",
+      ui = { category = "Editor", label = "Frontmatter auto-fold lines", priority = -2 },
+    },
+  },
+  additionalProperties = false,
+})
+
+config.define("emoji", {
+  description = "Additional emoji aliases",
+  type = "object",
+  properties = {
+    aliases = {
+      type = "object",
+      additionalProperties = schema.string(),
+    }
+  }
+})
+
+config.define("smartQuotes", {
+  description = "Configure smart quotes",
+  type = "object",
+  properties = {
+    enabled = {
+      type = "boolean",
+      description = "Indicates whether smart quotes are enabled",
+      ui = { category = "Smart Quotes", label = "Enable smart quotes", priority = 5 },
+      default = true,
+    },
+    double = {
+      type = "object",
+      properties = {
+        left = {
+          type = "string",
+          default = "“",
+          description = "Character for the left double quote",
+          ui = { category = "Smart Quotes", label = "Double quote left", priority = 4 },
+        },
+        right = {
+          type = "string",
+          default = "”",
+          description = "Character for the right double quote",
+          ui = { category = "Smart Quotes", label = "Double quote right", priority = 3 },
+        }
+      },
+      additionalProperties = false
+    },
+    single = {
+      type = "object",
+      properties = {
+        left = {
+          type = "string",
+          default = "‘",
+          description = "Character for the left single quote",
+          ui = { category = "Smart Quotes", label = "Single quote left", priority = 2 },
+        },
+        right = {
+          type = "string",
+          default = "’",
+          description = "Character for the right single quote",
+          ui = { category = "Smart Quotes", label = "Single quote right", priority = 1 },
+        }
+      },
+      additionalProperties = false
+    },
+  },
+  additionalProperties = false
+})
+
+config.define("mobileMenuStyle", {
+  type = "string",
+})
+
+config.define("vim", {
+  description = "Vim mode configuration",
+  type = "object",
+  properties = {
+    unmap = {
+      description = "Keys to unmap",
+      type = "array",
+      items = {
+        oneOf = {
+          { type = "string" },
+          {
+            type = "object",
+            properties = {
+              key = { type = "string" },
+              mode = {
+                type = "string",
+                enum = {"normal", "insert", "visual", "operator"}
+              }
+            },
+            required = { "key" },
+            additionalProperties = false
+          }
+        }
+      }
+    },
+    map = {
+      description = "Custom mappings",
+      type = "array",
+      items = {
+        type = "object",
+        properties = {
+          map = { type = "string" },
+          to = { type = "string" },
+          mode = {
+            type = "string",
+            enum = {"normal", "insert", "visual", "operator"}
+          }
+        },
+        required = { "map", "to" },
+        additionalProperties = false
+      }
+    },
+    noremap = {
+      description = "Non-recursive custom mappings",
+      type = "array",
+      items = {
+        type = "object",
+        properties = {
+          map = { type = "string" },
+          to = { type = "string" },
+          mode = {
+            type = "string",
+            enum = {"normal", "insert", "visual", "operator"}
+          }
+        },
+        required = { "map", "to" },
+        additionalProperties = false
+      }
+    },
+    commands = {
+      description = "Custom Ex commands",
+      type = "array",
+      items = {
+        type = "object",
+        properties = {
+          command = { type = "string" },
+          ex = { type = "string" }
+        },
+        required = { "command", "ex" },
+        additionalProperties = false
+      }
+    },
+  },
+  additionalProperties = false
+})
+
+config.define("queryCollation", {
+  description = "Configure string ordering in queries",
+  type = "object",
+  ui = { category = "Query", label = "Query collation", priority = 1 },
+  properties = {
+    enabled = {
+      type = "boolean",
+      default = false,
+      description = "Indicates whether string collation should be used instead of simple codepoint ordering",
+      ui = { category = "Query", label = "Enable collation", priority = 2 },
+    },
+    locale = {
+      type = "string",
+      description = "Language tag to specify sorting rules (from BCP 47)",
+      ui = { category = "Query", label = "Locale", priority = 1 },
+    },
+    options = {
+      type = "object",
+      description = "Additional options passed to Intl.Collator constructor"
+      -- See https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/Collator#options
+    },
+  },
+  additionalProperties = false
+})
+
+
+-- Don't use directly, use command.define instead
+config.define("commands", {
+  type = "object",
+  additionalProperties = {
+    type = "object",
+    properties = {
+      name = schema.string(),
+      contexts = schema.nullableArray "string",
+      priority = schema.nullable "number",
+      key = {
+        anyOf = {
+          schema.string(),
+          schema.array("string"),
+          schema.null()
+        }
+      },
+      mac = {
+        anyOf = {
+          schema.string(),
+          schema.array("string"),
+          schema.null()
+        }
+      },
+      hide = schema.nullable "boolean",
+      requireMode = schema.nullable {
+        type = "string", 
+        enum = {"rw", "ro"},
+      },
+      requireEditor = schema.nullable("string"),
+      run = schema.func(),
+    },
+  },
+})
+
+-- Don't use directly, use slashCommands.define instead
+config.define("slashCommands", {
+  type = "object",
+  additionalProperties = {
+    type = "object",
+    properties = {
+      name = schema.string(),
+      description = schema.nullable "string",
+      priority = schema.nullable "number",
+      onlyContexts = schema.nullableArray "string",
+      exceptContexts = schema.nullableArray "string",
+      run = schema.func(),
+    },
+  },
+})
+
+-- Don't use directly, use event.listen instead
+config.define("eventHandlers", {
+  type = "object",
+  additionalProperties = schema.array(schema.func()),
+})
+
+-- Don't use directly, use mq.listen instead
+config.define("mqSubscriptions", {
+  type = "object",
+  additionalProperties = {
+    type = "array",
+    items = {
+      type = "object",
+      properties = {
+        batchSize = schema.number(),
+        run = schema.func(),
+      }
+    }
+  },
+})
+
+config.define("taskStates", {
+  type = "object",
+  default = {},
+  additionalProperties = {
+    type = "object",
+    properties = {
+      name = schema.string(),
+      done = schema.nullable "boolean",
+      order = schema.nullable "number",
+    },
+    required = {"name"},
+  },
+})
+
+config.define("identities", {
+  type = "object",
+  default = {},
+  additionalProperties = {
+    type = "object",
+    properties = {
+      name = schema.string(),
+      description = schema.nullable "string",
+    },
+    required = {"name"},
+  },
+})
+
+-- Don't use directly, WIP
+config.define("tags", {
+  type = "object",
+  additionalProperties = {
+    type = "object",
+    properties = {
+      name = schema.string(),
+      schema = schema.schema(),
+      -- Whether or not an object HAS to validate to be indexed (defaults to false), has a performance penalty
+      mustValidate = schema.boolean(),
+      -- Additional custom validation logic
+      validate = schema.func(),
+      -- Invoked by the object indexer, takes a proposed object as input, returns an array of objects (can be empty table to skip indexing altogether)
+      transform = schema.func(),
+    },
+  },
+})
+
+-- Don't use directly, use actionButton.define instead
+config.define("actionButtons", {
+  type = "array",
+  items = {
+    type = "object",
+    properties = {
+      icon = {
+        type = "string",
+        description = "Icon for the action button, from https://feathericons.com. The name 'profile' is reserved for the account menu."
+      },
+      description = {
+        type = "string",
+        description = "Optional description of the action button"
+      },
+      command = {
+        type = "string",
+        description = "Optional command name to invoke when clicked (replaces run). The command's keyboard shortcut is automatically shown in the tooltip."
+      },
+      priority = {
+        type = "number",
+        description = "Optional priority: the higher the earlier the button will appear in the list"
+      },
+      mobile = {
+        type = "boolean",
+        description = "Optional boolean indicating if the action button is applicable for mobile"
+      },
+      standalone = {
+        type = "boolean",
+        description = "Optional: when set to true, button only appears in standalone/PWA mode; when false, only in browser mode"
+      },
+      accountManaged = {
+        type = "boolean",
+        description = "Optional: when true, button only appears on servers that manage accounts (multi-space)"
+      },
+      dropdown = {
+        type = "boolean",
+        description = "Optional: set to false to keep this button outside the dropdown menu on mobile (default: true)"
+      },
+      run = schema.func(),
+    },
+    required = {"icon"},
+    additionalProperties = false
+  }
+})
+
+config.define("keyboardBar", {
+  description = "Buttons in the bar shown above the on-screen keyboard (or at the bottom with an external keyboard) while editing on a touch device. Set to an empty list to hide the bar. See [[^Library/Std/APIs/Keyboard Bar]].",
+  type = "array",
+  items = {
+    type = "object",
+    properties = {
+      icon = {
+        type = "string",
+        description = "Icon name: a Feather icon (https://feathericons.com) or one of the md-* editor icons"
+      },
+      description = schema.string(),
+      command = {
+        type = "string",
+        description = "Command to run when tapped (replaces run)"
+      },
+      run = schema.func(),
+      onlyContexts = schema.nullableArray "string",
+      exceptContexts = schema.nullableArray "string",
+    },
+    required = {"icon"},
+    additionalProperties = false
+  }
+})
+
+config.define("view.defaults", {
+  description = "Per-view presentation defaults, keyed by view name.",
+  type = "object",
+  -- Fork: open the page tree on boot. A space that sets its own view.defaults
+  -- replaces this whole table, so it must list std.spaceTree to keep it.
+  default = { ["std.spaceTree"] = { open = true } },
+  additionalProperties = {
+    type = "object",
+    properties = {
+      dock = { type = "string", enum = {"modal", "lhs", "rhs", "bhs", "page-top", "page-bottom"} },
+      open = { type = "boolean" },
+      collapsed = { type = "boolean" },
+      width = { type = "number", minimum = 160, maximum = 600 },
+      height = { type = "number", minimum = 160, maximum = 600 },
+    },
+    additionalProperties = false,
+  },
+})
+```
+
+# Default values
+Default values that cannot be expressed as schema defaults (e.g. because they contain functions).
+
+```space-lua
+-- priority: 99
+config.set("actionButtons", {
+  {
+    icon = "home",
+    description = "Go to the index page",
+    command = "Navigate: Home",
+    priority = 3,
+    dropdown = false,
+  },
+  {
+    icon = "book",
+    description = "Open page",
+    command = "Navigate: Page Picker",
+    priority = 2,
+    dropdown = false,
+  },
+  {
+    icon = "terminal",
+    description = "Run command",
+    command = "Open Command Palette",
+    priority = 1,
+  },
+  {
+    -- Fork: the guide to what this fork added (see Library/Std/Docs/Fork Guide).
+    icon = "help-circle",
+    description = "Help: how to use this fork",
+    command = "Help: Fork Guide",
+    priority = 0.5,
+    dropdown = false,
+  },
+  {
+    icon = "chevron-left",
+    description = "Go back",
+    standalone = true,
+    priority = 0,
+    run = function()
+      editor.goHistory(-1)
+    end,
+  },
+  {
+    icon = "chevron-right",
+    description = "Go forward",
+    standalone = true,
+    priority = -1,
+    run = function()
+      editor.goHistory(1)
+    end,
+  },
+  {
+    icon = "profile",
+    description = "Account",
+    accountManaged = true,
+    priority = -2,
+  },
+})
+
+-- Inserts a character that opens completion (`#`, `/`), separated from a
+-- preceding word so the completer recognizes it. Local to this bootstrap page
+-- so the default buttons work before the index has loaded any other Lua.
+local function insertCompletionTrigger(char)
+  local pos = editor.getCursor()
+  if string.match(string.sub(editor.getText(), pos, pos), "[%w_]") then
+    char = " " .. char
+  end
+  editor.insertAtCursor(char)
+  editor.startCompletion()
+end
+
+config.set("keyboardBar", {
+  { icon = "md-format-list-bulleted", description = "Bullet list", command = "Text: Listify Selection", exceptContexts = {"ListItem", "FencedCode", "FrontMatter"} },
+  { icon = "md-checklist", description = "New task", command = "Text: Taskify Line", exceptContexts = {"ListItem", "FencedCode", "FrontMatter"} },
+  { icon = "md-format-indent-decrease", description = "Outdent", command = "Outline: Move Left", onlyContexts = {"ListItem"} },
+  { icon = "md-format-indent-increase", description = "Indent", command = "Outline: Move Right", onlyContexts = {"ListItem"} },
+  { icon = "md-checklist", description = "Make task", command = "Text: Taskify Line", onlyContexts = {"ListItem"}, exceptContexts = {"Task"} },
+  { icon = "check-square", description = "Cycle task state", command = "Task: Cycle State", onlyContexts = {"Task"} },
+  { icon = "arrow-up", description = "Move up", command = "Outline: Move Up", onlyContexts = {"ListItem"} },
+  { icon = "arrow-down", description = "Move down", command = "Outline: Move Down", onlyContexts = {"ListItem"} },
+  { icon = "chevrons-right", description = "Tab", command = "Editor: Indent", onlyContexts = {"FencedCode"} },
+  { icon = "chevrons-left", description = "Shift-Tab", command = "Editor: Outdent", onlyContexts = {"FencedCode"} },
+  { icon = "md-link", description = "Wiki link", command = "Text: Wiki Link", exceptContexts = {"FencedCode", "FrontMatter"} },
+  { icon = "md-format-bold", description = "Bold", command = "Text: Bold", exceptContexts = {"FencedCode", "FrontMatter"} },
+  { icon = "md-format-italic", description = "Italic", command = "Text: Italic", exceptContexts = {"FencedCode", "FrontMatter"} },
+  { icon = "hash", description = "Tag", exceptContexts = {"FencedCode", "FrontMatter"}, run = function()
+    insertCompletionTrigger("#")
+  end },
+  { icon = [[<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="16" y1="4" x2="8" y2="20"/></svg>]], description = "Slash command", exceptContexts = {"FencedCode", "FrontMatter"}, run = function()
+    insertCompletionTrigger("/")
+  end },
+  { icon = "rotate-ccw", description = "Undo", command = "Editor: Undo" },
+  { icon = "rotate-cw", description = "Redo", command = "Editor: Redo" },
+  { icon = "terminal", description = "Run command", command = "Open Command Palette" },
+})
+```

@@ -1,0 +1,14 @@
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!.cargo
+!bin/silverbullet
+!bin/sb
+!server
+!server-common
+!server-merge
+!server-runtime-chrome
+!plug-api/lib/resolve_path_fixture.json
+!docker-entrypoint.sh
+target

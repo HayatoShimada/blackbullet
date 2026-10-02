@@ -1,0 +1,183 @@
+import type { Client } from "../../client.ts";
+import type { SysCallMapping } from "../system.ts";
+
+export function syncSyscalls(client: Client): SysCallMapping {
+  const syncTimeoutMs = 30000;
+  // Deferring indexing only pays off while the sync engine is actually
+  // delivering files. Once it has gone this long without reporting progress
+  // there is nothing left to yield to, and continuing to defer would stall
+  // the initial index forever.
+  const syncStallMs = 5000;
+
+  function waitForServiceWorkerActivation(path?: string): Promise<any> {
+    return new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Sync timeout after ${syncTimeoutMs / 1000}s`));
+      }, syncTimeoutMs);
+
+      function cleanup() {
+        clearTimeout(timeout);
+        client.eventHook.removeLocalListener(
+          "service-worker:file-sync-complete",
+          eventHandler,
+        );
+        client.eventHook.removeLocalListener(
+          "service-worker:space-sync-complete",
+          eventHandler,
+        );
+        client.eventHook.removeLocalListener(
+          "service-worker:sync-error",
+          errorHandler,
+        );
+      }
+
+      client.eventHook.addLocalListener(
+        "service-worker:file-sync-complete",
+        eventHandler,
+      );
+      client.eventHook.addLocalListener(
+        "service-worker:space-sync-complete",
+        eventHandler,
+      );
+      client.eventHook.addLocalListener(
+        "service-worker:sync-error",
+        errorHandler,
+      );
+
+      function eventHandler(data: any) {
+        if (data.path && path && data.path !== path) {
+          return;
+        }
+        cleanup();
+        resolve(data);
+      }
+
+      function errorHandler(e: any) {
+        // Only reject if the error is for our specific path, or if no path was specified
+        if (e.path && path && e.path !== path) {
+          return;
+        }
+        cleanup();
+        reject(e);
+      }
+    });
+  }
+
+  return {
+    "sync.isEnabled": {
+      callback: (): boolean => {
+        return !client.bootConfig.disableServiceWorker;
+      },
+      description:
+        "Whether client Sync is enabled. False when the service worker is off.",
+      returns: [
+        {
+          type: "boolean",
+          description:
+            "False when SB_DISABLE_SERVICE_WORKER is set or the browser has no service worker.",
+        },
+      ],
+    },
+    "sync.hasInitialSyncCompleted": {
+      callback: (): boolean => {
+        return client.fullSyncCompleted;
+      },
+      description:
+        "Checks whether the initial client synchronization has completed.",
+      returns: [
+        { type: "boolean", description: "Whether initial sync is complete." },
+      ],
+    },
+    "sync.areFilesReadyToIndex": {
+      callback: (_ctx, paths: string[]): boolean[] => {
+        const allReady =
+          !!client.bootConfig.disableServiceWorker ||
+          client.fullSyncCompleted ||
+          client.fullIndexCompleted ||
+          (client.serverPingMs !== undefined && client.serverPingMs < 25) ||
+          Date.now() - client.lastSyncProgressAt > syncStallMs;
+        return paths.map((path) => allReady || client.syncedPaths.has(path));
+      },
+      description:
+        "For each file, whether indexing it now would read it locally or cheaply (true), or race the initial sync and expensively re-download it (false).",
+      parameters: [
+        {
+          name: "paths",
+          type: "string[]",
+          description: "Space-relative file paths.",
+        },
+      ],
+      returns: [
+        {
+          type: "boolean[]",
+          description: "Per-path readiness, in input order.",
+        },
+      ],
+    },
+    "sync.performFileSync": {
+      callback: async (
+        _ctx,
+        path: string,
+        remoteLastModified?: number,
+        remoteRevisionHash?: string,
+      ): Promise<void> => {
+        await client.postServiceWorkerMessage({
+          type: "perform-file-sync",
+          path,
+          remoteLastModified,
+          remoteRevisionHash,
+        });
+        // postServiceWorkerMessage returns silently if no SW, so only wait if SW is active
+        const registration = await navigator.serviceWorker?.getRegistration();
+        if (registration?.active) {
+          return waitForServiceWorkerActivation(path);
+        }
+      },
+      description:
+        "Prioritizes a file for immediate synchronization and waits for completion.",
+      parameters: [
+        {
+          name: "path",
+          type: "string",
+          description: "Space-relative file path.",
+        },
+        {
+          name: "remoteLastModified",
+          type: "number",
+          optional: true,
+          description:
+            "lastModified of the remote change event, used for echo suppression.",
+        },
+        {
+          name: "remoteRevisionHash",
+          type: "string",
+          optional: true,
+          description:
+            "Content revision the remote change event reported, which tells a same-millisecond change from an echo.",
+        },
+      ],
+      examples: [{ code: 'sync.performFileSync("notes/important.md")' }],
+    },
+    "sync.performSpaceSync": {
+      callback: async (): Promise<number> => {
+        await client.postServiceWorkerMessage({ type: "perform-space-sync" });
+        const registration = await navigator.serviceWorker?.getRegistration();
+        if (registration?.active) {
+          return waitForServiceWorkerActivation();
+        }
+        return 0;
+      },
+      description:
+        "Starts an immediate full-space synchronization and waits for completion.",
+      returns: [
+        {
+          type: "number",
+          description:
+            "Number of sync operations, or zero without an active worker.",
+        },
+      ],
+      examples: [{ code: "local changes = sync.performSpaceSync()" }],
+    },
+  };
+}

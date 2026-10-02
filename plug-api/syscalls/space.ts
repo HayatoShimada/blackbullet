@@ -1,0 +1,322 @@
+import type { Path, Ref } from "@silverbulletmd/silverbullet/lib/ref";
+import type {
+  DocumentMeta,
+  FileMeta,
+  PageMeta,
+} from "../../plug-api/types/index.ts";
+import type {
+  FileRevisions,
+  SpaceLog,
+} from "../../plug-api/types/revisions.ts";
+import type { PathLookup } from "../lib/resolve_path.ts";
+import { syscall } from "../syscall.ts";
+
+/**
+ * Exposes the space with its pages, documents and plugs.
+ * @module
+ */
+
+/**
+ * Lists all pages (files ending in .md) in the space.
+ * @param unfiltered
+ * @returns a list of all pages in the space represented as PageMeta objects
+ */
+export function listPages(): Promise<PageMeta[]> {
+  return syscall("space.listPages");
+}
+
+/**
+ * Get metadata for a page in the space.
+ * @param name the name of the page to get metadata for
+ * @returns the metadata for the page
+ */
+export function getPageMeta(name: string): Promise<PageMeta> {
+  return syscall("space.getPageMeta", name);
+}
+
+/**
+ * Check if a page exists in the space.
+ * @param name the name of the page to check
+ * @returns true if the page exists, false otherwise
+ */
+export function pageExists(name: string): Promise<boolean> {
+  return syscall("space.pageExists", name);
+}
+
+/**
+ * Read a page from the space as text.
+ * @param name the name of the page to read
+ * @returns the text of the page
+ */
+export function readPage(name: string): Promise<string> {
+  return syscall("space.readPage", name);
+}
+
+/**
+ * Read a page from the space returning both its text and meta data
+ * @param name the name of the page to read
+ * @returns
+ *  - text: page text as a string
+ *  - meta: pageMeta
+ */
+export function readPageWithMeta(
+  name: string,
+): Promise<{ text: string; meta: PageMeta }> {
+  return syscall("space.readPageWithMeta", name);
+}
+
+/**
+ * Write a page to the space.
+ * @param name the name of the page to write
+ * @param text the text of the page to write
+ * @returns the metadata for the written page
+ */
+export function writePage(name: string, text: string): Promise<PageMeta> {
+  return syscall("space.writePage", name, text);
+}
+
+/**
+ * Delete a page from the space.
+ * @param name the name of the page to delete
+ */
+export function deletePage(name: string): Promise<void> {
+  return syscall("space.deletePage", name);
+}
+
+/**
+ * List all plugs in the space.
+ * @returns a list of all plugs in the space represented as FileMeta objects
+ */
+export function listPlugs(): Promise<FileMeta[]> {
+  return syscall("space.listPlugs");
+}
+
+/**
+ * Lists all documents in the space (all files not ending in .md).
+ * @returns a list of all documents in the space represented as DocumentMeta objects
+ */
+export function listDocuments(): Promise<DocumentMeta[]> {
+  return syscall("space.listDocuments");
+}
+
+/**
+ * Get metadata for an document in the space.
+ * @param name the path of the document to get metadata for
+ * @returns the metadata for the document
+ */
+export function getDocumentMeta(name: string): Promise<DocumentMeta> {
+  return syscall("space.getDocumentMeta", name);
+}
+
+/**
+ * Read an document from the space
+ * @param name path of the document to read
+ * @returns the document data as a UInt8Array
+ */
+export function readDocument(name: string): Promise<Uint8Array> {
+  return syscall("space.readDocument", name);
+}
+
+/**
+ * Writes a document to the space
+ * @param name path of the document to write
+ * @param data data itself
+ * @returns
+ */
+export function writeDocument(
+  name: string,
+  data: Uint8Array,
+): Promise<DocumentMeta> {
+  return syscall("space.writeDocument", name, data);
+}
+
+/**
+ * Deletes a document from the space
+ * @param name path of the document to delete
+ */
+export function deleteDocument(name: string): Promise<void> {
+  return syscall("space.deleteDocument", name);
+}
+
+/**
+ * List all files in the space (pages, documents and plugs).
+ * @returns a list of all files in the space represented as FileMeta objects
+ */
+export function listFiles(): Promise<FileMeta[]> {
+  return syscall("space.listFiles");
+}
+
+/**
+ * Read a file from the space as a Uint8Array.
+ * @param name the name of the file to read
+ * @returns the data of the file
+ */
+export function readFile(name: string): Promise<Uint8Array> {
+  return syscall("space.readFile", name);
+}
+
+/**
+ * Reads a reference (e.g. page#header or page@20) and returns it as a string
+ */
+export function readRef(ref: string | Ref): Promise<string> {
+  return syscall("space.readRef", ref);
+}
+
+/**
+ * Read a file from the space returning both its data and meta data
+ * @param name the name of the page to read
+ * @returns
+ *  - data: file content
+ *  - meta: pageMeta
+ */
+export function readFileWithMeta(
+  name: string,
+): Promise<{ data: Uint8Array; meta: FileMeta }> {
+  return syscall("space.readFileWithMeta", name);
+}
+
+/**
+ * Get metadata for a file in the space.
+ * @param name the name of the file to get metadata for
+ * @returns the metadata for the file
+ */
+export function getFileMeta(name: string): Promise<FileMeta> {
+  return syscall("space.getFileMeta", name);
+}
+
+/**
+ * Write a file to the space.
+ * @param name the name of the file to write
+ * @param data the data of the file to write
+ * @returns the metadata for the written file
+ */
+export function writeFile(name: string, data: Uint8Array): Promise<FileMeta> {
+  return syscall("space.writeFile", name, data);
+}
+
+/**
+ * Delete a file from the space.
+ * @param name the name of the file to delete
+ */
+export function deleteFile(name: string): Promise<void> {
+  return syscall("space.deleteFile", name);
+}
+
+export function fileExists(name: string): Promise<boolean> {
+  return syscall("space.fileExists", name);
+}
+
+/**
+ * Every basename carried by more than one file, with the files that carry it.
+ * Small under the bare-iff-unique invariant; pair with `collisionIndex` and
+ * `writeLinkPath` from `lib/resolve_path` to decide link write formats.
+ */
+export function collidingBasenames(): Promise<Record<string, Path[]>> {
+  return syscall("space.collidingBasenames");
+}
+
+/**
+ * Looks up a batch of paths at once: for each, whether that exact path exists
+ * and which files share its basename. Pair with `lookupIndex` and `resolvePath`
+ * from `lib/resolve_path` to resolve them.
+ */
+export function lookupPaths(
+  paths: string[],
+): Promise<Record<string, PathLookup>> {
+  return syscall("space.lookupPaths", paths);
+}
+
+/**
+ * Lists the revision history of a file.
+ * @param path the path of the file to list revisions for
+ * @param before list revisions older than this revision id
+ */
+export function listRevisions(
+  path: string,
+  before?: string,
+): Promise<FileRevisions> {
+  return syscall("space.listRevisions", path, before);
+}
+
+/**
+ * Reads the text of a file as it was at a given revision, or at that
+ * revision's parent.
+ * @param path the path of the file to read
+ * @param rev the revision id to read
+ * @param parent read the file as of the revision's parent instead (e.g. the
+ * version immediately before a deletion commit)
+ */
+export function getRevision(
+  path: string,
+  rev: string,
+  parent?: boolean,
+): Promise<string> {
+  return syscall("space.getRevision", path, rev, parent);
+}
+
+/**
+ * Reads a unified diff of a revision's own change (vs its parent; a root
+ * commit reads as fully added).
+ * @param path the path of the file to diff
+ * @param rev the revision id to diff; omitted, diffs the uncommitted change
+ */
+export function getRevisionDiff(path: string, rev?: string): Promise<string> {
+  return syscall("space.getRevisionDiff", path, rev);
+}
+
+/**
+ * Lists the space-wide commit log.
+ * @param before list commits older than this revision id
+ * @param q match commits whose message or author contains this phrase
+ */
+export function getSpaceLog(before?: string, q?: string): Promise<SpaceLog> {
+  return syscall("space.getSpaceLog", before, q);
+}
+
+/**
+ * Commits everything outstanding as a revision now, rather than waiting for
+ * the automatic commit.
+ * @returns false if there was nothing to commit
+ */
+export function createRevisionSnapshot(): Promise<boolean> {
+  return syscall("space.createRevisionSnapshot");
+}
+
+export function getGitSyncStatus(): Promise<
+  import("../types/revisions.ts").GitSyncSnapshot
+> {
+  return syscall("space.getGitSyncStatus");
+}
+
+export function getGitConflicts(): Promise<
+  import("../types/revisions.ts").GitConflicts
+> {
+  return syscall("space.getGitConflicts");
+}
+
+export function syncGitNow(): Promise<void> {
+  return syscall("space.syncGitNow");
+}
+
+export function resolveGitConflict(
+  id: string,
+  generation: string,
+  contentRevision: string,
+  action: import("../types/revisions.ts").GitConflictAction,
+): Promise<import("../types/revisions.ts").GitConflicts> {
+  return syscall(
+    "space.resolveGitConflict",
+    id,
+    generation,
+    contentRevision,
+    action,
+  );
+}
+
+export function getGitConflictVersion(
+  id: string,
+  generation: string,
+  side: "local" | "remote",
+): Promise<Uint8Array> {
+  return syscall("space.getGitConflictVersion", id, generation, side);
+}

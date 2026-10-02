@@ -1,0 +1,152 @@
+import type { Manifest } from "../types.ts";
+import type { ControllerMessage, WorkerMessage } from "../protocol.ts";
+import type { Plug } from "../plug.ts";
+import { AssetBundle, type AssetJson } from "../../asset_bundle/bundle.ts";
+import type { Sandbox, SandboxFactory } from "./sandbox.ts";
+import { race, timeout } from "@silverbulletmd/silverbullet/lib/async";
+import { fsEndpoint } from "../../spaces/constants.ts";
+
+/**
+ * Effectively this wraps a web worker, the reason to have this split from Plugs is to allow plugs to manage multiple sandboxes, e.g. for performance in the future
+ */
+export class WorkerSandbox<HookT> implements Sandbox<HookT> {
+  public manifest?: Manifest<HookT>;
+  private worker?: Worker;
+  private reqId = 0;
+  private outstandingInvocations = new Map<
+    number,
+    { resolve: (result: any) => void; reject: (e: any) => void }
+  >();
+
+  constructor(
+    readonly plug: Plug<HookT>,
+    public workerUrl: URL,
+    private workerOptions = {},
+  ) {}
+
+  static forPath<HookT>(path: string): SandboxFactory<HookT> {
+    return (plug) =>
+      new WorkerSandbox(
+        plug,
+        new URL(path, `${document.baseURI.slice(0, -1) + fsEndpoint}/`),
+      );
+  }
+
+  /**
+   * Should only invoked lazily (either by invoke, or by a ManifestCache to load the manifest)
+   */
+  init(): Promise<void> {
+    console.log("Booting up worker from", this.workerUrl.pathname);
+    if (this.worker) {
+      console.warn("Double init of sandbox, ignoring");
+      return Promise.resolve();
+    }
+    this.worker = new Worker(this.workerUrl, {
+      ...this.workerOptions,
+      type: "module",
+    });
+
+    return race([
+      // We're adding a timeout of 5s here to handle the case where a plug blows up during initialization
+      timeout(5000).catch((_) =>
+        Promise.reject(new Error("Plug timed out during creation")),
+      ),
+      new Promise<void>((resolve) => {
+        this.worker!.onmessage = (ev) => {
+          if (ev.data.type === "manifest") {
+            this.manifest = ev.data.manifest;
+            this.plug.manifest = this.manifest!;
+
+            this.plug.assets = new AssetBundle(
+              this.manifest?.assets ? (this.manifest.assets as AssetJson) : {},
+            );
+
+            return resolve();
+          }
+
+          void this.onMessage(ev.data);
+        };
+      }),
+    ]).catch((e) => {
+      // A worker that failed to come up must not linger: its script fetch may
+      // still be in flight (e.g. on a slow link), and a late boot would
+      // resolve into a sandbox the system already gave up on. Terminating it
+      // also lets a retry start from a clean slate.
+      this.worker?.terminate();
+      this.worker = undefined;
+      throw e;
+    });
+  }
+
+  async onMessage(data: ControllerMessage) {
+    if (!this.worker) {
+      console.warn("Received message for terminated worker, ignoring");
+      return;
+    }
+    switch (data.type) {
+      case "sys":
+        try {
+          const result = await this.plug.syscall(data.name!, data.args!);
+
+          this.worker &&
+            this.worker!.postMessage({
+              type: "sysr",
+              id: data.id,
+              result: result,
+            } as WorkerMessage);
+        } catch (e: any) {
+          this.worker &&
+            this.worker!.postMessage({
+              type: "sysr",
+              id: data.id,
+              error: e.message,
+            } as WorkerMessage);
+        }
+        break;
+      case "invr": {
+        const resultCbs = this.outstandingInvocations.get(data.id!);
+        this.outstandingInvocations.delete(data.id!);
+        if (data.error) {
+          resultCbs?.reject(new Error(data.error));
+        } else {
+          resultCbs?.resolve(data.result);
+        }
+        break;
+      }
+      default:
+        console.error("Unknown message type", data);
+    }
+  }
+
+  async invoke(name: string, args: any[]): Promise<any> {
+    if (!this.worker) {
+      await this.init();
+    }
+    this.reqId++;
+    this.worker!.postMessage({
+      type: "inv",
+      id: this.reqId,
+      name,
+      args,
+    } as WorkerMessage);
+    return new Promise((resolve, reject) => {
+      this.outstandingInvocations.set(this.reqId, { resolve, reject });
+    });
+  }
+
+  stop() {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = undefined;
+    }
+    // A terminated worker will never post the `invr` that would otherwise
+    // settle these.
+    if (this.outstandingInvocations.size > 0) {
+      const error = new Error("Plug sandbox stopped");
+      for (const { reject } of this.outstandingInvocations.values()) {
+        reject(error);
+      }
+      this.outstandingInvocations.clear();
+    }
+  }
+}

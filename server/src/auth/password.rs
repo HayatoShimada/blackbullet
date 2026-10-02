@@ -1,0 +1,68 @@
+//! Argon2id password hashing. Account PHC strings (`$argon2id$v=19$…`) live in
+//! `users.json`; classic single-space mode derives the same representation from
+//! its configured credentials. Plaintext is never persisted.
+
+use argon2::password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::Argon2;
+
+/// Hash a plaintext password to an argon2id PHC string (default params).
+pub fn hash_password(plain: &str) -> Result<String, String> {
+    Argon2::default()
+        .hash_password(plain.as_bytes())
+        .map(|h| h.to_string())
+        .map_err(|e| format!("password hashing failed: {e}"))
+}
+
+/// Verify a plaintext password against a PHC string. Any parse/verify error is
+/// a mismatch (never panics on malformed input).
+pub fn verify_password(plain: &str, phc: &str) -> bool {
+    PasswordHash::new(phc)
+        .map(|h| {
+            Argon2::default()
+                .verify_password(plain.as_bytes(), &h)
+                .is_ok()
+        })
+        .unwrap_or(false)
+}
+
+/// Whether `phc` parses as a valid PHC hash string (config validation).
+pub fn is_valid_phc(phc: &str) -> bool {
+    PasswordHash::new(phc).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_verifies_and_wrong_password_fails() {
+        let phc = hash_password("s3cret").unwrap();
+        assert!(phc.starts_with("$argon2id$"), "{phc}");
+        assert!(verify_password("s3cret", &phc));
+        assert!(!verify_password("wrong", &phc));
+    }
+
+    #[test]
+    fn verifies_phc_written_by_previous_argon2_release() {
+        let phc = "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc";
+        assert!(verify_password("password", phc));
+        assert!(!verify_password("different", phc));
+    }
+
+    #[test]
+    fn hashes_are_salted_uniquely() {
+        assert_ne!(hash_password("x").unwrap(), hash_password("x").unwrap());
+    }
+
+    #[test]
+    fn phc_validity_check() {
+        assert!(is_valid_phc(&hash_password("x").unwrap()));
+        assert!(!is_valid_phc("not-a-hash"));
+        assert!(!is_valid_phc(""));
+    }
+
+    #[test]
+    fn garbage_phc_never_verifies() {
+        assert!(!verify_password("x", "garbage"));
+    }
+}

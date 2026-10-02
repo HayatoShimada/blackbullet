@@ -1,0 +1,42 @@
+[package]
+name = "silverbullet-server-common"
+edition.workspace = true
+license.workspace = true
+# Internal-only crate: never published, depended on by path. No version field
+# (defaults to 0.0.0); path deps ignore version, so nothing to ever bump.
+publish = false
+
+[features]
+# Exposes MemorySpacePrimitives for use in downstream crates' tests.
+testing = []
+
+[dependencies]
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
+mime_guess = { workspace = true }
+chrono = { workspace = true }
+filetime = { workspace = true }
+reqwest = { workspace = true }
+percent-encoding = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+# Self-upgrade engine (shared by the `sb` and `silverbullet` binaries): download
+# a release zip and extract it in place.
+zip = { workspace = true }
+tempfile = { workspace = true }
+
+# `fcntl(F_GETPATH)` is the only cheap way to recover true on-disk casing on
+# macOS; `canonicalize` does not correct casing there. Windows gets the same
+# information from `std::fs::canonicalize` (which uses
+# GetFinalPathNameByHandle), so no dependency is needed there.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
+[lints]
+workspace = true

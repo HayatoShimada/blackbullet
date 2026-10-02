@@ -1,0 +1,320 @@
+@use "profile_menu";
+
+:root {
+  --sb-top-height: 55px;
+}
+
+@media (display-mode: standalone) {
+  @supports (-webkit-touch-callout: none) and selector(:heading) {
+    :root {
+      --sb-standalone-top-offset: 20px;
+    }
+  }
+}
+
+#sb-top {
+  display: flex;
+  flex-direction: row;
+  z-index: 20;
+
+  height: var(--sb-top-height);
+
+  // iOS 27 paints a progressive blur over the top ~35px of a home-screen web app's content, which smears the page title and the action icons. 
+  // selector(:heading) shipped in Safari 27 and is the closest available proxy for "this WebKit draws the band", the
+  // `-webkit-touch-callout` half pins it to iOS. The blur fades out, so 20px is
+  // enough to put every glyph row at full contrast; clearing all 35px buys nothing.
+  @media (display-mode: standalone) {
+    @supports (-webkit-touch-callout: none) and selector(:heading) {
+      padding-top: var(--sb-standalone-top-offset);
+    }
+  }
+
+  .main {
+    flex: 2;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    scrollbar-gutter: stable;
+
+    .inner {
+      // Hack to not have SCSS precompile this value but use proper CSS variables
+      max-width: var(--#{"editor-width"});
+      margin: auto;
+      font-size: 28px;
+      padding: 8px 0;
+      display: flex;
+      flex-direction: row;
+
+      .wrapper {
+        width: env(titlebar-area-width, 100%);
+        padding: 0 20px;
+        display: flex;
+        box-sizing: border-box;
+        position: relative;
+
+      }
+    }
+
+    #sb-current-page {
+      flex: 1;
+
+      overflow: hidden;
+      white-space: nowrap;
+      text-align: left;
+      display: block;
+
+      -webkit-app-region: drag;
+
+      .sb-input {
+        font-family: var(--ui-font);
+        font-size: inherit;
+        font-weight: bold;
+        line-height: 1.35;
+        color: inherit;
+        background-color: transparent;
+        padding: 0;
+        width: 100%;
+        border: 0;
+        border-radius: 0;
+        outline: none;
+        overflow-x: hidden;
+        text-overflow: ellipsis;
+        caret-color: var(--editor-caret-color);
+
+        &:focus {
+          box-shadow: none;
+        }
+      }
+    }
+  }
+
+  .sb-actions {
+    display: flex;
+    flex: 0 0 auto;
+    text-align: right;
+
+    &.hamburger button.expander {
+      display: none;
+    }
+  }
+
+  .progress-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    margin-right: 6px;
+    padding: 4px;
+    background-color: var(--top-background-color);
+  }
+
+  // Shown next to the ring during the first boot only, while the space is
+  // still being synced and indexed
+  .progress-label {
+    font-size: 12px;
+    color: var(--subtle-color);
+    white-space: nowrap;
+  }
+
+  .progress-bar {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    font-size: 8px;
+  }
+
+  .progress-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+  }
+
+  .progress-hole {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background-color: var(--top-background-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+}
+
+#sb-top .sb-mobile-dock-button {
+  display: none;
+}
+
+@media only screen and (max-width: 600px) {
+
+  #sb-top .sb-mobile-dock-button {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  #sb-top .sb-mobile-dock-right svg {
+    transform: scaleX(-1);
+  }
+
+  #sb-top .sb-mobile-dock-button[aria-expanded="true"] {
+    background: var(--ui-surface-hover-background-color);
+  }
+
+  #sb-top .sb-mobile-dock-button:hover {
+    background: var(--ui-surface-hover-background-color);
+  }
+
+  #sb-top:has(.sb-mobile-dock-left) .main .inner .wrapper {
+    padding-left: 8px;
+  }
+
+  #sb-top:has(.sb-mobile-dock-right) .main .inner .wrapper {
+    padding-right: 8px;
+  }
+
+  /* Let the hamburger fly-out escape the top bar's scroll container */
+  #sb-top .main {
+    overflow: visible;
+  }
+
+  #sb-top .cm-scroller:has(.hamburger) {
+    position: relative;
+  }
+
+  #sb-top .sb-actions.hamburger {
+    width: 2.8rem;
+    margin-top: 2px;
+    background: color-mix(in srgb,
+        var(--top-background-color) 90%,
+        transparent);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+    flex-direction: column;
+    align-items: center;
+    z-index: 10;
+    transition:
+      max-height 0.3s ease-in-out,
+      box-shadow 0.3s ease-in-out;
+
+    max-height: 2.2rem;
+
+    button {
+      &.expander {
+        display: initial;
+      }
+
+      &:not(.sb-code-copy-button) {
+        display: block;
+        height: 1.8rem;
+        text-align: center;
+        margin: 4px 0;
+        padding: 4px 0;
+      }
+
+      &:not(:first-of-type) {
+        margin: 8px 0;
+        opacity: 0;
+        transform: translateY(-10px);
+        transition:
+          opacity 0.3s ease-in-out,
+          transform 0.3s ease-in-out;
+      }
+    }
+
+    &.open:hover {
+      max-height: calc(100vh - 24px);
+
+      button {
+        opacity: 1;
+        transform: translateY(0) translateX(0);
+      }
+    }
+  }
+
+  #sb-top .sb-actions.bottom-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    padding: 10px 0;
+    background: var(--top-background-color);
+    width: 100vw;
+    box-shadow: 0px 4px 8px black;
+    justify-content: space-around;
+
+    button {
+      padding: 1em;
+      margin: 0;
+      height: unset;
+      width: unset;
+
+      svg {
+        margin-bottom: -5px;
+      }
+    }
+  }
+}
+
+.sb-notifications {
+  position: fixed;
+  pointer-events: none;
+  left: calc(var(--sb-editor-pane-left, 0px) + max(20px,
+      (var(--sb-editor-pane-width, 100vw) - var(--#{"editor-width"})) / 2 + 20px));
+  right: calc(100vw - var(--sb-editor-pane-left, 0px) - var(--sb-editor-pane-width, 100vw) + max(20px,
+      (var(--sb-editor-pane-width, 100vw) - var(--#{"editor-width"})) / 2 + 20px));
+  top: 60px;
+
+  font-size: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+
+  >div {
+    pointer-events: auto;
+    padding: 3px 8px;
+    margin-bottom: 3px;
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sb-notification-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+
+    .sb-button {
+      font-size: 0.85em;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
+  }
+
+  .sb-notification-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1.1em;
+    padding: 0 2px;
+    opacity: 0.7;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+}

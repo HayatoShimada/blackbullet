@@ -1,0 +1,43 @@
+[package]
+name = "sb"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "sb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sb"
+path = "src/main.rs"
+
+[dependencies]
+silverbullet-server-common = { path = "../../server-common" }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+open = "5"
+tempfile = { workspace = true }
+globset = "0.4"
+similar = "3"
+
+[build-dependencies]
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Only for `find_chrome()`, so the runtime e2e test skips cleanly on machines
+# without a browser instead of failing.
+silverbullet-server-runtime-chrome = { path = "../../server-runtime-chrome" }
+# `cookies` is declared here rather than relied on from workspace feature
+# unification: `bin/silverbullet` enables it, which is enough for a whole-
+# workspace build but leaves `cargo clippy -p sb` without
+# `ClientBuilder::cookie_store` (used by the multi-space runtime e2e test).
+reqwest = { workspace = true, features = ["cookies"] }

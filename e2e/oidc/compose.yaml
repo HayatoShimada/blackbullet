@@ -1,0 +1,20 @@
+services:
+  pocket-id:
+    image: ghcr.io/pocket-id/pocket-id:v2.14.0@sha256:01540977dcf4c7b41b1159f34d68e4632f2658d62790e460ca65a42722b13c4a
+    environment:
+      APP_URL: ${OIDC_ISSUER_ORIGIN:?}
+      ENCRYPTION_KEY: ${OIDC_ENCRYPTION_KEY:?}
+      ANALYTICS_DISABLED: "true"
+      VERSION_CHECK_DISABLED: "true"
+      GEOLITE_DB_URL: ""
+      TRUST_PROXY: "true"
+    ports:
+      - "127.0.0.1:${OIDC_PROVIDER_PORT:?}:1411"
+    volumes:
+      - provider-data:/app/data
+    networks:
+      - fixture
+networks:
+  fixture: {}
+volumes:
+  provider-data:

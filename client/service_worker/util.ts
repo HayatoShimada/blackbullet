@@ -1,0 +1,39 @@
+export async function unregisterServiceWorkers() {
+  if (navigator.serviceWorker) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const registration of registrations) {
+      await registration.unregister();
+      console.log("Service worker unregistered");
+    }
+  } else {
+    console.error("No service worker found to unregister");
+  }
+}
+
+export function flushCachesAndUnregisterServiceWorker() {
+  console.log("Going to flush the caches and unregister the service worker");
+  return new Promise<void>((resolve) => {
+    if (!navigator.serviceWorker?.controller) {
+      console.log("No service worker active");
+      return resolve();
+    }
+
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data.type === "cacheFlushed") {
+        console.log("Cache flushed");
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
+            console.log("Service worker unregistered");
+            resolve();
+          }
+        });
+      }
+    });
+
+    navigator.serviceWorker.ready.then((registration) => {
+      console.log("Sending request to flush cache");
+      registration.active!.postMessage({ type: "flush-cache" });
+    });
+  });
+}

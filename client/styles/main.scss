@@ -1,0 +1,289 @@
+@use "tokens";
+@use "editor";
+@use "modals";
+@use "theme";
+@use "colors";
+@use "top";
+@use "xray";
+@use "components";
+// Navigator overrides rely on source order after components; its partials
+// follow for the same reason.
+@use "navigator";
+@use "revision_preview";
+@use "dock_menu";
+@use "page_widget";
+@use "view_content";
+@use "../capture/capture";
+@use "keyboard_bar";
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  padding: 0;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--top-background-color);
+}
+
+#sb-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: var(--root-background-color);
+}
+
+.sb-panel {
+  flex: 1;
+}
+
+.sb-bottom-iframe {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--editor-widget-background-color);
+  border-radius: 4px;
+}
+
+.sb-top-iframe {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--editor-widget-background-color);
+  border-radius: 4px;
+}
+
+#sb-main {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+  height: 0;
+
+  .sb-panel {
+    flex: 1;
+  }
+}
+
+#sb-editor {
+  flex: 2;
+  height: 100%;
+
+  width: 100%;
+
+  container-type: inline-size;
+  container-name: sb-editor-col;
+
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+}
+
+#sb-editor.hide-cm {
+  .cm-editor {
+    display: none !important;
+  }
+}
+
+.sb-media-viewer {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  height: 100%;
+  padding: 1rem;
+  overflow: auto;
+  color: var(--root-color);
+  background: var(--root-background-color);
+
+  > button {
+    align-self: flex-end;
+    flex-shrink: 0;
+  }
+
+  > img,
+  > video {
+    min-height: 0;
+    max-height: calc(100% - 4rem);
+    object-fit: contain;
+  }
+
+  > audio {
+    width: min(100%, 40rem);
+    margin: auto;
+  }
+
+  > object {
+    width: 100%;
+    flex: 1;
+    min-height: 20rem;
+  }
+}
+
+.sb-bhs {
+  height: 300px;
+  width: 100%;
+  z-index: 10;
+
+  .sb-panel {
+    height: 100%;
+  }
+}
+
+.sb-hidden {
+  display: none;
+}
+
+// Keep 600px in step with `MOBILE_MEDIA_QUERY` in `client/lib/mobile.ts`.
+@media only screen and (max-width: 600px) {
+  #sb-main {
+    position: relative;
+  }
+
+  // Drawers overlay the editor, leaving a strip visible on the other side.
+  #sb-main .sb-nav-root-lhs,
+  #sb-main .sb-nav-root-rhs {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: calc(100% - 44px);
+    z-index: 15;
+    border: 0;
+    flex: none !important;
+    box-shadow: 0 0 18px rgba(0, 0, 0, 0.18);
+  }
+
+  #sb-main .sb-nav-root-lhs {
+    left: 0;
+  }
+
+  #sb-main .sb-nav-root-rhs {
+    right: 0;
+  }
+
+  // Drawers reserve no title space because they overlay the editor.
+  #sb-top .sb-nav-spacer {
+    display: none;
+  }
+}
+
+// Full-screen dim behind a "modal" panel, matching the <dialog> backdrop used
+// by the filter-box / prompt / confirm modals (.sb-modal-box).
+.sb-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background-color: var(--modal-backdrop-color);
+}
+
+.sb-modal {
+  position: absolute;
+  border: var(--modal-border-color) 1px solid;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+
+  // Not `visibility: hidden`: the panel focuses its own filter input as it
+  // activates, and an element in a visibility-hidden subtree can't take
+  // focus at all.
+  &.sb-modal-paint-pending {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sb-panel {
+    height: 100%;
+
+    iframe {
+      background-color: initial;
+    }
+  }
+
+  &.sb-modal-centered {
+    left: 0;
+    right: 0;
+    width: 700px;
+    max-width: 90%;
+    margin-inline: auto;
+    box-sizing: border-box;
+    // Height comes from the panel's own content, so the box shrinks with it;
+    // `bottom` is deliberately unset, and the inline `max-height` beside it
+    // is only the viewport backstop.
+    bottom: auto;
+    height: auto;
+  }
+
+  @media only screen and (max-width: 600px) {
+    // On narrow screens override the inline `inset` that plugs pass to
+    // showPanel("modal", N) so the modal sits closer to the edges. It keeps
+    // its rounded corners since (unlike .sb-modal-box) it isn't edge-to-edge.
+    inset: 8px !important;
+    top: calc(8px + var(--sb-standalone-top-offset, 0px)) !important;
+
+    &.sb-modal-centered {
+      top: calc(8px + var(--sb-top-height) + var(--sb-standalone-top-offset, 0px)) !important;
+      bottom: auto !important;
+      left: 8px !important;
+      right: 8px !important;
+      width: auto;
+      max-width: none;
+      max-height: calc(100% - 16px - var(--sb-top-height) - var(--sb-standalone-top-offset, 0px)) !important;
+    }
+  }
+}
+
+.sb-page-prefix {
+  display: flex;
+  align-items: baseline;
+  flex: 0 0 auto;
+  text-align: left;
+  padding-top: 3px;
+  font-family: var(--ui-font);
+  white-space: pre-wrap;
+  height: 36px;
+  line-height: 36px;
+  overflow: hidden;
+}
+
+.sb-page-decoration-icon {
+  display: inline-flex;
+  flex: none;
+  margin-right: 0.25em;
+  vertical-align: -0.125em;
+
+  svg {
+    width: 1em;
+    height: 1em;
+  }
+}
+
+.sb-panel {
+  iframe {
+    display: block;
+    background-color: var(--root-background-color);
+    border: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+  }
+}
+
+.sb-preview {
+  position: relative;
+}
+
+.sb-markdown-toolbar {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.2s;
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.sb-markdown-toolbar:hover {
+  opacity: 1;
+}

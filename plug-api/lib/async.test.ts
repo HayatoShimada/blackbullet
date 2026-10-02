@@ -1,0 +1,185 @@
+import { expect, test } from "vitest";
+import {
+  batchRequests,
+  processWithConcurrency,
+  PromiseQueue,
+  sleep,
+} from "./async.ts";
+
+test("PromiseQueue test", async () => {
+  const q = new PromiseQueue();
+  let r1RanFirst = false;
+  const r1 = q.runInQueue(async () => {
+    await sleep(10);
+    r1RanFirst = true;
+    return 1;
+  });
+  const r2 = q.runInQueue(async () => {
+    await sleep(4);
+    return 2;
+  });
+  expect(await Promise.all([r1, r2])).toEqual([1, 2]);
+  expect(r1RanFirst).toEqual(true);
+  let wasRun = false;
+  await q.runInQueue(async () => {
+    await sleep(4);
+    wasRun = true;
+  });
+  expect(wasRun).toEqual(true);
+});
+
+test("processWithConcurrency test - basic functionality", async () => {
+  const items = [1, 2, 3, 4, 5];
+  const results = await processWithConcurrency(
+    items,
+    async (item) => {
+      await sleep(10);
+      return item * 2;
+    },
+    2,
+  );
+  expect(results).toEqual([2, 4, 6, 8, 10]);
+});
+
+test("processWithConcurrency test - maintains order", async () => {
+  const items = [1, 2, 3, 4, 5];
+  const startTimes: number[] = [];
+  const endTimes: number[] = [];
+
+  const results = await processWithConcurrency(
+    items,
+    async (item) => {
+      const start = Date.now();
+      startTimes[item - 1] = start;
+      // Longer sleep for higher numbers to test order preservation
+      await sleep(item * 5);
+      endTimes[item - 1] = Date.now();
+      return `item-${item}`;
+    },
+    2,
+  );
+
+  expect(results).toEqual(["item-1", "item-2", "item-3", "item-4", "item-5"]);
+});
+
+test("processWithConcurrency test - concurrency limit", async () => {
+  const items = [1, 2, 3, 4, 5, 6];
+  const activeCount = { value: 0 };
+  const maxActive = { value: 0 };
+
+  const results = await processWithConcurrency(
+    items,
+    async (item) => {
+      activeCount.value++;
+      maxActive.value = Math.max(maxActive.value, activeCount.value);
+      await sleep(20);
+      activeCount.value--;
+      return item;
+    },
+    3,
+  );
+
+  expect(results).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(maxActive.value <= 3).toEqual(true);
+});
+
+test("processWithConcurrency test - empty array", async () => {
+  const results = await processWithConcurrency(
+    [],
+    (item) => Promise.resolve(item),
+    2,
+  );
+  expect(results).toEqual([]);
+});
+
+test("processWithConcurrency test - concurrency higher than item count", async () => {
+  const items = [1, 2, 3];
+  const results = await processWithConcurrency(
+    items,
+    async (item) => {
+      await sleep(10);
+      return item + 10;
+    },
+    10, // Higher than items.length
+  );
+  expect(results).toEqual([11, 12, 13]);
+});
+
+test("processWithConcurrency test - error handling", async () => {
+  const items = [1, 2, 3, 4, 5];
+
+  try {
+    await processWithConcurrency(
+      items,
+      (item) => {
+        if (item === 3) {
+          throw new Error(`Error processing item ${item}`);
+        }
+        return Promise.resolve(item * 2);
+      },
+      2,
+    );
+    expect(false).toEqual(true); // Should have thrown an error
+  } catch (error) {
+    expect(
+      error instanceof Error &&
+        error.message.includes("Error processing item 3"),
+    ).toBeTruthy();
+  }
+});
+
+test("processWithConcurrency test - performance with concurrency", async () => {
+  const items = Array.from({ length: 6 }, (_, i) => i + 1);
+  const delay = 30;
+
+  // Test with concurrency of 1 (sequential)
+  const start1 = Date.now();
+  await processWithConcurrency(
+    items,
+    async (item) => {
+      await sleep(delay);
+      return item;
+    },
+    1,
+  );
+  const sequential = Date.now() - start1;
+
+  // Test with concurrency of 3 (parallel)
+  const start2 = Date.now();
+  await processWithConcurrency(
+    items,
+    async (item) => {
+      await sleep(delay);
+      return item;
+    },
+    3,
+  );
+  const parallel = Date.now() - start2;
+
+  // Parallel should be significantly faster than sequential
+  // Allow some margin for timing variations
+  expect(parallel < sequential * 0.8).toBeTruthy(); // `Parallel (${parallel}ms) should be faster than sequential (${sequential}ms)`
+});
+
+test("Batch test", async () => {
+  const elements = Array.from(Array(100).keys());
+  const multiplied = await batchRequests(
+    elements,
+    async (batch) => {
+      await sleep(2);
+      // Batches should be 9 or smaller (last batch will be smaller)
+      expect(batch.length <= 9).toBeTruthy();
+      return batch.map((e) => e * 2);
+    },
+    9,
+  );
+  expect(multiplied).toEqual(elements.map((e) => e * 2));
+  const multiplied2 = await batchRequests(
+    elements,
+    (batch) => {
+      return Promise.resolve(batch.map((e) => e * 2));
+    },
+    10000,
+  );
+  expect(multiplied2).toEqual(elements.map((e) => e * 2));
+});

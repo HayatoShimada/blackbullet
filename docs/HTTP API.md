@@ -1,0 +1,90 @@
+---
+references:
+- bin/silverbullet/src/server.rs
+- server-common/src/space/http.rs
+- server/src/handlers/revisions.rs
+- server/src/multi/dashboard.rs
+- server/src/multi/admin_api.rs
+---
+The server API is relatively small. The client primarily communicates with the server for file “CRUD” (Create, Read, Update, Delete) style operations.
+
+All API requests from the client will always set the `X-Sync-Mode` request header set to `true`. The server _will_ use this fact to distinguish between requests coming from the client and regular e.g. `GET` requests from the browser (through navigation) and redirect appropriately (for instance to the UI URL associated with a specific `.md` file).
+
+# Authentication
+When authentication is enabled, most endpoints require a valid session cookie (JWT) or a Bearer token. The following paths are excluded from auth: `/service_worker.js`, `/.client/*`, `/.auth`, `/.ping`.
+
+* `GET /.auth`: Serves the login page. Returns 403 if authentication is not enabled.
+* `POST /.auth`: Authenticates a user. Expects form fields: `username`, `password`, `rememberMe` (optional), `from` (optional redirect path). Returns JSON `{"status":"ok","redirect":"..."}` on success or `{"status":"error","error":"..."}` on failure. Implements lockout after repeated failed attempts.
+* `GET /.logout`: Clears authentication cookies and redirects to `/.auth`.
+* **Bearer token**: When [[Install/Configuration#Authentication|SB_AUTH_TOKEN]] is set, requests can authenticate via the `Authorization: Bearer <token>` header instead of cookies.
+
+# Accounts (multi-space mode)
+In [[Dashboard|multi-space mode]] every account carries a profile — a display name and email, used for attribution — alongside its login credentials. These live under the `/.dashboard` prefix and require the session cookie described in [[Dashboard#Dashboard access]].
+
+* `GET /.dashboard/api/profile`: The caller's own profile: `{"username", "admin", "fullName", "email"}`. `fullName`/`email` are `null` until set. `401` without a session.
+* `PUT /.dashboard/api/profile`: Sets the caller's own profile. Body: `{"fullName": string, "email": string}`. The username always comes from the session — there is no way to address another account through this endpoint. An empty string clears a field. `400` with `{"errors":[{"field", "message"}]}` if a value contains `<`, `>`, a line break, or (for `email`) whitespace.
+* `POST /.dashboard/api/admin/users` (admin only): Creates an account. Body: `{"username", "password", "admin", "fullName", "email"}` — `fullName`/`email` are optional, validated the same way.
+* `PUT /.dashboard/api/admin/users/<name>/profile` (admin only): Sets another account's profile. Same body and validation as `PUT /.dashboard/api/profile`.
+
+# Profile
+* `GET /.accounts`: Every account with access to this space, as `[{"username", "fullName", "me"}]`, with the caller's own entry marked `me`. `username` is `null` where the deployment keeps no accounts (the caller is still reported, marked `me`, so their name is known even though they are nobody the space can address), `fullName` is omitted when unset, and `me` is omitted when false.
+
+# File system
+The space file system is exposed under the `/.fs` prefix. The [[CLI#`fs`: remote files|`sb fs` CLI commands]] use these endpoints directly, including metadata and conditional writes, without requiring the Runtime API:
+
+* `GET /.fs` will return a full listing of all files in your space including metadata like when the file was last modified, as well as permissions in JSON format. This is primarily used for sync purposes with the client.
+* `GET /.fs/*`: _Reads_ and returns the content of the file at the given path. This means that if you `GET /.fs/index.md` you will receive the content of your `index` page. If the optional `X-Get-Meta` _request header_ is set, the server does not _need to_ return the body of the file (but it can). The `GET` _response_ will have a few additional SB-specific headers:
+  * (optional) `X-Last-Modified` the last modified time of the file as a UNIX timestamp in ms since the epoch (as coming from `Data.now()`). This timestamp _has_ to match the `lastModified` listed for this file in `/.fs` otherwise syncing issues may occur. When this header is missing, frequent polling-based sync will be disabled for this file.
+  * (optional) `X-Created` the created time of the file as a UNIX timestamp in ms since the epoch (as coming from `Data.now()`).
+  * (optional) `X-Permission`: either `rw` or `ro` which will change whether the editor opens in read-only or edit mode. When missing, `ro` is assumed.
+  * (optional) `X-Content-Length`: which will be the same as `Content-Length` except if the request was sent with a `X-Get-Meta` header and the body is not returned (then `Content-Length` will be `0` and `X-Content-Length` will be the size of the file)
+* `PUT /.fs/*`: The same as `GET` except that it takes the body of the request and _writes_ it to a file.
+* `DELETE /.fs/*`: Again the same, except this will _delete_ the given file.
+
+## Conditional writes
+`GET`/`PUT` responses carry an `ETag` (`"sha256:<hash>"`) reflecting the file’s current content. `PUT` and `DELETE` accept the standard conditional headers to guard against overwriting a change you haven’t seen:
+
+* `If-Match: "sha256:<hash>"`: only write/delete if the file’s current content still matches that hash.
+* `If-None-Match: *`: only write if the file doesn’t exist yet (create-only).
+
+A precondition that doesn't hold returns `412 Precondition Failed` instead of silently overwriting or deleting whatever is actually there.
+
+This is the same mechanism the built-in clients use to drive the automatic merging and conflict handling described in [[Collaboration]].
+
+# Revisions
+Present when [[Revisions]] are enabled for the space: every endpoint below answers `404` with `{"error": "revisions disabled"}` when they are not. A `rev` is always a full 40-character commit hash — anything else is a `404`.
+
+* `GET /.revisions/`: The space-wide commit log as JSON: `mode`, `commits` (each with `rev`, `timestamp`, `author`, `message`, `files`, `added` and `removed`), `uncommitted` (paths differing from HEAD right now) and `more`. Takes optional `before` (page back from this revision), `limit` (default 50, capped at 200) and `q` (only commits whose message or author contains this phrase) query parameters.
+* `POST /.revisions/`: Commits everything outstanding immediately. Takes no body, returns `{"committed": true|false}`. Returns `409` for a space that is not in Managed mode.
+* `GET /.revisions/?rev=<hash>&to=<hash|HEAD|WORKING>`: A summary of everything that changed between `rev` and `to` as JSON: `from`, `to`, `files` (each with `path`, `status`, `added` and `removed`) and `authors`. `to=WORKING` reaches all the way to what's on disk, uncommitted changes included.
+* `GET /.revisions/<path>`: One file's revisions as JSON: `mode`, `uncommitted` (whether what is on disk differs from the last commit), `revisions` and `more`. Takes the same `before`/`limit` parameters.
+* `GET /.revisions/<path>?rev=<hash>`: The content of that file as it was at that revision, served with the file's own content type.
+* `GET /.revisions/<path>?rev=<hash>&format=diff`: A unified diff of what that revision changed in that file, as `text/plain`. `404` when the revision has nothing to diff against a parent (a merge commit).
+* `GET /.revisions/<path>?format=diff`: With no `rev`, the *uncommitted* change instead — HEAD versus what is on disk, as `text/plain`. A file that has never been committed reads as wholly added. `404` when it matches HEAD after all.
+
+# RPC
+Some functionality is exposed as RPC-style calls
+
+* `GET /.ping`: Returns 200 with body `OK` if the server is available.
+* `POST /.shell`: Run a shell command on the server side and return the result.
+* `POST /.logs`: Accepts a JSON array of log entry objects with fields `source`, `level`, `message`, and `timestamp`. The server logs these with the client's IP. Returns `OK`.
+* `* /.proxy/<host[:port]>/path`: Proxy an HTTP request to avoid CORS issues.
+  * Blocked in read-only mode (returns 405).
+  * The URI does not include a scheme — it is auto-detected: `http://` is used for `localhost`, `127.0.0.1`, bare IP addresses, and `host.docker.internal`; `https://` is used for everything else.
+  * Request headers prefixed with `X-Proxy-Header-` have the prefix stripped and are forwarded to the upstream server.
+  * Upstream response headers are returned with an `x-proxy-header-` prefix.
+  * The `x-proxy-status-code` header contains the actual upstream HTTP status code; the proxy response itself always returns 200 to avoid interference.
+
+## Runtime API
+Enabled automatically when Chrome/Chromium is detected (set `SB_RUNTIME_API=0` to disable). See [[Runtime API]] for full documentation, setup instructions, and examples.
+
+# Client
+* `GET /.config`: Retrieve client configuration, JSON with the following keys:
+  * `readOnly`: Run the client in read-only mode
+  * `spaceFolderPath`: Path of the space (used to prefix client database names to support switching space folders)
+  * `indexPage`: name of the index page
+  * `logPush`: whether the client should push logs to the server via `/.logs`
+  * `enableClientEncryption`: true when authentication is enabled, offering client-side encryption as an option
+* `GET /.client/*`: Retrieve files implementing the client
+* `GET /.client/manifest.json`: Dynamically generated PWA manifest containing the space name and description (not served from the static bundle).
+* `GET /*` (every other path) will serve the HTML of the SilverBullet UI

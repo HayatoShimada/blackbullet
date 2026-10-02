@@ -1,0 +1,25 @@
+# Native build of the fork (used on the Pi: no CI-supplied binaries).
+# Slim variant (no Chromium); add the runtime layer later if server-side Lua is needed.
+FROM node:24-bookworm AS web
+WORKDIR /src
+COPY . .
+RUN npm ci && npm run build && npm run build:plug-compile
+
+FROM rust:1-alpine AS server
+RUN apk add --no-cache build-base pkgconf perl \
+ && ln -s /usr/bin/gcc /usr/local/bin/aarch64-linux-gnu-gcc \
+ && ln -s /usr/bin/ar /usr/local/bin/aarch64-linux-gnu-ar
+WORKDIR /src
+COPY --from=web /src /src
+RUN cargo build --release -p silverbullet
+
+FROM alpine:latest
+RUN apk add --no-cache git curl bash tini openssh-client
+ENV SB_HOSTNAME=0.0.0.0 SB_PORT=3000
+EXPOSE 3000
+HEALTHCHECK CMD curl --fail "http://localhost:$SB_PORT/.instance" || exit 1
+RUN echo "" > /etc/group && echo "root:x:0:0:root:/root:/bin/sh" > /etc/passwd
+ADD ./docker-entrypoint.sh /docker-entrypoint.sh
+COPY --from=server /src/target/release/silverbullet /silverbullet
+RUN chmod +x /silverbullet /docker-entrypoint.sh
+ENTRYPOINT ["/sbin/tini", "--", "/docker-entrypoint.sh"]

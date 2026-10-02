@@ -1,0 +1,69 @@
+#getting-started
+
+While silverBullet works over plain HTTP on a LAN IP or hostname in online-only mode, _HTTPS_ enables the full feature set, including offline use and local encryption. This page documents a few deployment options.
+
+> **note** Note
+> This is a browser enforced restriction: browsers restrict service workers, crypto, and programmatic clipboard access to secure contexts. This is why the recommended deployment model is TLS, but SilverBullet will make a best effort to work without it.
+
+# LAN HTTP (no TLS)
+Open your server using its LAN address, for example `http://192.168.1.20:3000`. The server must listen on an address reachable from your LAN. Editing, indexing, queries, Space Lua, plugs, attachments, and local password login remain available.
+
+The limitations are:
+* The server must remain reachable. Offline startup, cached file access, and offline synchronization are unavailable. If saving fails, keep the editor open until it can save.
+* Local data encryption and OIDC/SSO sign-in are disabled. Use a local account with a password. The local index is stored unencrypted in the browser.
+* Browser-based CLI authorization still requires HTTPS or loopback.
+* Text copy buttons use the browser's legacy copying support. Normal keyboard copy/paste remains available. Programmatic image/binary copying requires HTTPS or localhost.
+
+And obviously, HTTP does not encrypt or authenticate network traffic: credentials, notes, and application code can be intercepted or modified by someone with access to the connection.
+
+# localhost (http)
+If you run SilverBullet _locally_ on your machine, this is the easiest option. Everything runs fine as long as the browser sees `localhost` or `127.0.0.1` appear in the URL, even with `http://`.
+
+The obvious drawback of this approach is that your SilverBullet instance is _only accessible from the machine you run it on_.
+
+# TLS (https)
+For this, you need to get your hands on a TLS certificate.
+
+A few options:
+
+## Pangolin, Authelia, Authentik
+If you’re _already_ using a proxy like [Pangolin](https://pangolin.net/), [Authelia](https://www.authelia.com/) or [Authentik](https://goauthentik.io/), you are likely already set up with everything you need and can just reverse-proxy a subdomain to SilverBullet. Be sure to check the notes on using a [[Authentication Proxy]] on how to configure this.
+
+## Tailscale SSL certificate
+If you’re a [Tailscale](https://tailscale.com/) user, this a simple solution. If not, you may consider becoming one — it’s a solid service, very friendly to self hosters, and _free_ for this use case.
+
+Part of the [guide to setup SilverBullet on Linux](https://community.silverbullet.md/t/install-silverbullet-on-a-64-bit-debian-ubuntu-raspianos-internet-accessible-via-tailscale/48) are instructions on how to install  (a free service) and use it to expose a local server (like SilverBullet) locally on your VPN, or the Internet — a setup that gives you a `.ts.net` subdomain with TLS certificate.
+
+The advantage of this approach is that you have the choice to expose your SilverBullet to the wide Internet, or limit it to just your Tailscale VPN. The disadvantage is that you now rely on a third party (Tailscale).
+
+## Cloud VM with Caddy
+There a various affordable providers of cloud servers that can be used to self-host SilverBullet in the cloud. It relatively easy to get a TLS certificate issued on a publicly exposed server.
+
+The recommended approach for this requires two things:
+
+1. An Internet exposed cloud server. Affordable options include:
+   * [Hetzner Cloud](https://hetzner.cloud/?ref=6jW03LSGlJKf) (referral link, EU based) starting from about 3.5 euro/month.
+   * [Vultr](https://www.vultr.com/products/cloud-compute/) starting from about $2.5/month.
+2. A domain name of your own that you can configure DNS records on to point to your server, or using a service like [DuckDNS](https://www.duckdns.org/) which gives you a `*.duckdns.org` sub-domain for free.
+
+After deploying SilverBullet on the VM (with [[Authentication]] enabled, obviously), you can deploy [Caddy](https://caddyserver.com/) next to it as a reverse proxy. Caddy can automatically request TLS certificates using [Let’s Encrypt](https://letsencrypt.org/).
+
+For this, [install Caddy](https://caddyserver.com/docs/install) into your VM. Then, in your Caddyfile (usually located `/etc/caddy/Caddyfile`) put:
+
+```
+silverbullet.mydomain.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Replace `silverbullet.mydomain.com` with any domain that you have configured to resolve to the IP of your server, and the `:3000` port with whatever local port you run SilverBullet on.
+
+Restart Caddy and access SilverBullet via `https://silverbullet.mydomain.com`. On first load, Caddy will work with Let’s Encrypt to issue a TLS certificate and install (and update) it automatically, this may take a minute, so be patient.
+
+## Community guides
+For end-to-end walkthroughs of specific setups, the community has written several [guides](https://community.silverbullet.md/c/guides/6):
+
+* [Cloudflare Zero Trust](https://community.silverbullet.md/t/use-silverbullet-with-cloudflare-zero-trust/3618): requires a (free) Cloudflare account and domain name, covers TLS and tunneling.
+* [Tailscale](https://community.silverbullet.md/t/install-silverbullet-on-a-64-bit-debian-ubuntu-raspianos-internet-accessible-via-tailscale/48): requires a (free) Tailscale account, covers TLS and tunneling and VPN access.
+* [Caddy and self-signed certificates](https://community.silverbullet.md/t/level-1-local-https-with-caddy-and-self-signed-certificates/3531): no accounts required, but requires manually accepting certificates.
+* [Twingate](https://community.silverbullet.md/t/level-1-access-your-silverbullet-from-outside-your-home-network-using-twingate/3541): requires a Twingate account, covers TLS and tunneling.

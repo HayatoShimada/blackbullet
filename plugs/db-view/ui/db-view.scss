@@ -1,0 +1,205 @@
+// The db view's look: the shared panel palette (`--ui-*`) does the theming, so
+// light, dark and the explicit theme attribute all work without a token here.
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-family: var(--ui-font);
+  font-size: 14px;
+  color: var(--ui-surface-color);
+  background: transparent;
+
+  --db-overdue: #c0392b;
+  --db-today: #d35400;
+  --db-soon: #b7791f;
+  --db-drop: var(--ui-accent-color, #3a6fd8);
+}
+
+body { margin: 0; }
+
+.db-app { padding: 4px 0 28px; } // the widget frame hides the last few pixels
+
+.db-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 8px;
+  flex-wrap: wrap;
+}
+
+.db-title { font-size: 15px; }
+.db-count { color: var(--ui-surface-subtle-color); font-size: 12px; }
+
+.db-tabs { display: flex; gap: 2px; margin-left: auto; }
+
+.db-tab, .db-btn {
+  font: inherit;
+  color: inherit;
+  background: var(--ui-surface-background-color);
+  border: 1px solid var(--ui-surface-border-color);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.db-tab.db-active {
+  background: var(--ui-accent-color, #3a6fd8);
+  border-color: var(--ui-accent-color, #3a6fd8);
+  color: #fff;
+}
+.db-btn:disabled { opacity: 0.5; cursor: default; }
+
+.db-input {
+  font: inherit;
+  color: inherit;
+  background: var(--ui-surface-background-color);
+  border: 1px solid var(--ui-surface-border-color);
+  border-radius: 6px;
+  padding: 2px 6px;
+  min-width: 0;
+}
+.db-filter { width: 140px; }
+
+.db-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ui-surface-border-color);
+  background: var(--ui-surface-section-background-color, var(--ui-surface-background-color));
+}
+.db-notice-error { border-color: var(--db-overdue); color: var(--db-overdue); }
+
+.db-link { color: var(--ui-accent-color, #3a6fd8); cursor: pointer; text-decoration: none; }
+.db-link:hover { text-decoration: underline; }
+
+.db-empty { color: var(--ui-surface-subtle-color); }
+.db-empty-view { padding: 16px; text-align: center; color: var(--ui-surface-subtle-color); }
+
+// Table
+.db-table-scroll { overflow-x: auto; }
+.db-table { border-collapse: collapse; width: 100%; }
+.db-table th, .db-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ui-surface-border-color);
+  vertical-align: middle;
+}
+.db-th {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ui-surface-subtle-color);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.db-th:hover { color: var(--ui-surface-color); }
+.db-editable:hover { background: var(--ui-surface-hover-background-color); }
+.db-editable:focus-visible { outline: 2px solid var(--db-drop); outline-offset: -2px; }
+.db-cell-date, .db-cell-number { white-space: nowrap; }
+.db-row-done { opacity: 0.55; }
+.db-check { cursor: pointer; }
+
+.db-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.db-tag, .db-chip {
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--ui-surface-hover-background-color);
+  border: 1px solid var(--ui-surface-border-color);
+}
+
+.db-date { white-space: nowrap; }
+.db-due-overdue { color: var(--db-overdue); font-weight: 600; }
+.db-due-today { color: var(--db-today); font-weight: 600; }
+.db-due-soon { color: var(--db-soon); }
+
+.db-status {
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--ui-surface-hover-background-color);
+  border: 1px solid var(--ui-surface-border-color);
+  font-size: 12px;
+}
+.db-status-active { border-color: #2e8b57; color: #2e8b57; }
+.db-status-done { color: var(--ui-surface-subtle-color); }
+
+// Board
+.db-board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, 1fr);
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px;
+}
+.db-column, .db-undated {
+  background: var(--ui-surface-section-background-color, var(--ui-surface-hover-background-color));
+  border: 1px solid var(--ui-surface-border-color);
+  border-radius: 8px;
+  min-height: 90px;
+}
+.db-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+.db-column-body, .db-undated-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 6px 8px;
+  min-height: 40px;
+}
+.db-drop { outline: 2px dashed var(--db-drop); outline-offset: -2px; }
+
+.db-card {
+  background: var(--ui-surface-background-color);
+  border: 1px solid var(--ui-surface-border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: grab;
+}
+.db-card:active { cursor: grabbing; }
+.db-dragging { opacity: 0.4; }
+.db-card-title { display: block; font-weight: 600; margin-bottom: 2px; }
+.db-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+
+// Calendar
+.db-cal-nav { display: flex; align-items: center; gap: 6px; padding: 0 2px 8px; }
+.db-cal-title { min-width: 7em; text-align: center; }
+.db-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--ui-surface-border-color);
+  border-left: 1px solid var(--ui-surface-border-color);
+}
+.db-cal-dow {
+  text-align: center;
+  padding: 2px;
+  color: var(--ui-surface-subtle-color);
+  border-right: 1px solid var(--ui-surface-border-color);
+  border-bottom: 1px solid var(--ui-surface-border-color);
+}
+.db-cal-day {
+  min-height: 84px;
+  padding: 2px 3px 4px;
+  border-right: 1px solid var(--ui-surface-border-color);
+  border-bottom: 1px solid var(--ui-surface-border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.db-cal-day.db-out { background: var(--ui-surface-hover-background-color); color: var(--ui-surface-subtle-color); }
+.db-cal-day.db-today .db-cal-num { background: var(--ui-accent-color, #3a6fd8); color: #fff; border-radius: 10px; }
+.db-cal-num { align-self: flex-start; padding: 0 6px; font-size: 12px; }
+.db-cal-day .db-card { padding: 2px 6px; }
+.db-cal-day .db-card-title { font-size: 12px; margin: 0; }
+.db-cal-day .db-card-meta { display: none; }
+.db-undated { margin-top: 10px; }

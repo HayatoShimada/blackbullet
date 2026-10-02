@@ -1,0 +1,39 @@
+// Share bullets, task indents, and wiki links across panel and page widgets;
+// the containers supply their own typography and spacing. A mixin emits no
+// rules on @use, preserving the deliberate cascade order in main.scss.
+@mixin markdown-body {
+  ul {
+    list-style: none;
+  }
+
+  // \2022 is the unicode bullet. The negative margin pulls it into the space
+  // the width reserves, so wrapped text aligns past it.
+  ul li::before {
+    content: "\2022";
+    color: var(--editor-list-bullet-color);
+    display: inline-block;
+    width: 1em;
+    margin-left: -1em;
+  }
+
+  // Hanging-indent for task items so wrapped task text aligns with the
+  // first-line text (after the checkbox) instead of falling back under
+  // the bullet column.
+  li>.sb-task {
+    display: inline-block;
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: 1.7em;
+    text-indent: -1.7em;
+    vertical-align: top;
+  }
+
+  a.wiki-link {
+    border-radius: 5px;
+    padding: 0 5px;
+    margin: 0 -5px;
+    color: var(--editor-wiki-link-page-color);
+    background-color: var(--editor-wiki-link-page-background-color);
+    text-decoration: none;
+  }
+}

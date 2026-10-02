@@ -1,0 +1,446 @@
+import { expect, test } from "vitest";
+import { createMockSystem } from "../../plug-api/system_mock.ts";
+import {
+  atMentionComplete,
+  frontmatterAuthorComplete,
+  frontmatterRecipientComplete,
+  listIdentities,
+  parseDeclaredNames,
+  identityId,
+  spliceAtMention,
+} from "./identity.ts";
+
+/** A mock system whose deployment reports `accounts` and whose current user is
+ * `profile`. Both syscalls are overridden: the real ones need a live client. */
+function mockSpace(accounts: any[], profile: any = { username: "me" }) {
+  const mock = createMockSystem();
+  mock.system.registerSyscalls([], {
+    "system.listAccounts": () => accounts,
+    "system.getProfile": () => profile,
+  });
+  return mock;
+}
+
+/** What `indexRelations` emits for a page that mentions these names: one
+ * `identity` object per distinct name, carrying the page's own spelling. */
+async function indexMentions(page: string, aliases: string[]): Promise<void> {
+  const byRef = new Map<string, string>();
+  for (const alias of aliases) {
+    const ref = `@${alias.toLowerCase()}`;
+    if (!byRef.has(ref)) byRef.set(ref, alias);
+  }
+  await (globalThis as any).syscall(
+    "index.indexObjects",
+    page,
+    [...byRef].map(([ref, name]) => ({ ref, tag: "identity", name, page })),
+  );
+}
+
+test("identityId lowercases, so @Bob and @bob are one recipient", () => {
+  expect(identityId("Bob")).toBe("@bob");
+  expect(identityId("bob")).toBe("@bob");
+});
+
+test("accounts are recipients, labelled by full name", async () => {
+  mockSpace([
+    { username: "ada", fullName: "Ada Lovelace", me: false },
+    { username: "bob", me: false },
+  ]);
+  const listed = await listIdentities();
+  expect(listed).toEqual([
+    { name: "ada", id: "@ada", detail: "Ada Lovelace" },
+    { name: "bob", id: "@bob" },
+  ]);
+});
+
+test("your own account is labelled you, under your real username", async () => {
+  mockSpace([
+    { username: "ada", fullName: "Ada Lovelace", me: true },
+    { username: "bob", me: false },
+  ]);
+  expect(await listIdentities()).toEqual([
+    { name: "ada", id: "@ada", detail: "you" },
+    { name: "bob", id: "@bob" },
+  ]);
+});
+
+test("a nameless owner is addressable as self", async () => {
+  mockSpace([{ username: null, fullName: "Casey Example", me: true }]);
+  await indexMentions("Notes", ["Sales"]);
+  expect(await listIdentities()).toEqual([
+    { name: "Sales", id: "@sales" },
+    { name: "self", id: "@self", detail: "you" },
+  ]);
+});
+
+test("defined recipients carry their description", async () => {
+  const { config } = mockSpace([]);
+  config.set(["identities", "sales"], {
+    name: "sales",
+    description: "Sales team",
+  });
+  const listed = await listIdentities();
+  expect(listed.find((r) => r.name === "sales")).toEqual({
+    name: "sales",
+    id: "@sales",
+    detail: "Sales team",
+  });
+});
+
+test("an account wins the spelling over a definition of the same name", async () => {
+  const { config } = mockSpace([
+    { username: "ada", fullName: "Ada Lovelace", me: false },
+  ]);
+  config.set(["identities", "Ada"], { name: "Ada", description: "not this" });
+  const listed = await listIdentities();
+  expect(listed.filter((r) => r.id === "@ada")).toEqual([
+    { name: "ada", id: "@ada", detail: "Ada Lovelace" },
+  ]);
+});
+
+test("an unclaimed mentioned name is a recipient, spelled the way most pages write it", async () => {
+  mockSpace([]);
+  await indexMentions("Notes", ["Sales"]);
+  await indexMentions("Other", ["Sales"]);
+  await indexMentions("Third", ["sales"]);
+  const listed = await listIdentities();
+  expect(listed.find((r) => r.id === "@sales")).toEqual({
+    name: "Sales",
+    id: "@sales",
+  });
+});
+
+test("one page naming someone many times still counts once", async () => {
+  mockSpace([]);
+  // A page shouting "@sales" twenty times must not outvote two pages that
+  // spell it "@Sales" — the indexer emits one object per page per name.
+  await indexMentions("Loud", ["sales"]);
+  await indexMentions("A", ["Sales"]);
+  await indexMentions("B", ["Sales"]);
+  const listed = await listIdentities();
+  expect(listed.find((r) => r.id === "@sales")?.name).toBe("Sales");
+});
+
+test("a frontmatter-declared name is a known recipient", async () => {
+  mockSpace([]);
+  await indexMentions("Notes", ["sales"]);
+  const listed = await listIdentities();
+  expect(listed.map((r) => r.name)).toEqual(["sales"]);
+});
+
+test("spliceAtMention remove mode eats the mention and one adjacent space", () => {
+  const remove = (text: string, start: number, nickname = "petra") =>
+    spliceAtMention({
+      text,
+      range: [start, start + nickname.length + 1],
+      nickname,
+      mode: "remove",
+    });
+  // Leading space preferred, so no double space is left behind
+  expect(remove("Talked to @petra today", 10)).toBe("Talked to today");
+  // Start-of-line mention eats the trailing space instead
+  expect(remove("@petra called me", 0)).toBe("called me");
+  // Start-of-line via newline boundary too
+  expect(remove("Hi\n@petra called", 3)).toBe("Hi\ncalled");
+  // No adjacent space at all: just the mention goes
+  expect(remove("(@petra)", 1)).toBe("()");
+  // Mention at the very end
+  expect(remove("Talked to @petra", 10)).toBe("Talked to");
+  // CRLF text: the \r is not an eatable space
+  expect(remove("A\r\nTalked to @petra now\r\n", 13)).toBe(
+    "A\r\nTalked to now\r\n",
+  );
+  // Stale range: text returned unchanged
+  expect(remove("Talked to @petr today", 10)).toBe("Talked to @petr today");
+});
+
+test("spliceAtMention delete-host mode deletes a task/item line", () => {
+  const del = (text: string, start: number) =>
+    spliceAtMention({
+      text,
+      range: [start, start + "@petra".length],
+      nickname: "petra",
+      mode: "delete-host",
+    });
+  // A task line goes whole, including its trailing newline
+  expect(del("Intro.\n\n* [ ] Review @petra\nAfter.\n", 21)).toBe(
+    "Intro.\n\nAfter.\n",
+  );
+  // An indented item line: only that one line, children stay
+  const nested = "* parent\n  - child @petra\n  - sibling\n";
+  expect(del(nested, 19)).toBe("* parent\n  - sibling\n");
+  // A list line at the very end of the text, no trailing newline
+  expect(del("Intro.\n- ping @petra", 14)).toBe("Intro.\n");
+  // A solo list line between blanks takes one of them, no double blank left
+  expect(del("A\n\n* ping @petra\n\nB\n", 10)).toBe("A\n\nB\n");
+  // Ordered-list lines are list lines too: only the one line goes
+  expect(del("1. one @petra\n2. two\n\nB\n", 7)).toBe("2. two\n\nB\n");
+  expect(del("Intro.\n\n1) ping @petra\nAfter.\n", 16)).toBe(
+    "Intro.\n\nAfter.\n",
+  );
+});
+
+test("spliceAtMention delete-host mode deletes the enclosing paragraph", () => {
+  const del = (text: string, start: number) =>
+    spliceAtMention({
+      text,
+      range: [start, start + "@petra".length],
+      nickname: "petra",
+      mode: "delete-host",
+    });
+  // Multi-line paragraph in the middle: the blank after it goes too,
+  // so no double blank remains
+  expect(del("A\n\nTalked to @petra today\nmore of it\n\nB\n", 13)).toBe(
+    "A\n\nB\n",
+  );
+  // Paragraph at the start: the following blank line goes with it
+  expect(del("Talked to @petra\n\nB\n", 10)).toBe("B\n");
+  // Paragraph at the end: no blank after, so the one before goes
+  expect(del("A\n\nTalked to @petra\n", 13)).toBe("A\n");
+  // The whole text is one paragraph
+  expect(del("Talked to @petra", 10)).toBe("");
+  // Paragraph at EOF without a trailing newline
+  expect(del("A\n\nTalked to @petra", 13)).toBe("A\n");
+  // CRLF text: \r-bearing blank lines still read as blank
+  expect(del("A\r\n\r\nTalked to @petra\r\n\r\nB\r\n", 15)).toBe(
+    "A\r\n\r\nB\r\n",
+  );
+});
+
+test("spliceAtMention delete-host stops at structural boundaries", () => {
+  const del = (text: string, start: number) =>
+    spliceAtMention({
+      text,
+      range: [start, start + "@petra".length],
+      nickname: "petra",
+      mode: "delete-host",
+    });
+  // A frontmatter fence is a paragraph boundary, never paragraph text
+  expect(del("---\ntags: x\n---\nTalked to @petra\n\nB\n", 26)).toBe(
+    "---\ntags: x\n---\nB\n",
+  );
+  // A heading is never part of the paragraph below it
+  expect(del("# Head\nTalked to @petra\n\nB\n", 17)).toBe("# Head\nB\n");
+});
+
+test("spliceAtMention verifies before splicing", () => {
+  // Stale range: the text no longer reads `@nickname` there, so nothing moves
+  expect(
+    spliceAtMention({
+      text: "Xxllo @PeteSmith!",
+      range: [0, 10],
+      nickname: "PeteSmith",
+      mode: "remove",
+    }),
+  ).toBe("Xxllo @PeteSmith!");
+});
+
+test("parseDeclaredNames accepts a list, a plain string, and @ notation", () => {
+  expect(parseDeclaredNames(["ada", "Pete Smith"])).toEqual([
+    "ada",
+    "Pete Smith",
+  ]);
+  // A plain string is cut on whitespace: one recipient each, like tags
+  expect(parseDeclaredNames("ada sales")).toEqual(["ada", "sales"]);
+  expect(parseDeclaredNames("@ada @sales")).toEqual(["ada", "sales"]);
+  expect(parseDeclaredNames(["@ada"])).toEqual(["ada"]);
+  // A wikilink survives the cut whole, spaces and all, so the indexer can
+  // recognise one and leave it alone rather than minting junk names from it
+  expect(parseDeclaredNames("[[Team/Ops Squad]] ada")).toEqual([
+    "[[Team/Ops Squad]]",
+    "ada",
+  ]);
+  expect(parseDeclaredNames("  ")).toEqual([]);
+  expect(parseDeclaredNames(undefined)).toEqual([]);
+});
+
+function makeCompleteEvent(linePrefix: string) {
+  return {
+    linePrefix,
+    pos: linePrefix.length,
+    pageName: "TestPage",
+    parentNodes: [],
+  } as any;
+}
+
+function frontmatterCompleteEvent(linePrefix: string, fmContent: string) {
+  return {
+    linePrefix,
+    pos: linePrefix.length,
+    pageName: "TestPage",
+    parentNodes: [`FrontMatter:${fmContent}`],
+  } as any;
+}
+
+test("atMentionComplete offers every known recipient with its detail", async () => {
+  mockSpace([{ username: "ada", fullName: "Ada Lovelace", me: true }]);
+  await indexMentions("Notes", ["Sales"]);
+  const result = await atMentionComplete(makeCompleteEvent("Ping @"));
+  expect(result!.options.filter((o: any) => o.type === "at-mention")).toEqual([
+    { label: "@ada", type: "at-mention", detail: "you", boost: 10 },
+    { label: "@Sales", type: "at-mention", detail: undefined, boost: 10 },
+  ]);
+  // From the `@` itself, which a page or a date replaces with a link.
+  expect(result!.from).toBe("Ping ".length);
+});
+
+test("atMentionComplete also offers today, tomorrow and yesterday as journal links", async () => {
+  mockSpace([]);
+  const result = await atMentionComplete(makeCompleteEvent("@"));
+  const dates = result!.options.filter((o: any) => o.type === "date");
+  expect(dates.map((o: any) => o.displayLabel)).toEqual([
+    "Today (今日)",
+    "Tomorrow (明日)",
+    "Yesterday (昨日)",
+  ]);
+  for (const date of dates) {
+    expect(date.apply).toMatch(/^\[\[Journal\/\d{4}-\d{2}-\d{2}\]\]$/);
+  }
+});
+
+test("atMentionComplete turns a typed date into a link to that day", async () => {
+  mockSpace([]);
+  const result = await atMentionComplete(makeCompleteEvent("see @2026-12-24"));
+  expect(result!.options[0]).toMatchObject({
+    label: "@2026-12-24",
+    apply: "[[Journal/2026-12-24]]",
+    type: "date",
+  });
+});
+
+test("atMentionComplete offers the pages the [[ completion offers, as links", async () => {
+  const mock = mockSpace([]);
+  mock.system.registerSyscalls([], {
+    "system.invokeFunction": (_ctx: any, name: string, event: any) => {
+      expect(name).toBe("editor.pageComplete");
+      expect(event.linePrefix).toBe("[[Pro");
+      return {
+        from: 0,
+        options: [
+          {
+            label: "Projects/Plan",
+            type: "page",
+            displayLabel: "Plan",
+            boost: 3,
+          },
+          { label: "Alias", apply: "Real page|Alias", type: "page" },
+        ],
+      };
+    },
+  });
+  const result = await atMentionComplete(makeCompleteEvent("@Pro"));
+  const pages = result!.options.filter((o: any) => o.type === "page");
+  expect(pages).toEqual([
+    {
+      label: "@Projects/Plan",
+      displayLabel: "Plan",
+      apply: "[[Projects/Plan]]",
+      type: "page",
+      boost: 3,
+    },
+    {
+      label: "@Alias",
+      displayLabel: "Alias",
+      apply: "[[Real page|Alias]]",
+      type: "page",
+    },
+  ]);
+});
+
+test("atMentionComplete keeps the people when the page list fails", async () => {
+  const mock = mockSpace([{ username: "ada", me: false }]);
+  mock.system.registerSyscalls([], {
+    "system.invokeFunction": () => {
+      throw new Error("index not ready");
+    },
+  });
+  const result = await atMentionComplete(makeCompleteEvent("@"));
+  expect(result!.options.map((o: any) => o.label)).toContain("@ada");
+});
+
+test("atMentionComplete asks again once the text starts with a digit, so a typed date can be offered", async () => {
+  mockSpace([]);
+  const result = await atMentionComplete(makeCompleteEvent("@"));
+  const valid = result!.validFor as RegExp;
+  expect(valid.test("@")).toBe(true);
+  expect(valid.test("@ada")).toBe(true);
+  expect(valid.test("@Projects/Plan")).toBe(true);
+  // `@2026-12-24` is only offered once typed out: the list built at `@` is no use.
+  expect(valid.test("@2")).toBe(false);
+  expect(valid.test("@2026-12-24")).toBe(false);
+});
+
+test("atMentionComplete stays out of frontmatter", async () => {
+  mockSpace([]);
+  const result = await atMentionComplete({
+    linePrefix: "recipients: @",
+    pos: 13,
+    pageName: "TestPage",
+    parentNodes: ["FrontMatter:recipients: @"],
+  } as any);
+  expect(result).toBeNull();
+});
+
+test("at-mention completion offers your own account, labelled you", async () => {
+  mockSpace([{ username: "ada", me: true }]);
+  const result = await atMentionComplete(makeCompleteEvent("@"));
+  const own = result!.options.find((o: any) => o.label === "@ada");
+  expect(own).toBeDefined();
+  expect(own!.detail).toBe("you");
+});
+
+test("frontmatterRecipientComplete filters on what has been typed", async () => {
+  mockSpace([
+    { username: "ada", fullName: "Ada Lovelace", me: false },
+    { username: "bob", me: false },
+  ]);
+  const result = await frontmatterRecipientComplete(
+    frontmatterCompleteEvent("recipients: ad", "recipients: ad"),
+  );
+  expect(result!.options.map((o: any) => o.label)).toEqual(["ada"]);
+  expect(result!.filter).toBe(false);
+});
+
+test("frontmatter recipient completion offers the current user too", async () => {
+  mockSpace([{ username: "ada", me: true }]);
+  const result = await frontmatterRecipientComplete(
+    frontmatterCompleteEvent("recipients: ", "recipients: "),
+  );
+  expect(result!.options.map((o: any) => o.label)).toContain("ada");
+});
+
+test("authors: frontmatter completion offers the same names as recipients:", async () => {
+  mockSpace([
+    { username: "ada", fullName: "Ada Lovelace", me: false },
+    { username: "bob", me: false },
+  ]);
+  const inline = await frontmatterAuthorComplete(
+    frontmatterCompleteEvent("authors: @ad", "authors: @ad"),
+  );
+  expect(inline!.options.map((o: any) => o.label)).toContain("ada");
+
+  const listItem = await frontmatterAuthorComplete(
+    frontmatterCompleteEvent("- @ad", "authors:\n- @ad"),
+  );
+  expect(listItem!.options.map((o: any) => o.label)).toContain("ada");
+});
+
+test("author and recipient completions do not fire in each other's key", async () => {
+  mockSpace([{ username: "ada", me: false }]);
+  expect(
+    await frontmatterAuthorComplete(
+      frontmatterCompleteEvent("recipients: @a", "recipients: @a"),
+    ),
+  ).toBeNull();
+  expect(
+    await frontmatterRecipientComplete(
+      frontmatterCompleteEvent("authors: @a", "authors: @a"),
+    ),
+  ).toBeNull();
+});
+
+test("at-mention completion fires after a signature marker", async () => {
+  mockSpace([{ username: "ada", me: false }]);
+  const result = await atMentionComplete(makeCompleteEvent("Why not? -- @a"));
+  expect(result!.options.map((o: any) => o.label)).toContain("@ada");
+});

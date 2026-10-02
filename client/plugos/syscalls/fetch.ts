@@ -1,0 +1,173 @@
+import type { SysCallMapping } from "../system.ts";
+import type {
+  ProxyFetchRequest,
+  ProxyFetchRequest64,
+  ProxyFetchResponse,
+  ProxyFetchResponse64,
+} from "../proxy_fetch.ts";
+import type { Client } from "../../client.ts";
+import {
+  base64Decode,
+  base64Encode,
+} from "@silverbulletmd/silverbullet/lib/crypto";
+import { fsEndpoint } from "../../spaces/constants.ts";
+
+export function sandboxFetchSyscalls(client: Client): SysCallMapping {
+  return {
+    // For use in Lua
+    "http.request": {
+      callback: async (
+        _ctx,
+        url: string,
+        options: ProxyFetchRequest = {},
+      ): Promise<ProxyFetchResponse> => {
+        console.warn("Deprecated: use net.proxyFetch() instead");
+        if (
+          options?.body &&
+          typeof options.body !== "string" &&
+          !(options.body instanceof Uint8Array)
+        ) {
+          options.body = JSON.stringify(options.body);
+        }
+        const fetchOptions = options
+          ? {
+              method: options.method,
+              headers: {} as Record<string, string>,
+              body: options.body,
+            }
+          : {};
+
+        fetchOptions.headers = buildProxyHeaders(options?.headers);
+
+        const resp = await client.httpSpacePrimitives.authenticatedFetch(
+          buildProxyUrl(client, url),
+          fetchOptions,
+        );
+        // Read as ArrayBuffer first to safely handle empty responses (e.g.
+        // PUT/DELETE returning 204 with Content-Type: application/json).
+        // resp.arrayBuffer() never throws on an empty body, whereas
+        // resp.json() would throw a SyntaxError.
+        const rawBytes = new Uint8Array(await resp.arrayBuffer());
+        let body: any;
+        const contentTypeHeader =
+          options.responseEncoding ||
+          resp.headers.get("x-proxy-header-content-type");
+        const statusCode = +(resp.headers.get("x-proxy-status-code") || "200");
+        if (rawBytes.length === 0) {
+          body = null;
+        } else if (contentTypeHeader?.startsWith("application/json")) {
+          body = JSON.parse(new TextDecoder().decode(rawBytes));
+        } else if (
+          contentTypeHeader?.startsWith("application/xml") ||
+          contentTypeHeader?.startsWith("text/")
+        ) {
+          body = new TextDecoder().decode(rawBytes);
+        } else {
+          body = rawBytes;
+        }
+        return {
+          ok: resp.ok,
+          status: statusCode,
+          headers: extractProxyHeaders(resp.headers),
+          body: body,
+        };
+      },
+      description:
+        "Performs an authenticated HTTP request through the server proxy.",
+      parameters: [
+        { name: "url", type: "string", description: "Target URL." },
+        {
+          name: "options",
+          type: "table",
+          description: "Method, headers, body, and response encoding.",
+          optional: true,
+        },
+      ],
+      returns: [
+        {
+          type: "table",
+          description: "Status, headers, and decoded response body.",
+        },
+      ],
+      deprecated: "Use net.proxyFetch instead.",
+      see: "API/net#net.proxyFetch(url, options?)",
+    },
+    "sandboxFetch.fetch": {
+      callback: async (
+        _ctx,
+        url: string,
+        options?: ProxyFetchRequest64,
+      ): Promise<ProxyFetchResponse64> => {
+        const fetchOptions = options
+          ? {
+              method: options.method,
+              headers: options.headers,
+              body: options.base64Body && base64Decode(options.base64Body),
+            }
+          : {};
+        fetchOptions.headers = buildProxyHeaders(options?.headers);
+        const resp = await client.httpSpacePrimitives.authenticatedFetch(
+          buildProxyUrl(client, url),
+          // Casting to any due to TypeScript fetch type limitations
+          fetchOptions as any,
+        );
+        const statusCode = +(resp.headers.get("x-proxy-status-code") || "200");
+        const body = await resp.arrayBuffer();
+        return {
+          ok: resp.ok,
+          status: statusCode,
+          headers: extractProxyHeaders(resp.headers),
+          base64Body: base64Encode(new Uint8Array(body)),
+        };
+      },
+      description:
+        "Performs an authenticated proxied fetch for a plug sandbox.",
+      parameters: [
+        { name: "url", type: "string", description: "Target URL." },
+        {
+          name: "options",
+          type: "table",
+          description: "Method, headers, and base64-encoded body.",
+          optional: true,
+        },
+      ],
+      returns: [
+        {
+          type: "table",
+          description: "Status, headers, and base64-encoded response body.",
+        },
+      ],
+      see: "API/http",
+    },
+  };
+}
+
+function buildProxyUrl(client: Client, url: string) {
+  url = url.replace(/^https?:\/\//, "");
+  return (
+    client.httpSpacePrimitives.url.slice(0, -fsEndpoint.length) +
+    "/.proxy/" +
+    url
+  );
+}
+
+function buildProxyHeaders(headers?: Record<string, any>): Record<string, any> {
+  const newHeaders: Record<string, any> = { "X-Proxy-Request": "true" };
+  if (!headers) {
+    return newHeaders;
+  }
+  for (const [key, value] of Object.entries(headers)) {
+    newHeaders[`X-Proxy-Header-${key}`] = value;
+  }
+  return newHeaders;
+}
+
+function extractProxyHeaders(headers: Headers): Record<string, any> {
+  const newHeaders: Record<string, any> = {};
+  for (const [key, value] of headers.entries()) {
+    if (key.toLowerCase().startsWith("x-proxy-header-")) {
+      newHeaders[key.slice("x-proxy-header-".length)] = value;
+    }
+  }
+  return newHeaders;
+}

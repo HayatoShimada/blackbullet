@@ -1,0 +1,217 @@
+import { describe, expect, test } from "vitest";
+import {
+  decodePageURI,
+  encodeLinkText,
+  encodePageURI,
+  encodeRef,
+  getOffsetFromLineColumn,
+  isValidName,
+  isValidPath,
+  parseToRef,
+} from "./ref.ts";
+
+test("parseToRef() default cases", () => {
+  expect(parseToRef("foo")).toEqual({ path: "foo.md" });
+  expect(parseToRef("/foo")).toEqual({ path: "foo.md" });
+  expect(parseToRef("foo/bar")).toEqual({ path: "foo/bar.md" });
+  expect(parseToRef("foo.png")).toEqual({ path: "foo.png" });
+  expect(parseToRef("foo.md")).toEqual({ path: "foo.md" });
+  expect(parseToRef("foo.")).toEqual({ path: "foo..md" });
+  expect(parseToRef("foo.tar.gz")).toEqual({ path: "foo.tar.gz" });
+  expect(parseToRef("foo.c-d")).toEqual({ path: "foo.c-d.md" });
+  expect(parseToRef("foo..")).toEqual({ path: "foo...md" });
+  expect(parseToRef(" .foo")).toEqual({ path: " .foo" });
+  expect(parseToRef("foo[bar")).toEqual({ path: "foo[bar.md" });
+  expect(parseToRef("foo]bar")).toEqual({ path: "foo]bar.md" });
+  expect(parseToRef("foo(bar")).toEqual({ path: "foo(bar.md" });
+  expect(parseToRef("foo)bar")).toEqual({ path: "foo)bar.md" });
+  expect(parseToRef("/bar/.../foo")).toEqual({ path: "bar/.../foo.md" });
+
+  expect(parseToRef("/foo/.bar.md")).toEqual(null);
+  expect(parseToRef("foo.md.md")).toEqual(null);
+  expect(parseToRef("/.../foo")).toEqual(null);
+  expect(parseToRef("^.foo")).toEqual(null);
+  expect(parseToRef(".foobar")).toEqual(null);
+  expect(parseToRef("foo[[bar")).toEqual(null);
+  expect(parseToRef("foo]]bar")).toEqual(null);
+  expect(parseToRef("foo|bar")).toEqual(null);
+  expect(parseToRef("foo@bar")).toEqual(null);
+  expect(parseToRef("/../foo")).toEqual(null);
+  expect(parseToRef("/./foo")).toEqual(null);
+  expect(parseToRef("/bar/../foo")).toEqual(null);
+  expect(parseToRef("/bar/./foo")).toEqual(null);
+
+  expect(parseToRef("")).toEqual({ path: "" });
+  expect(parseToRef("/")).toEqual({ path: "" });
+  expect(parseToRef("/.md")).toEqual(null);
+  expect(parseToRef("/.foo")).toEqual(null);
+  expect(parseToRef("/@132")).toEqual({
+    path: "",
+    details: { type: "position", pos: 132 },
+  });
+});
+
+test("parseToRef() link cases", () => {
+  expect(parseToRef("^foo")).toEqual({ path: "foo.md", meta: true });
+
+  expect(parseToRef("foo# header")).toEqual({
+    path: "foo.md",
+    details: { type: "header", header: "header" },
+  });
+  expect(parseToRef("foo# header@123")).toEqual({
+    path: "foo.md",
+    details: { type: "header", header: "header@123" },
+  });
+  expect(parseToRef("foo@1231")).toEqual({
+    path: "foo.md",
+    details: { type: "position", pos: 1231 },
+  });
+  expect(parseToRef("foo@l42c69")).toEqual({
+    path: "foo.md",
+    details: { type: "linecolumn", line: 42, column: 69 },
+  });
+  expect(parseToRef("foo@L42C69")).toEqual({
+    path: "foo.md",
+    details: { type: "linecolumn", line: 42, column: 69 },
+  });
+  expect(parseToRef("foo@L42")).toEqual({
+    path: "foo.md",
+    details: { type: "linecolumn", line: 42, column: 1 },
+  });
+
+  expect(parseToRef("foo@ 123")).toEqual(null);
+  expect(parseToRef("foo@c69")).toEqual(null);
+  expect(parseToRef("foo@123#header")).toEqual(null);
+  expect(parseToRef("foo@123@l29")).toEqual(null);
+});
+
+test("encodeRef() cases", () => {
+  // Encoding
+  expect(encodeRef({ path: "foo.md" })).toEqual("foo");
+  expect(
+    encodeRef({ path: "foo.md", details: { type: "position", pos: 10 } }),
+  ).toEqual("foo@10");
+  expect(
+    encodeRef({
+      path: "foo.md",
+      details: { type: "linecolumn", line: 10, column: 69 },
+    }),
+  ).toEqual("foo@L10C69");
+  expect(
+    encodeRef({
+      path: "foo.md",
+      details: { type: "header", header: "bar" },
+    }),
+  ).toEqual("foo#bar");
+});
+
+test("isValidPath() and isValidName()", () => {
+  expect(isValidPath("foo.md")).toBeTruthy();
+  expect(!isValidPath("foo")).toBeTruthy();
+  expect(!isValidPath("foo.md@123")).toBeTruthy();
+
+  expect(isValidName("foo")).toBeTruthy();
+  expect(!isValidName("foo.md")).toBeTruthy();
+  expect(!isValidName("foo@123")).toBeTruthy();
+  expect(!isValidName("^foo@123")).toBeTruthy();
+  expect(!isValidName("foo[[bar")).toBeTruthy();
+
+  // Disallow < and > in ref names
+  expect(!isValidName("hello<there")).toBeTruthy();
+  expect(!isValidName("hello>there")).toBeTruthy();
+});
+
+describe("anchor refs", () => {
+  test("parseToRef bare anchor", () => {
+    expect(parseToRef("$pete")).toEqual({
+      path: "",
+      details: { type: "anchor", name: "pete" },
+    });
+  });
+
+  test("parseToRef page-qualified anchor", () => {
+    expect(parseToRef("Some Page$pete")).toEqual({
+      path: "Some Page.md",
+      details: { type: "anchor", name: "pete" },
+    });
+  });
+
+  test("parseToRef accepts allowed character classes", () => {
+    for (const name of ["toc1", "tasks/7", "a:b", "a-b", "_foo"]) {
+      const ref = parseToRef(`$${name}`);
+      expect(ref?.details).toEqual({ type: "anchor", name });
+    }
+  });
+
+  test("parseToRef rejects digit-leading anchors", () => {
+    // "$100" should NOT be parsed as an anchor; falling through to
+    // the path branch should fail because the path would be "$100"
+    // which is not a valid path either.
+    expect(parseToRef("$100")).toBeNull();
+  });
+
+  test("encodeRef round-trips bare anchor", () => {
+    expect(
+      encodeRef({ path: "", details: { type: "anchor", name: "pete" } }),
+    ).toBe("$pete");
+  });
+
+  test("encodeRef round-trips page-qualified anchor", () => {
+    expect(
+      encodeRef({
+        path: "Some Page.md",
+        details: { type: "anchor", name: "pete" },
+      }),
+    ).toBe("Some Page$pete");
+  });
+});
+
+test("Page URI encoding", () => {
+  expect(encodePageURI("foo")).toEqual("foo");
+  expect(encodePageURI("folder/foo")).toEqual("folder/foo");
+  expect(encodePageURI("hello there")).toEqual("hello%20there");
+  expect(encodePageURI("hello?there")).toEqual("hello%3Fthere");
+  // Now ensure all these cases are reversible
+  expect(decodePageURI("foo")).toEqual("foo");
+  expect(decodePageURI("folder/foo")).toEqual("folder/foo");
+  expect(decodePageURI("hello%20there")).toEqual("hello there");
+  expect(decodePageURI("hello%3Fthere")).toEqual("hello?there");
+});
+
+test("encodeLinkText() preserves the caret that encodeRef drops", () => {
+  const ref = parseToRef("^Library/Std/Config")!;
+  expect(ref.meta).toBe(true);
+  // encodeRef also builds page URLs, where a caret would address a page that
+  // does not exist — so it drops the prefix and link text must not use it.
+  expect(encodeRef(ref)).toEqual("Library/Std/Config");
+  expect(encodeLinkText(ref)).toEqual("^Library/Std/Config");
+});
+
+test("encodeLinkText() round-trips caret links with details and no meta", () => {
+  for (const name of [
+    "^Library/Std",
+    "^Library/Std/Config#Options",
+    "Plain Page",
+    "folder/Page#Header",
+  ]) {
+    expect(encodeLinkText(parseToRef(name)!)).toEqual(name);
+  }
+});
+
+describe("getOffsetFromLineColumn", () => {
+  const text = "ab\n\ncdef\ng";
+  test("line starts count the newlines of the preceding lines", () => {
+    expect(getOffsetFromLineColumn(text, 1, 1)).toBe(0);
+    expect(getOffsetFromLineColumn(text, 2, 1)).toBe(3);
+    expect(getOffsetFromLineColumn(text, 3, 1)).toBe(4);
+    expect(getOffsetFromLineColumn(text, 4, 1)).toBe(9);
+    expect(text.slice(getOffsetFromLineColumn(text, 3, 1))).toBe("cdef\ng");
+  });
+  test("columns are 1-based and clamped to the line", () => {
+    expect(getOffsetFromLineColumn(text, 3, 3)).toBe(6);
+    expect(getOffsetFromLineColumn(text, 3, 99)).toBe(8);
+  });
+  test("out of range lines do not throw", () => {
+    expect(getOffsetFromLineColumn(text, 99, 1)).toBeGreaterThanOrEqual(0);
+  });
+});

@@ -1,0 +1,1007 @@
+import {
+  encodePageURI,
+  encodeRef,
+  parseToRef,
+} from "@silverbulletmd/silverbullet/lib/ref";
+import { extractHashtag } from "@silverbulletmd/silverbullet/lib/tags";
+import {
+  parseTransclusion,
+  type Transclusion,
+} from "@silverbulletmd/silverbullet/lib/transclusion";
+import {
+  addParentPointers,
+  collectNodesOfType,
+  findNodeOfType,
+  normalizeTableRow,
+  type ParseTree,
+  removeParentPointers,
+  renderToText,
+  traverseTree,
+} from "@silverbulletmd/silverbullet/lib/tree";
+import type { PageMeta } from "@silverbulletmd/silverbullet/type/index";
+import * as TagConstants from "../../plugs/index/constants.ts";
+import { parseHtmlTag } from "../codemirror/html_element.ts";
+import { resolveIconMarkup } from "../lib/icon.ts";
+import { Fragment, RawHtml, renderHtml, type Tag } from "./html_render.ts";
+import { CustomSyntaxRenderedHtmlType, createMediaElement } from "./inline.ts";
+import { justifiedTableRender } from "./justified_tables.ts";
+import { sanitizeTag } from "./sanitize_html.ts";
+
+export type MarkdownRenderOptions = {
+  failOnUnknown?: true;
+  smartHardBreak?: true;
+  annotationPositions?: true;
+  shortWikiLinks?: boolean;
+  // When defined, use to inline images as data: urls
+  translateUrls?: (url: string, type: "link" | "image") => string;
+  resolveTagHref?: (tagName: string) => string;
+  // Resolve a wiki-link transclusion's target the way wiki links resolve
+  // (see buildResolveTransclusion)
+  resolveTransclusion?: (t: Transclusion) => void;
+  expand?: true;
+};
+
+function cleanTags(values: (Tag | null)[], cleanWhitespace = false): Tag[] {
+  const result: Tag[] = [];
+  for (const value of values) {
+    if (cleanWhitespace && typeof value === "string" && value.match(/^\s+$/)) {
+      continue;
+    }
+    if (value) {
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+// Markdown node types whose rendered output is block-level (renders with its
+// own line box / margins) and therefore doesn't need explicit `<br>`
+// separators around it.
+const blockTypes = new Set([
+  "ATXHeading1",
+  "ATXHeading2",
+  "ATXHeading3",
+  "ATXHeading4",
+  "ATXHeading5",
+  "ATXHeading6",
+  "SetextHeading1",
+  "SetextHeading2",
+  "BulletList",
+  "OrderedList",
+  "TaskList",
+  "Table",
+  "Blockquote",
+  "FencedCode",
+  "CodeBlock",
+  "HorizontalRule",
+  "HTMLBlock",
+  "LuaDirective",
+  "CommentBlock",
+  "CommentMarkerBlock",
+  "FrontMatter",
+]);
+
+function isBlockNode(node: ParseTree | undefined): boolean {
+  return !!node?.type && blockTypes.has(node.type);
+}
+
+// ATX headings include the space after the `#` marker in their child text
+// (e.g. `# Heading` parses to a text child of ` Heading`). Strip that.
+function trimLeadingSpace(tags: Tag[]): Tag[] {
+  if (tags.length === 0) return tags;
+  const first = tags[0];
+  if (typeof first === "string" && first.startsWith(" ")) {
+    const trimmed = first.replace(/^ +/, "");
+    return trimmed ? [trimmed, ...tags.slice(1)] : tags.slice(1);
+  }
+  return tags;
+}
+
+/**
+ * Drop whitespace-only text nodes from Document-level children only when
+ * BOTH neighbours are block-level (so they already have their own margins
+ * and don't need explicit `<br/>` separators). Trailing/leading whitespace
+ * (no neighbour on one side) is also dropped.
+ */
+function collapseBlockWhitespace(
+  children: ParseTree[],
+  rendered: (Tag | null)[],
+): (Tag | null)[] {
+  return rendered.map((tag, i) => {
+    if (typeof tag !== "string" || !/^\s+$/.test(tag)) return tag;
+    const prev = children[i - 1];
+    const next = children[i + 1];
+    if (!prev || !next) return null;
+    if (isBlockNode(prev) && isBlockNode(next)) return null;
+    // Block - inline: the block side already contributes its own margin,
+    // so a single <br/> is enough to mirror the paragraph-paragraph gap
+    // without piling up extra space. Collapse any multi-newline whitespace
+    // to one newline.
+    if (isBlockNode(prev) || isBlockNode(next)) return "\n";
+    return tag;
+  });
+}
+
+/**
+ * Cleans up a markdown tree. Side effect: adds parent pointers
+ */
+function preprocess(t: ParseTree) {
+  addParentPointers(t);
+  traverseTree(t, (node) => {
+    if (!node.type) {
+      if (node.text?.startsWith("\n")) {
+        const prevNodeIdx = node.parent!.children!.indexOf(node) - 1;
+        const prevNodeType = node.parent!.children![prevNodeIdx]?.type;
+        if (
+          prevNodeType?.includes("Heading") ||
+          prevNodeType?.includes("Table")
+        ) {
+          node.text = node.text.slice(1);
+        }
+      }
+    }
+    return false;
+  });
+}
+
+function posPreservingRender(
+  t: ParseTree,
+  options: MarkdownRenderOptions = {},
+): Tag | null {
+  const tag = render(t, options);
+  if (!options.annotationPositions) {
+    return tag;
+  }
+  if (!tag) {
+    return null;
+  }
+  if (typeof tag === "string") {
+    return tag;
+  }
+  if (t.from) {
+    if (!tag.attrs) {
+      tag.attrs = {};
+    }
+    tag.attrs["data-pos"] = `${t.from}`;
+  }
+  return tag;
+}
+
+function render(t: ParseTree, options: MarkdownRenderOptions = {}): Tag | null {
+  if (t.type?.endsWith("Mark") || t.type?.endsWith("Delimiter")) {
+    return null;
+  }
+  switch (t.type) {
+    case "Document":
+      return {
+        name: Fragment,
+        body: cleanTags(
+          collapseBlockWhitespace(t.children!, mapRender(t.children!)),
+        ),
+      };
+    case "FrontMatter":
+      return null;
+    case "CommentBlock":
+    case "CommentMarkerBlock":
+      return null;
+    case "ConflictMarker":
+      return renderToText(t);
+    case "ATXHeading1":
+      return {
+        name: "h1",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "ATXHeading2":
+      return {
+        name: "h2",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "ATXHeading3":
+      return {
+        name: "h3",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "ATXHeading4":
+      return {
+        name: "h4",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "ATXHeading5":
+      return {
+        name: "h5",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "ATXHeading6":
+      return {
+        name: "h6",
+        body: trimLeadingSpace(cleanTags(mapRender(t.children!))),
+      };
+    case "Paragraph": {
+      const hasHtml = t.children!.some((c) => c.type === "HTMLTag");
+      return {
+        name: "span",
+        attrs: {
+          class: "p",
+        },
+        body: cleanTags(
+          hasHtml
+            ? groupInlineHtml(t.children!, options, posPreservingRender)
+            : mapRender(t.children!),
+        ),
+      };
+    }
+    case "FencedCode":
+    case "CodeBlock": {
+      const lang = findNodeOfType(t, "CodeInfo");
+      t.children = t.children!.filter((c) => c.type);
+      return {
+        name: "pre",
+        attrs: {
+          "data-lang": lang ? lang.children![0].text : undefined,
+        },
+        body: cleanTags(mapRender(t.children!)),
+      };
+    }
+    case "CodeInfo":
+      return null;
+    case "CodeText":
+      return t.children![0].text!;
+    case "Blockquote":
+      return {
+        name: "blockquote",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "HardBreak":
+      return {
+        name: "br",
+        body: "",
+      };
+    case "Emphasis":
+      return {
+        name: "em",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "Highlight":
+      return {
+        name: "span",
+        attrs: {
+          class: "sb-highlight",
+        },
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "Strikethrough":
+      return {
+        name: "del",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "InlineCode":
+      return {
+        name: "code",
+        attrs: {
+          class: "sb-code",
+        },
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "BulletList":
+      return {
+        name: "ul",
+        body: cleanTags(mapRender(t.children!), true),
+      };
+    case "OrderedList":
+      return {
+        name: "ol",
+        body: cleanTags(mapRender(t.children!), true),
+      };
+    case "ListItem":
+      return {
+        name: "li",
+        body: cleanTags(mapRender(t.children!), true),
+      };
+    case "StrongEmphasis":
+      return {
+        name: "strong",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "HorizontalRule":
+      return {
+        name: "hr",
+        body: "",
+      };
+    case "Link": {
+      const linkTextChildren = t.children!.slice(1, -4);
+      const urlNode = findNodeOfType(t, "URL");
+      if (!urlNode) {
+        return renderToText(t);
+      }
+      return {
+        name: "a",
+        attrs: {
+          href: urlNode.children![0].text!,
+          target: "_blank",
+        },
+        body: cleanTags(mapRender(linkTextChildren)),
+      };
+    }
+    case "Autolink": {
+      const urlNode = findNodeOfType(t, "URL");
+      if (!urlNode) {
+        return renderToText(t);
+      }
+      const url = urlNode.children![0].text!;
+      return {
+        name: "a",
+        attrs: {
+          href: url,
+          target: "_blank",
+        },
+        body: url,
+      };
+    }
+    case "Image": {
+      const text = renderToText(t);
+
+      const transclusion = parseTransclusion(text);
+      if (!transclusion) {
+        return text;
+      }
+      options.resolveTransclusion?.(transclusion);
+
+      try {
+        const element = createMediaElement(transclusion);
+        if (!element) {
+          return text;
+        }
+
+        return {
+          name: element.tagName,
+          attrs: Array.from(element.attributes).reduce(
+            (obj, attr) => {
+              obj[attr.name] = attr.value;
+              return obj;
+            },
+            {} as Record<string, string>,
+          ),
+          body: "",
+        };
+      } catch (e: any) {
+        console.error("Error handling image or transclusion", e.message);
+        return {
+          name: "span",
+          body: "Error loading image",
+        };
+      }
+    }
+
+    case "WikiLink": {
+      const link = findNodeOfType(t, "WikiLinkPage")!.children![0].text!;
+      let linkText =
+        options.shortWikiLinks === true ? link.split("/").pop()! : link;
+      const aliasNode = findNodeOfType(t, "WikiLinkAlias");
+      if (aliasNode) {
+        linkText = aliasNode.children![0].text!;
+      }
+
+      // For invalid refs the link just won't link
+      let href: string = `#`;
+
+      const ref = parseToRef(link);
+      if (ref) {
+        href = `/${encodePageURI(encodeRef(ref))}`;
+      }
+
+      return {
+        name: "a",
+        attrs: {
+          href,
+          class: "wiki-link",
+          "data-ref": link,
+        },
+        body: linkText,
+      };
+    }
+    case "NakedURL": {
+      const url = t.children![0].text!;
+      return {
+        name: "a",
+        attrs: {
+          href: url,
+          target: "_blank",
+        },
+        body: url,
+      };
+    }
+    case "Hashtag": {
+      const tagText: string = t.children![0].text!;
+      const tagName = extractHashtag(tagText);
+      const link =
+        options.resolveTagHref?.(tagName) ?? TagConstants.tagPrefix + tagName;
+      return {
+        name: "a",
+        attrs: {
+          class: "hashtag sb-hashtag",
+          "data-tag-name": tagName,
+          href: `/${encodePageURI(link)}`,
+          "data-ref": link,
+        },
+        body: tagText,
+      };
+    }
+    case "NamedAnchor": {
+      // Render the `$` sigil in its own span so themes can color just
+      // the marker; the name reads as plain text.
+      const literal = renderToText(t);
+      return {
+        name: "span",
+        attrs: { class: "sb-named-anchor" },
+        body: [
+          {
+            name: "span",
+            attrs: { class: "sb-named-anchor-mark" },
+            body: "$",
+          },
+          literal.slice(1),
+        ],
+      };
+    }
+    case "AtMentionSignature": {
+      const literal = renderToText(t);
+      return {
+        name: "span",
+        attrs: { class: "sb-at-mention-signature" },
+        body: literal,
+      };
+    }
+    case "AtMention": {
+      const literal = renderToText(t);
+      return {
+        name: "span",
+        attrs: {
+          class: "sb-at-mention",
+          "data-mention-name": literal.slice(1),
+        },
+        body: [
+          { name: "span", attrs: { class: "sb-at-mention-mark" }, body: "@" },
+          literal.slice(1),
+        ],
+      };
+    }
+    case "Task": {
+      let externalTaskRef = "";
+      collectNodesOfType(t, "WikiLinkPage").forEach((wikilink) => {
+        const ref = parseToRef(wikilink.children![0].text!);
+
+        if (
+          !externalTaskRef &&
+          ref &&
+          (ref.details?.type === "position" ||
+            ref.details?.type === "linecolumn" ||
+            ref.details?.type === "anchor")
+        ) {
+          externalTaskRef = wikilink.children![0].text!;
+        }
+      });
+
+      const hasHtml = t.children!.some((c) => c.type === "HTMLTag");
+      return {
+        name: "span",
+        attrs: {
+          class: "sb-task",
+          ...(externalTaskRef
+            ? { "data-external-task-ref": externalTaskRef }
+            : {}),
+        },
+        body: cleanTags(
+          hasHtml
+            ? groupInlineHtml(t.children!, options, posPreservingRender)
+            : mapRender(t.children!),
+        ),
+      };
+    }
+    case "TaskState": {
+      // child[0] = marker, child[1] = state, child[2] = marker
+      const stateText = t.children![1].text!;
+      if ([" ", "x", "X"].includes(stateText)) {
+        return {
+          name: "input",
+          attrs: {
+            type: "checkbox",
+            checked: stateText !== " " ? "checked" : undefined,
+            "data-state": stateText,
+          },
+          body: "",
+        };
+      }
+      return {
+        name: Fragment,
+        body: [
+          { name: "span", attrs: { class: "sb-task-mark" }, body: "[" },
+          {
+            name: "span",
+            attrs: { class: "sb-task-state", "data-task-state": stateText },
+            body: stateText,
+          },
+          { name: "span", attrs: { class: "sb-task-mark" }, body: "]" },
+        ],
+      };
+    }
+
+    case "Table":
+      return {
+        name: "table",
+        body: justifiedTableRender(cleanTags(mapRender(t.children!)), t),
+      };
+    case "TableHeader":
+      return {
+        name: "thead",
+        body: [
+          {
+            name: "tr",
+            body: cleanTags(mapRender(t.children!), true),
+          },
+        ],
+      };
+    case "TableCell": {
+      const cellHasHtml = t.children!.some((c) => c.type === "HTMLTag");
+      return {
+        name: "td",
+        body: cleanTags(
+          cellHasHtml
+            ? groupInlineHtml(t.children!, options, posPreservingRender)
+            : mapRender(t.children!),
+        ),
+      };
+    }
+    case "TableRow": {
+      const table = t.parent;
+      const header = table?.children?.find((c) => c.type === "TableHeader");
+      let columnCount = 0;
+      let headerHasLeadingDelim: boolean | undefined;
+      if (header) {
+        normalizeTableRow(header);
+        headerHasLeadingDelim = header.children?.[0]?.type === "TableDelimiter";
+        for (const c of header.children ?? []) {
+          if (c.type === "TableCell") columnCount++;
+        }
+      }
+      normalizeTableRow(t, columnCount, headerHasLeadingDelim);
+      return {
+        name: "tr",
+        body: cleanTags(mapRender(t.children!), true),
+      };
+    }
+    case "Attribute": {
+      const nameNode = findNodeOfType(t, "AttributeName");
+      const valueNode = findNodeOfType(t, "AttributeValue");
+      const colonNode = findNodeOfType(t, "AttributeColon");
+      const attrName = nameNode?.children?.[0].text ?? "";
+      const attrValue = valueNode?.children?.[0].text ?? "";
+      const attrColon = colonNode?.children?.[0].text ?? ": ";
+      return {
+        name: "span",
+        attrs: {
+          class: "sb-attribute",
+          ...(attrName ? { [`data-${attrName}`]: attrValue } : {}),
+        },
+        body: [
+          {
+            name: "span",
+            attrs: { class: "sb-frontmatter sb-meta" },
+            body: "[",
+          },
+          {
+            name: "span",
+            attrs: { class: "sb-frontmatter sb-attribute-name" },
+            body: attrName,
+          },
+          {
+            name: "span",
+            attrs: { class: "sb-frontmatter sb-meta" },
+            body: attrColon,
+          },
+          {
+            name: "span",
+            attrs: { class: "sb-frontmatter sb-attribute-value" },
+            body: attrValue,
+          },
+          {
+            name: "span",
+            attrs: { class: "sb-frontmatter sb-meta" },
+            body: "]",
+          },
+        ],
+      };
+    }
+    case "Escape": {
+      return {
+        name: "span",
+        attrs: {
+          class: "escape",
+        },
+        body: t.children![0].text!.slice(1),
+      };
+    }
+    case "Entity":
+      return t.children![0].text!;
+
+    case "Superscript":
+      return {
+        name: "sup",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "Subscript":
+      return {
+        name: "sub",
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "FootnoteRef": {
+      const label = findNodeOfType(t, "FootnoteRefLabel")!.children![0].text!;
+      return {
+        name: "sup",
+        attrs: {
+          class: "sb-rendered-footnote-ref",
+        },
+        body: label,
+      };
+    }
+    case "FootnoteDefinition": {
+      const label = findNodeOfType(t, "FootnoteDefLabel")!.children![0].text!;
+      const body = findNodeOfType(t, "FootnoteDefBody");
+      return {
+        name: "div",
+        attrs: {
+          class: "sb-rendered-footnote-def",
+          id: `fn-${label}`,
+        },
+        body: [
+          {
+            name: "span",
+            attrs: { class: "sb-rendered-footnote-def-label" },
+            body: `${label}. `,
+          },
+          ...(body ? cleanTags(mapRender(body.children!)) : []),
+        ],
+      };
+    }
+    case "FootnoteDefBody":
+      return {
+        name: Fragment,
+        body: cleanTags(mapRender(t.children!)),
+      };
+    case "InlineFootnote": {
+      const content = findNodeOfType(t, "InlineFootnoteContent")!.children![0]
+        .text!;
+      return {
+        name: "sup",
+        attrs: {
+          class: "sb-rendered-footnote-ref",
+        },
+        body: [
+          {
+            name: "span",
+            attrs: {
+              class: "sb-rendered-inline-footnote-content",
+              title: content,
+            },
+            body: "*",
+          },
+        ],
+      };
+    }
+    case CustomSyntaxRenderedHtmlType:
+      return {
+        name: RawHtml,
+        body: renderToText(t),
+      };
+
+    case "LuaDirective":
+      return {
+        name: "span",
+        attrs: {
+          class: "sb-lua-directive",
+        },
+        body: renderToText(t),
+      };
+
+    // Structured HTMLBlock from the custom parser: flat sequence of
+    // HTMLOpenTag / HTMLCloseTag / HTMLSelfClosingTag + inline content.
+    // We rebuild nesting via a stack, similar to groupInlineHtml.
+    case "HTMLBlock": {
+      const rawChildren = t.children ?? [];
+      if (
+        rawChildren.length === 1 &&
+        rawChildren[0].type === undefined &&
+        /^\s*<script(?:\s|>|$)/i.test(rawChildren[0].text ?? "")
+      ) {
+        return { name: Fragment, body: [] };
+      }
+      return renderHtmlBlock(rawChildren, options);
+    }
+
+    // Tag markers inside HTMLBlock — should not appear outside of it,
+    // but handle gracefully.
+    case "HTMLOpenTag":
+    case "HTMLCloseTag":
+    case "HTMLSelfClosingTag":
+      return renderToText(t);
+
+    // Unmatched HTMLTag nodes render as literal text (matched ones are
+    // handled at the Paragraph level by groupInlineHtml)
+    case "HTMLTag":
+      return renderToText(t);
+
+    case undefined:
+      return t.text!;
+    default:
+      if (options.failOnUnknown) {
+        removeParentPointers(t);
+        console.error("Not handling", JSON.stringify(t, null, 2));
+        throw new Error(`Unknown markdown node type ${t.type}`);
+      } else {
+        removeParentPointers(t);
+        console.warn("Not handling", JSON.stringify(t, null, 2));
+        return renderToText(t);
+      }
+  }
+
+  function mapRender(children: ParseTree[]) {
+    return children.map((t) => posPreservingRender(t, options));
+  }
+}
+
+/**
+ * Render a structured HTMLBlock's children into nested Tag elements.
+ *
+ * Walks the flat sequence of HTMLOpenTag / HTMLCloseTag /
+ * HTMLSelfClosingTag and inline content nodes, using a stack to
+ * rebuild proper nesting.
+ */
+function renderHtmlBlock(
+  children: ParseTree[],
+  options: MarkdownRenderOptions,
+): Tag {
+  const stack: {
+    name: string;
+    attrs: Record<string, string> | undefined;
+    body: Tag[];
+  }[] = [];
+
+  const root: Tag[] = [];
+
+  function currentBody(): Tag[] {
+    return stack.length > 0 ? stack[stack.length - 1].body : root;
+  }
+
+  for (const child of children) {
+    switch (child.type) {
+      case "HTMLOpenTag": {
+        const text = renderToText(child);
+        const parsed = parseHtmlTag(text);
+        if (parsed) {
+          stack.push({
+            name: parsed.tagName,
+            attrs:
+              Object.keys(parsed.parsedAttrs).length > 0
+                ? parsed.parsedAttrs
+                : undefined,
+            body: [],
+          });
+        } else {
+          currentBody().push(text);
+        }
+        break;
+      }
+      case "HTMLCloseTag": {
+        if (stack.length > 0) {
+          const top = stack.pop()!;
+          currentBody().push({
+            name: top.name,
+            attrs: top.attrs,
+            body: top.body,
+          });
+        }
+        break;
+      }
+      case "HTMLSelfClosingTag": {
+        const text = renderToText(child);
+        const parsed = parseHtmlTag(text);
+        if (parsed) {
+          currentBody().push({
+            name: parsed.tagName,
+            attrs:
+              Object.keys(parsed.parsedAttrs).length > 0
+                ? parsed.parsedAttrs
+                : undefined,
+            body: [],
+          });
+        } else {
+          currentBody().push(text);
+        }
+        break;
+      }
+      default: {
+        const rendered = posPreservingRender(child, options);
+        if (rendered !== null) {
+          currentBody().push(rendered);
+        }
+        break;
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    currentBody().push({
+      name: top.name,
+      attrs: top.attrs,
+      body: top.body,
+    });
+  }
+
+  if (root.length === 1) {
+    return root[0];
+  }
+  return {
+    name: Fragment,
+    body: root,
+  };
+}
+
+type RenderFn = (t: ParseTree, options: MarkdownRenderOptions) => Tag | null;
+
+function groupInlineHtml(
+  children: ParseTree[],
+  options: MarkdownRenderOptions,
+  renderFn: RenderFn,
+): (Tag | null)[] {
+  const result: (Tag | null)[] = [];
+  let i = 0;
+  while (i < children.length) {
+    const child = children[i];
+    if (child.type === "HTMLTag") {
+      const text = renderToText(child);
+      if (!text.startsWith("</")) {
+        const parsed = parseHtmlTag(text);
+        if (parsed?.isSelfClosing) {
+          // Void elements (<br/>, <hr/>, <img/>...) have no closer — emit
+          // as a structured tag (rather than raw HTML) so its attributes
+          // are visible to the sanitizer. Must run before the pair-search
+          // below, which would otherwise fail to find a closer and fall
+          // through to text-escaping.
+          result.push({
+            name: parsed.tagName,
+            attrs:
+              Object.keys(parsed.parsedAttrs).length > 0
+                ? parsed.parsedAttrs
+                : undefined,
+            body: [],
+          });
+          i++;
+          continue;
+        }
+        if (parsed && !parsed.isClosing) {
+          let depth = 1;
+          let j = i + 1;
+          for (; j < children.length; j++) {
+            if (children[j].type === "HTMLTag") {
+              const jText = renderToText(children[j]);
+              const jParsed = parseHtmlTag(jText);
+              if (!jParsed) continue;
+              if (
+                !jParsed.isClosing &&
+                jParsed.tagName.toLowerCase() === parsed.tagName.toLowerCase()
+              ) {
+                depth++;
+              } else if (
+                jParsed.isClosing &&
+                jParsed.tagName.toLowerCase() === parsed.tagName.toLowerCase()
+              ) {
+                depth--;
+                if (depth === 0) break;
+              }
+            }
+          }
+          if (j < children.length) {
+            const innerChildren = children.slice(i + 1, j);
+            const attrs =
+              Object.keys(parsed.parsedAttrs).length > 0
+                ? parsed.parsedAttrs
+                : undefined;
+            result.push({
+              name: parsed.tagName,
+              attrs,
+              body: cleanTags(
+                groupInlineHtml(innerChildren, options, renderFn),
+              ),
+            });
+            i = j + 1;
+            continue;
+          }
+        }
+      }
+      result.push(renderFn(child, options));
+      i++;
+      continue;
+    }
+    result.push(renderFn(child, options));
+    i++;
+  }
+  return result;
+}
+
+function traverseTag(t: Tag, fn: (t: Tag) => void) {
+  fn(t);
+  if (typeof t === "string") {
+    return;
+  }
+  if (t.body) {
+    for (const child of t.body) {
+      traverseTag(child, fn);
+    }
+  }
+}
+
+export function renderMarkdownToHtml(
+  t: ParseTree,
+  options: MarkdownRenderOptions = {},
+  allPages: PageMeta[] = [],
+) {
+  preprocess(t);
+  const htmlTree = posPreservingRender(t, options);
+  if (htmlTree) {
+    traverseTag(htmlTree, (t) => {
+      if (typeof t === "string") {
+        return;
+      }
+      if (t.name === "img" && options.translateUrls) {
+        t.attrs!.src = options.translateUrls!(t.attrs!.src!, "image");
+      }
+
+      if (t.name === "a" && t.attrs!.href) {
+        if (options.translateUrls) {
+          t.attrs!.href = options.translateUrls!(t.attrs!.href, "link");
+        }
+        if (t.attrs!["data-ref"]?.length) {
+          const ref = parseToRef(t.attrs!["data-ref"]!);
+          if (!ref) {
+            return;
+          }
+
+          const pageMeta = allPages.find(
+            (p) => ref.path === parseToRef(p.ref)?.path,
+          );
+          if (
+            pageMeta &&
+            !(
+              ref.details?.type === "position" ||
+              ref.details?.type === "linecolumn"
+            )
+          ) {
+            const icon = resolveIconMarkup(pageMeta.pageDecoration?.icon);
+            t.body = [
+              ...(icon
+                ? [
+                    {
+                      name: RawHtml,
+                      body: `<span class="sb-page-decoration-icon" aria-hidden="true">${icon}</span>`,
+                    },
+                  ]
+                : []),
+              (pageMeta.pageDecoration?.prefix ?? "") + t.body,
+            ];
+            if (pageMeta.pageDecoration?.cssClasses) {
+              t.attrs!.class +=
+                " sb-decorated-object " +
+                pageMeta.pageDecoration.cssClasses
+                  .join(" ")
+                  .replaceAll(/[^a-zA-Z0-9-_ ]/g, "");
+            }
+          }
+        }
+        if (t.body.length === 0) {
+          t.body = [t.attrs!.href];
+        }
+      }
+    });
+  }
+  return renderHtml(htmlTree ? sanitizeTag(htmlTree) : htmlTree);
+}

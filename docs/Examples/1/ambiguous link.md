@@ -1,0 +1,1 @@
+Example to explain [[ADR/011 Link Resolution by Name]]

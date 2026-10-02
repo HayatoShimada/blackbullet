@@ -1,0 +1,54 @@
+//! Authentication core: environment-driven configuration, a brute-force
+//! lockout timer, and a JWT issuer/verifier whose signing secret is persisted
+//! in `.silverbullet.auth.json` within the space folder. Self-contained — it is
+//! configured only from environment variables and that file.
+
+pub mod access;
+pub mod authenticator;
+pub mod authorizer;
+pub mod browser_sessions;
+pub mod config;
+pub mod cookie;
+pub mod device;
+pub mod handoff;
+pub mod headless_token;
+pub mod identity;
+pub mod jwt_authorizer;
+pub mod lockout;
+pub mod login;
+pub mod oauth;
+pub mod oidc;
+pub mod password;
+
+pub use access::{AccessLevel, AccessPolicy, AnonymousFallbackAuthorizer, AuthorizedPolicy};
+pub use authenticator::{Authenticator, AUTH_FILE_NAME, MULTI_AUTH_FILE_NAME};
+pub use authorizer::{Actor, AuthContext, AuthOutcome, RequestAuthorizer};
+pub use browser_sessions::BrowserSessions;
+pub use config::AuthConfig;
+pub use cookie::{
+    auth_cookie_name, cookie_value, is_secure_request, request_host, scoped_auth_cookie_name,
+    CookieOptions,
+};
+pub use headless_token::{headless_cookie_name, HeadlessTokenAuthorizer};
+pub use identity::{clean_email, clean_full_name, username_only, IdentityResolver, UserProfile};
+pub use jwt_authorizer::JwtAuthorizer;
+pub use lockout::LockoutTimer;
+pub use login::LoginManager;
+pub use oauth::{AuthCodeStore, CodeGrant, OAuthError, CLIENT_ID};
+
+/// Verifies a username/password pair against some backing credential store.
+/// Lets `LoginManager` drive either the legacy single-user `AuthConfig` or a
+/// multi-user `users.json`-backed store, without knowing which.
+pub trait Credentials: Send + Sync {
+    fn verify(&self, username: &str, password: &str) -> bool;
+
+    fn record_login(&self, _username: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl Credentials for AuthConfig {
+    fn verify(&self, username: &str, password: &str) -> bool {
+        self.authorize(username, password)
+    }
+}

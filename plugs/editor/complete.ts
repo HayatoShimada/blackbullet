@@ -1,0 +1,278 @@
+import {
+  linkWriteFormat,
+  writtenLinkText,
+} from "@silverbulletmd/silverbullet/lib/link_write";
+import { type Path, parseToRef } from "@silverbulletmd/silverbullet/lib/ref";
+import { folderName } from "@silverbulletmd/silverbullet/lib/resolve";
+import { collisionIndex } from "@silverbulletmd/silverbullet/lib/resolve_path";
+import {
+  editor,
+  index,
+  language,
+  lua,
+  space,
+} from "@silverbulletmd/silverbullet/syscalls";
+import type { CompleteEvent } from "@silverbulletmd/silverbullet/type/client";
+import type {
+  DocumentMeta,
+  PageMeta,
+} from "@silverbulletmd/silverbullet/type/index";
+
+// Map a page's last-modified time to a small, monotone-decreasing boost
+function recencyToBoost(lastModified: string): number {
+  const days = (Date.now() - new Date(lastModified).getTime()) / 86_400_000;
+  if (Number.isNaN(days)) return -Infinity; // unknown timestamp → sort to bottom
+  if (days < 0) return 0; // future timestamp (clock skew) → treat as "now"
+  return -Math.log2(days + 1);
+}
+
+// Page completion
+export async function pageComplete(completeEvent: CompleteEvent) {
+  const isDocumentQuery = {
+    objectVariable: "_",
+    where: await lua.parseExpression(
+      `not string.startsWith(_.name, "_") and not string.endsWith(_.name, ".plug.js")`,
+    ),
+  };
+  const isMetaPageQuery = {
+    objectVariable: "_",
+    where: await lua.parseExpression(`table.find(_.tags, function(tag)
+           return tag == "meta" or string.startsWith(tag, "meta/")
+          end)`),
+  };
+  const isntMetaPageQuery = {
+    objectVariable: "_",
+    where: await lua.parseExpression(`not table.find(_.tags, function(tag)
+           return tag == "meta" or string.startsWith(tag, "meta/")
+          end)`),
+  };
+  // Try to match [[wikilink]]
+  let isWikilink = true;
+  // Negative lookbehind excludes query[[.
+  let match = /(?<!query)\[\[([^\]@$#:{}]*)$/.exec(completeEvent.linePrefix);
+  if (!match) {
+    // Try to match [markdown link]()
+    match = /\[.*\]\(([^\])@$#:{}]*)$/.exec(completeEvent.linePrefix);
+    isWikilink = false;
+  }
+  if (!match) {
+    return null;
+  }
+
+  const prefix = match[1];
+
+  let allPages: (PageMeta | DocumentMeta)[] = [];
+
+  if (prefix.startsWith("^")) {
+    // A carrot prefix means we're looking for a meta page
+    allPages = await index.queryLuaObjects<PageMeta>("page", isMetaPageQuery);
+    // Let's prefix the names with a caret to make them match
+    allPages = allPages.map((page) => ({
+      ...page,
+      name: `^${page.name}`,
+    }));
+  } else {
+    // This is the most common case, we're combining three types of completions here:
+    allPages = (
+      await Promise.all([
+        // All non-meta pages
+        index.queryLuaObjects<PageMeta>("page", isntMetaPageQuery),
+        // All documents
+        index.queryLuaObjects<DocumentMeta>("document", isDocumentQuery),
+        // And all links to non-existing pages (to augment the existing ones)
+        index
+          .queryLuaObjects<string>("aspiring-page", {
+            select: { type: "Variable", name: "name", ctx: {} as any },
+            distinct: true,
+          })
+          .then((aspiringPages) =>
+            // Rewrite them to PageMeta shaped objects
+            aspiringPages.map(
+              (aspiringPage: string): PageMeta => ({
+                ref: aspiringPage,
+                tag: "page",
+                tags: ["non-existing"], // Picked up later in completion
+                _isAspiring: true,
+                name: aspiringPage,
+                created: "",
+                lastModified: "",
+                perm: "rw",
+              }),
+            ),
+          ),
+      ])
+    ).flat();
+  }
+
+  // Don't complete hidden pages
+  allPages = allPages.filter((page) => !(page.pageDecoration?.hide === true));
+
+  const folder = folderName(completeEvent.pageName);
+
+  // Only the colliding basenames cross the sandbox boundary — everything else
+  // is unique by the bare-iff-unique invariant and writes bare. Asking for
+  // the whole listing instead costs tens of milliseconds per keystroke in a
+  // large space.
+  const [writeFormat, colliding] = await Promise.all([
+    linkWriteFormat(),
+    space.collidingBasenames(),
+  ]);
+  const linkIndex = collisionIndex(colliding);
+  // `allPages` holds documents too, whose names already carry an extension —
+  // `parseToRef` appends `.md` only where it belongs.
+  const pathOf = (name: string): Path | undefined =>
+    parseToRef(name)?.path || undefined;
+  const written = (name: string, aspiring: boolean): string => {
+    // Caret links address infrastructure pages by their full path; shortening
+    // `^Library/Std/APIs/Tag` to `^Tag` would point at the concept page.
+    // An aspiring page is not a file, so the collision index cannot vouch for
+    // its name; its link is inserted exactly as written elsewhere.
+    if (name.startsWith("^") || aspiring) {
+      return name;
+    }
+    const path = pathOf(name);
+    return path ? writtenLinkText(path, writeFormat, linkIndex) : name;
+  };
+
+  return {
+    from: completeEvent.pos - prefix.length,
+    options: allPages.flatMap((pageMeta) => {
+      const completions: any[] = [];
+      const applyName = written(
+        pageMeta.name,
+        (pageMeta as PageMeta)._isAspiring === true,
+      );
+      const namePrefix = (pageMeta as PageMeta).pageDecoration?.prefix || "";
+      const icon = (pageMeta as PageMeta).pageDecoration?.icon;
+      const cssClass = ((pageMeta as PageMeta).pageDecoration?.cssClasses || [])
+        .join(" ")
+        .replaceAll(/[^a-zA-Z0-9-_ ]/g, "");
+
+      if (isWikilink) {
+        // A [[wikilink]]
+        const linkAlias = pageMeta.linkName || pageMeta.displayName;
+        const recencyBoost = pageMeta._isAspiring
+          ? -Infinity
+          : recencyToBoost(pageMeta.lastModified);
+        if (linkAlias) {
+          const decoratedName = namePrefix + linkAlias;
+          completions.push({
+            label: linkAlias,
+            displayLabel: decoratedName,
+            boost: recencyBoost,
+            apply:
+              pageMeta.tag === "template"
+                ? applyName
+                : `${applyName}|${linkAlias}`,
+            detail: pageMeta.linkName
+              ? `linkName for: ${pageMeta.name}`
+              : `displayName for: ${pageMeta.name}`,
+            type: "page",
+            icon,
+            cssClass,
+          });
+        }
+        if (Array.isArray(pageMeta.aliases)) {
+          for (const alias of pageMeta.aliases) {
+            const decoratedName = namePrefix + alias;
+            completions.push({
+              label: `${alias}`,
+              displayLabel: decoratedName,
+              boost: recencyBoost,
+              apply:
+                pageMeta.tag === "template"
+                  ? applyName
+                  : `${applyName}|${alias}`,
+              detail: `alias to: ${pageMeta.name}`,
+              type: "page",
+              icon,
+              cssClass,
+            });
+          }
+        }
+        const decoratedName = namePrefix + pageMeta.name;
+        completions.push({
+          label: pageMeta.name,
+          displayLabel: decoratedName,
+          boost: recencyBoost,
+          apply: applyName === pageMeta.name ? undefined : applyName,
+          detail: pageMeta.tags?.includes("non-existing")
+            ? "Linked but not created"
+            : undefined,
+          type: "page",
+          icon,
+          cssClass,
+        });
+      } else {
+        // A markdown link []()
+        let labelText = pageMeta.name;
+        let boost = recencyToBoost(pageMeta.lastModified);
+        // Relative path if in the same folder or a subfolder
+        if (folder.length > 0 && labelText.startsWith(folder)) {
+          labelText = labelText.slice(folder.length + 1);
+          boost += 5;
+        } else {
+          // Absolute path otherwise
+          labelText = `/${labelText}`;
+        }
+        completions.push({
+          label: labelText,
+          displayLabel: namePrefix + labelText,
+          boost: boost,
+          apply: labelText.includes(" ") ? `<${labelText}>` : labelText,
+          type: "page",
+          icon,
+          cssClass,
+        });
+      }
+      return completions;
+    }),
+  };
+}
+
+export async function footnoteComplete(completeEvent: CompleteEvent) {
+  // Negative lookbehind avoids matching `[[^...` (a meta-page wikilink), which
+  // would otherwise collide with pageComplete's result on a different `from`
+  // position and cause the merged completion to be dropped.
+  const match = /(?<!\[)\[\^([^\]\s]*)$/.exec(completeEvent.linePrefix);
+  if (!match) return null;
+
+  // Rudamentary scan of full editor text to quickly find all footnote definitions
+  const text = await editor.getText();
+  const defRegex = /^\[\^([^\]\s]+)\]:\s?(.*)$/gm;
+  const options = [];
+  let m;
+  while ((m = defRegex.exec(text)) !== null) {
+    const label = m[1];
+    let body = m[2].trim();
+    if (body.length > 50) {
+      body = `${body.slice(0, 50)}\u2026`;
+    }
+    options.push({
+      label,
+      detail: body,
+      type: "footnote",
+    });
+  }
+
+  return {
+    from: completeEvent.pos - match[1].length,
+    options,
+  };
+}
+
+export async function languageComplete(completeEvent: CompleteEvent) {
+  const languagePrefix = /^(?:```+|~~~+)(\w*)$/.exec(completeEvent.linePrefix);
+  if (!languagePrefix) {
+    return null;
+  }
+
+  const allLanguages = await language.listLanguages();
+  return {
+    from: completeEvent.pos - languagePrefix[1].length,
+    options: allLanguages.map((lang) => ({
+      label: lang,
+      type: "language",
+    })),
+  };
+}

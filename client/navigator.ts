@@ -1,0 +1,238 @@
+import {
+  encodePageURI,
+  getNameFromPath,
+  isMarkdownPath,
+  parseToRef,
+  type Path,
+  type Ref,
+} from "@silverbulletmd/silverbullet/lib/ref";
+import type { Client } from "./client.ts";
+
+// The path of a location state should not be empty, rather it should be
+// normalized to the indexpage beforhand
+export type LocationState = Ref & {
+  scrollTop?: number;
+  selection?: {
+    anchor: number;
+    head?: number;
+  };
+};
+
+export class PathPageNavigator {
+  navigationPromise: PromiseWithResolvers<string | null> | null = null;
+  indexRef!: Ref;
+
+  openLocations = new Map<string, LocationState>();
+
+  // When true, the next popstate restores remembered scroll/selection from
+  // openLocations. navigate() sets this to its `restore` argument right before
+  // dispatching its synthetic popstate; genuine browser back/forward fires
+  // popstate without touching it, so it stays true and restores by default.
+  private restoreOnPopstate = true;
+  private skipNextPopstate = false;
+
+  constructor(private client: Client) {
+    this.indexRef = this.client.getIndexRef();
+  }
+
+  /**
+   * Navigates the client to the given page. An empty string path is navigated
+   * to the index page. This function also updates the browser history
+   * @param replaceState whether to update the state in place (rather than to
+   * push a new state)
+   */
+  async navigate(ref: Ref, replaceState = false, restore = false) {
+    if (this.navigationPromise) {
+      await this.navigationPromise.promise;
+    }
+
+    const currentState = this.buildCurrentLocationState();
+    // Remove details as we prefer to actually keep the scrollTop
+    currentState.details = undefined;
+
+    if (ref.path === "") {
+      ref.path = this.indexRef.path;
+    }
+
+    this.openLocations.set(currentState.path, currentState);
+
+    // history.state intentionally carries only the Ref (path + details).
+    // Ephemeral position (scrollTop, selection) lives exclusively in
+    // openLocations, which is refreshed on every popstate.
+    const currentRef: Ref = { path: currentState.path };
+    if (!replaceState) {
+      globalThis.history.replaceState(
+        currentRef,
+        "",
+        `${document.baseURI}${this.pathToURI(currentRef.path)}`,
+      );
+      globalThis.history.pushState(
+        ref,
+        "",
+        `${document.baseURI}${this.pathToURI(ref.path)}`,
+      );
+    } else {
+      globalThis.history.replaceState(
+        ref,
+        "",
+        `${document.baseURI}${this.pathToURI(ref.path)}`,
+      );
+    }
+
+    this.navigationPromise = Promise.withResolvers();
+
+    this.restoreOnPopstate = restore;
+    globalThis.dispatchEvent(
+      new PopStateEvent("popstate", {
+        state: ref,
+      }),
+    );
+
+    const error = await this.navigationPromise.promise;
+
+    if (error !== null) {
+      if (error !== "Opened externally") {
+        this.client.ui.flashNotification(
+          `Failed to navigate: ${error}`,
+          "error",
+        );
+      }
+
+      if (!replaceState) {
+        this.navigationPromise = Promise.withResolvers();
+        this.skipNextPopstate = true;
+        history.go(-1);
+        await this.navigationPromise.promise;
+      } else {
+        const newRef: Ref =
+          currentState.path === ref.path
+            ? this.indexRef
+            : { path: currentState.path };
+
+        globalThis.history.replaceState(
+          newRef,
+          "",
+          `${document.baseURI}${this.pathToURI(newRef.path)}`,
+        );
+      }
+    }
+
+    this.navigationPromise = null;
+  }
+
+  private pathToURI(path: Path): string {
+    return path !== this.indexRef.path
+      ? encodePageURI(getNameFromPath(path))
+      : "";
+  }
+
+  private buildCurrentLocationState(): LocationState {
+    const locationState: LocationState = parseRefFromURI() || this.indexRef;
+    if (locationState.path === "") {
+      locationState.path = this.indexRef.path;
+    }
+    if (isMarkdownPath(locationState.path)) {
+      Object.assign(locationState, this.captureEditorPosition());
+    }
+    return locationState;
+  }
+
+  /**
+   * Snapshot the current editor's scrollTop and selection. Only meaningful
+   * when the editor is currently showing a markdown page.
+   */
+  private captureEditorPosition(): Pick<
+    LocationState,
+    "scrollTop" | "selection"
+  > {
+    const editorView = this.client.editorView;
+    const mainSelection = editorView.state.selection.main;
+    return {
+      scrollTop: editorView.scrollDOM.scrollTop,
+      selection: { head: mainSelection.head, anchor: mainSelection.anchor },
+    };
+  }
+
+  subscribe(pageLoadCallback: (locationState: LocationState) => Promise<void>) {
+    globalThis.addEventListener("popstate", async (event: PopStateEvent) => {
+      if (this.skipNextPopstate) {
+        this.skipNextPopstate = false;
+        this.navigationPromise?.resolve(null);
+        return;
+      }
+
+      // Consume the restore intent for this navigation; default back to true so
+      // the next genuine browser back/forward restores.
+      const restore = this.restoreOnPopstate;
+      this.restoreOnPopstate = true;
+
+      // Browser back/forward bypasses navigate(), so capture the leaving
+      // page's position into openLocations here. (navigate() itself does the
+      // same on line above; a synthetic popstate redundantly re-saves the
+      // same value, which is cheap and harmless.)
+      const leavingPath = this.client.currentPath();
+      if (leavingPath && isMarkdownPath(leavingPath)) {
+        this.openLocations.set(leavingPath, {
+          path: leavingPath,
+          ...this.captureEditorPosition(),
+        });
+      }
+
+      const state: LocationState = event.state
+        ? event.state
+        : // The popstate event can be fired in a whole list of weird situations
+          // (see MDN). Try to do our best if it's fired without the state
+          parseRefFromURI() || this.indexRef;
+
+      if (restore) {
+        const openLocation = this.openLocations.get(state.path);
+        if (openLocation) {
+          state.scrollTop = openLocation.scrollTop;
+          state.selection = openLocation.selection;
+        }
+      }
+
+      try {
+        await pageLoadCallback(state);
+        this.navigationPromise?.resolve(null);
+      } catch (e: any) {
+        const error = e?.message ?? String(e);
+        if (this.navigationPromise) {
+          this.navigationPromise.resolve(error);
+          return;
+        }
+        if (error !== "Opened externally") {
+          this.client.ui.flashNotification(
+            `Failed to navigate: ${error}`,
+            "error",
+          );
+        }
+        const previousRef: Ref = {
+          path: leavingPath || this.indexRef.path,
+        };
+        globalThis.history.replaceState(
+          previousRef,
+          "",
+          `${document.baseURI}${this.pathToURI(previousRef.path)}`,
+        );
+      }
+    });
+  }
+}
+
+export function parseRefFromURI(): Ref | null {
+  const locationRef = parseToRef(
+    decodeURIComponent(
+      location.href.substring(document.baseURI.length), //this essentially returns location with prefix and leading slash removed (equivalent to location.pathname.substring(prefix.length).substring(1)),
+    ),
+  );
+
+  if (locationRef && location.hash) {
+    locationRef.details = {
+      type: "header",
+      header: decodeURIComponent(location.hash.substring(1)),
+    };
+  }
+
+  return locationRef;
+}

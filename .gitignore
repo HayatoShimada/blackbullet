@@ -1,4 +1,42 @@
 .env
-*.swp
-*.swo
-__pycache__/
+.chrome-data
+.DS_Store
+.obsidian
+# Per-space auth secret written at runtime by the authenticator into whatever
+# space folder a server is pointed at (e.g. docs/ when serving the docs space).
+# Contains the JWT signing secret — must never be committed.
+.silverbullet.auth.json
+**/.silverbullet.auth.json
+client_bundle/client
+client_bundle/base_fs
+dist
+*.js.map
+env.sh
+node_modules
+# Anchored to the repo root so it ignores the built `./silverbullet` binary
+# WITHOUT also swallowing the `bin/silverbullet/` Rust crate directory.
+/silverbullet
+# Cross-compiled musl binaries produced by the CI Docker build (_build.yml).
+/silverbullet-amd64
+/silverbullet-arm64
+/sb
+silverbullet-cli-*.zip
+silverbullet-server-*.zip
+deploy.json
+*.generated
+tmp_playground
+test-results
+playwright-report
+/version.json
+tmp
+.idea
+.opencode
+AGENTS.md
+
+# Rust workspace build artifacts (Cargo.lock is intentionally tracked — this
+# workspace produces binaries)
+/target
+
+# Local secrets (never commit)
+.env.local
+.env.*.local

@@ -1,0 +1,116 @@
+import { syntaxTree } from "@codemirror/language";
+import type { EditorState } from "@codemirror/state";
+import { Decoration, WidgetType } from "@codemirror/view";
+import {
+  type ParseTree,
+  renderToText,
+} from "@silverbulletmd/silverbullet/lib/tree";
+import type { Client } from "../client.ts";
+import { lezerToParseTree } from "../markdown_parser/parse_tree.ts";
+import { expandMarkdown } from "../markdown_renderer/inline.ts";
+import { renderMarkdownToHtml } from "../markdown_renderer/markdown_render.ts";
+import {
+  decoratorStateField,
+  hideBlockSource,
+  isCursorInRange,
+} from "./util.ts";
+import {
+  attachWidgetEventHandlers,
+  buildResolveTransclusion,
+  buildTranslateUrls,
+} from "./widget_util.ts";
+
+class TableViewWidget extends WidgetType {
+  tableBodyText: string;
+
+  constructor(
+    readonly client: Client,
+    readonly t: ParseTree,
+  ) {
+    super();
+    this.tableBodyText = renderToText(t);
+  }
+
+  override get estimatedHeight(): number {
+    return this.client.widgetCache.getCachedWidgetHeight(
+      `table:${this.tableBodyText}`,
+    );
+  }
+
+  toDOM(): HTMLElement {
+    const dom = document.createElement("span");
+    dom.classList.add("sb-table-widget");
+    dom.addEventListener("click", (e) => {
+      const dataAttributes = (e.target as any).dataset;
+      const fallbackPos = this.client.editorView.posAtDOM(dom, 0);
+      this.client.editorView.dispatch({
+        selection: {
+          anchor: dataAttributes.pos ? +dataAttributes.pos : fallbackPos,
+        },
+      });
+    });
+
+    const resolveTransclusion = buildResolveTransclusion(this.client);
+    void expandMarkdown(
+      this.client.space,
+      this.client.currentName(),
+      this.t,
+      this.client.clientSystem.spaceLuaEnv,
+      {
+        syntaxExtensions: this.client.config.get("syntaxExtensions", {}),
+        resolveTransclusion,
+      },
+    ).then((t) => {
+      dom.innerHTML = renderMarkdownToHtml(t, {
+        // Annotate every element with its position so we can use it to put
+        // the cursor there when the user clicks on the table.
+        annotationPositions: true,
+        shortWikiLinks: this.client.config.get("shortWikiLinks", true),
+        translateUrls: buildTranslateUrls(this.client),
+        resolveTransclusion,
+      });
+      setTimeout(() => {
+        attachWidgetEventHandlers(dom, this.client, this.tableBodyText);
+
+        this.client.widgetCache.setCachedWidgetMeta(
+          `table:${this.tableBodyText}`,
+          { height: dom.clientHeight, block: true },
+        );
+      });
+    });
+    return dom;
+  }
+
+  override eq(other: WidgetType): boolean {
+    return (
+      other instanceof TableViewWidget &&
+      other.tableBodyText === this.tableBodyText
+    );
+  }
+}
+
+export function tablePlugin(editor: Client) {
+  return decoratorStateField((state: EditorState) => {
+    const widgets: any[] = [];
+    syntaxTree(state).iterate({
+      enter: (node) => {
+        const { from, to, name } = node;
+        if (name !== "Table") return;
+        if (isCursorInRange(state, [from, to])) return;
+
+        hideBlockSource(widgets, state, from, to, "start");
+
+        const text = state.sliceDoc(0, to);
+        widgets.push(
+          Decoration.widget({
+            widget: new TableViewWidget(
+              editor,
+              lezerToParseTree(text, node.node),
+            ),
+          }).range(from),
+        );
+      },
+    });
+    return Decoration.set(widgets, true);
+  });
+}

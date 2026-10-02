@@ -1,0 +1,97 @@
+import { expect, test } from "vitest";
+import { describeSchemas, tagSchema } from "./schema_introspection.ts";
+import { indexSyscalls } from "./index.ts";
+
+// Fixtures mirroring real config under ["tags"] (plain JS, as config.get returns).
+const tags = {
+  task: {
+    name: "task",
+    schema: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        done: { type: "boolean", readOnly: true },
+        state: { type: "string", readOnly: true },
+        name: { type: "string", readOnly: true },
+        tags: { type: "array", items: { type: "string" } },
+        deadline: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+    },
+  },
+  page: {
+    name: "page",
+    schema: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        perm: { type: "string", readOnly: true, enum: ["ro", "rw"] },
+        name: { type: "string" },
+        itags: { type: "array", items: { type: "string" }, nullable: true },
+      },
+    },
+  },
+  person: {
+    name: "person",
+    schema: {
+      type: "object",
+      properties: {
+        age: { type: "number" },
+      },
+    },
+  },
+  bareTag: {
+    name: "bareTag",
+  },
+};
+
+test("describeSchemas returns only tags with schemas, keyed by tag name", () => {
+  const result = describeSchemas(tags);
+  expect(Object.keys(result).sort()).toEqual(["page", "person", "task"]);
+});
+
+test("describeSchemas returns the unmodified raw JSON Schema for each tag", () => {
+  const result = describeSchemas(tags);
+  expect((result.task as any).properties.done.type).toBe("boolean");
+  expect((result.task as any).additionalProperties).toBe(true);
+  expect((result.task as any).properties.deadline.anyOf).toBeDefined();
+  expect((result.page as any).properties.perm.enum).toEqual(["ro", "rw"]);
+  expect((result.person as any).properties.age.type).toBe("number");
+});
+
+test("tagSchema returns the raw JSON Schema for a defined tag with a schema", () => {
+  const schema = tagSchema(tags, "task") as any;
+  expect(schema).not.toBeNull();
+  expect(schema.type).toBe("object");
+  expect(schema.properties.done.type).toBe("boolean");
+  expect(schema.properties.done.readOnly).toBe(true);
+  expect(schema.properties.deadline.anyOf).toBeDefined();
+  expect(schema.properties.tags.type).toBe("array");
+  expect(schema.properties.tags.items.type).toBe("string");
+});
+
+test("tagSchema returns null for a tag without a schema", () => {
+  expect(tagSchema(tags, "bareTag")).toBeNull();
+});
+
+test("tagSchema returns null for an undefined tag", () => {
+  expect(tagSchema(tags, "doesNotExist")).toBeNull();
+});
+
+test("index.describeSchema / index.tagSchema syscalls delegate to config", () => {
+  const fakeClient: any = {
+    config: { get: (_path: string[], def: any) => tags ?? def },
+  };
+  const syscalls = indexSyscalls({} as any, fakeClient);
+  const describeSchema = (syscalls["index.describeSchema"] as any).callback;
+  const getTagSchema = (syscalls["index.tagSchema"] as any).callback;
+  const all = describeSchema({}) as Record<string, unknown>;
+  expect(Object.keys(all).sort()).toEqual(["page", "person", "task"]);
+  expect((all.task as any).properties.done.type).toBe("boolean");
+
+  const taskSchema = getTagSchema({}, "task") as any;
+  expect(taskSchema).not.toBeNull();
+  expect(taskSchema.properties.done.type).toBe("boolean");
+
+  expect(getTagSchema({}, "nope")).toBeNull();
+  expect(getTagSchema({}, "bareTag")).toBeNull();
+});

@@ -1,0 +1,255 @@
+name: index
+functions:
+  # Public API
+  extractFrontmatter:
+    path: api.ts:extractFrontmatter
+    syscall:
+      name: index.extractFrontmatter
+      description: Extracts and optionally transforms frontmatter and top-level tags in Markdown text.
+      parameters:
+        - { name: text, type: string, description: Markdown text to inspect. }
+        - { name: options, type: table, description: Optional frontmatter and tag removal settings., optional: true }
+      returns:
+        - { type: table, description: Parsed frontmatter and the optionally transformed text. }
+      see: API/index
+  patchFrontmatter:
+    path: api.ts:patchFrontmatter
+    syscall:
+      name: index.patchFrontmatter
+      description: Applies a table of updates to the frontmatter in Markdown text.
+      parameters:
+        - { name: text, type: string, description: Markdown text to update. }
+        - { name: patch, type: table, description: Frontmatter keys and values to merge. }
+      returns:
+        - { type: string, description: Markdown text with updated frontmatter. }
+      see: API/index
+  text:
+    path: indexer.ts:indexMarkdown
+    syscall:
+      name: index.markdown
+      description: Indexes Markdown text in memory and returns the objects extracted from it.
+      parameters:
+        - { name: text, type: string, description: Markdown text to index. }
+        - { name: pageMeta, type: table, description: Optional page metadata used during indexing., optional: true }
+      returns:
+        - { type: table, description: Objects extracted from the Markdown text. }
+      see: API/index
+  resolveAnchor:
+    path: api.ts:resolveAnchor
+    syscall:
+      name: index.resolveAnchor
+      description: Resolves a named anchor to its host page, tag, and source range.
+      parameters:
+        - { name: name, type: string, description: Anchor name without the leading dollar sign. }
+        - { name: page, type: string, description: Optional page to restrict the lookup to., optional: true }
+      returns:
+        - { type: table, description: Resolution result including success or missing/duplicate reason. }
+      see: API/index
+  queryLuaObjects:
+    # DEPRECATED: use index.queryLuaObjects syscall instead
+    path: api.ts:queryLuaObjects
+  getObjectByRef:
+    # DEPRECATED: use index.getObjectByRef syscall instead
+    path: api.ts:getObjectByRef
+
+  # YAML syscalls
+  yamlParse:
+    path: yaml.ts:parse
+    syscall:
+      name: yaml.parse
+      description: Parses a YAML string into a Lua value.
+      parameters:
+        - { name: text, type: string, description: YAML source text. }
+      returns:
+        - { description: Parsed YAML value. }
+      see: API/yaml
+
+  yamlStringify:
+    path: yaml.ts:stringify
+    syscall:
+      name: yaml.stringify
+      description: Serializes a Lua value as YAML text.
+      parameters:
+        - { name: value, description: Value to serialize. }
+      returns:
+        - { type: string, description: YAML representation of the value. }
+      see: API/yaml
+
+  reindexSpaceCommand:
+    path: "./command.ts:reindexCommand"
+    command:
+      name: "Space: Reindex"
+      menu: { location: space, group: "2_index", order: 1, label: "Reindex Space" }
+
+  processIndexQueue:
+    path: ./queue.ts:processIndexQueue
+    mqSubscriptions:
+      - queue: indexQueue
+        batchSize: 8
+        autoAck: false
+
+  indexDocument:
+    path: "./document.ts:indexDocument"
+    events:
+      - document:index
+
+  indexPage:
+    path: indexer.ts:indexPage
+    events:
+      - page:index
+
+  # Headers
+  headerComplete:
+    path: header.ts:headerComplete
+    events:
+      - editor:complete
+
+  # Anchors
+  anchorComplete:
+    path: complete.ts:anchorComplete
+    events:
+      - editor:complete
+
+  # Hashtags
+  tagComplete:
+    path: tags.ts:tagComplete
+    events:
+      - editor:complete
+
+  atMentionComplete:
+    path: identity.ts:atMentionComplete
+    events:
+      - editor:complete
+
+  resolveAtMention:
+    path: identity.ts:resolveAtMention
+
+  listIdentities:
+    path: identity.ts:listIdentities
+
+  frontmatterValueComplete:
+    path: frontmatter_value_complete.ts:frontmatterValueComplete
+    events:
+      - editor:complete
+
+  frontmatterComplete:
+    path: frontmatter.ts:frontmatterComplete
+    events:
+      - editor:complete
+
+  renamePageCommand:
+    path: "./refactor.ts:renamePageCommand"
+    command:
+      name: "Page: Rename"
+      menu: { location: file, group: "4_page", order: 1, label: "Rename Page..." }
+      page: ""
+      requireMode: rw
+      requireEditor: page
+  renamePrefixCommand:
+    path: "./refactor.ts:renamePrefixCommand"
+    command:
+      name: "Page: Batch Rename Prefix"
+      requireMode: rw
+      requireEditor: page
+  renamePageLinkCommand:
+    path: "./refactor.ts:renamePageLinkCommand"
+    command:
+      name: "Page: Rename Linked Page"
+      requireMode: rw
+      requireEditor: page
+
+  # Refactoring Commands
+
+  renameDocumentCommand:
+    path: "./refactor.ts:renameDocumentCommand"
+    command:
+      name: "Document: Rename Document"
+      requireMode: rw
+      requireEditor: notpage
+
+  extractToPageCommand:
+    path: ./refactor.ts:extractToPageCommand
+    command:
+      name: "Page: Extract"
+      requireMode: rw
+      requireEditor: page
+
+  refreshWidgets:
+    path: widget.ts:refreshWidgets
+
+  lintYAML:
+    path: lint.ts:lintYAML
+    events:
+      - editor:lint
+
+  lintLua:
+    path: lint.ts:lintLua
+    events:
+      - editor:lint
+
+  lintObjects:
+    path: lint.ts:lintObjects
+    events:
+      - editor:lint
+
+  lintAnchors:
+    path: lint.ts:lintAnchors
+    events:
+      - editor:lint
+
+  requalifyAfterSave:
+    path: requalify.ts:requalifyAfterSave
+    events:
+      - page:saved
+
+  invalidateOnFileAppeared:
+    path: invalidate.ts:invalidateOnFileAppeared
+    events:
+      - file:changed
+
+  invalidateOnFileDeleted:
+    path: invalidate.ts:invalidateOnFileDeleted
+    events:
+      - file:deleted
+
+  # X-Ray editor lens
+  xrayInfo:
+    path: xray.ts:xrayInfo
+    events:
+      - editor:lint
+
+  toggleXRayMode:
+    path: xray.ts:toggleXRayMode
+    command:
+      name: "Editor: Toggle X-Ray"
+      requireEditor: page
+
+  # Tasks
+  updateTaskState:
+    path: task.ts:updateTaskState
+
+  taskToggle:
+    path: "./task.ts:taskToggle"
+    events:
+      - page:click
+  cycleTaskStateByRef:
+    path: ./task.ts:cycleTaskStateByRef
+  taskToggleCommand:
+    path: ./task.ts:taskCycleCommand
+    command:
+      name: "Task: Cycle State"
+      key: Mod-. t
+      requireMode: rw
+      requireEditor: page
+
+  taskComplete:
+    path: ./complete.ts:completeTaskState
+    events:
+      - editor:complete
+
+  removeCompletedTasksCommand:
+    path: task.ts:removeCompletedTasksCommand
+    command:
+      name: "Task: Remove Completed"
+      requireMode: rw
+      requireEditor: page

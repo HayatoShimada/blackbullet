@@ -1,0 +1,778 @@
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+
+use crate::handlers::http_date;
+use crate::router::run_blocking;
+use crate::ssr::{convert_wiki_links, render_markdown, SpaceLinks};
+use crate::state::ServerState;
+
+#[derive(Clone)]
+pub struct ServerName(pub String);
+
+/// Cache policy for a bundle asset, keyed on whether its filename pins its
+/// content.
+fn cache_control_for(path: &str) -> &'static str {
+    if is_content_hashed(path) {
+        // Name pins content: a change to the file yields a different URL, so
+        // this response can never become the wrong answer for this URL.
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+/// Whether a bundle path carries esbuild's content hash (`[name]-[hash].js`,
+/// per `chunkNames` in `build/build_client.ts`).
+fn is_content_hashed(path: &str) -> bool {
+    let Some(stem) = path.strip_suffix(".js") else {
+        return false;
+    };
+    let Some((_, hash)) = stem.rsplit_once('-') else {
+        return false;
+    };
+    hash.len() == 8
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+}
+
+/// SPA fallback: serve a bundle asset by request path verbatim, or fall back to
+/// the templated `index.html` shell for any unknown path (client-side routing).
+/// For a space anonymous visitors may read but not write, the shell is filled
+/// with server-side-rendered page markdown (SEO); otherwise the empty shell is
+/// served and the JS client renders.
+pub async fn handle_client_bundle(
+    State(state): State<Arc<ServerState>>,
+    req: axum::http::Request<Body>,
+) -> impl IntoResponse {
+    // The browser echoes our `Last-Modified` verbatim in `If-Modified-Since`, so
+    // we string-compare to answer 304s.
+    let if_modified_since = req
+        .headers()
+        .get(axum::http::header::IF_MODIFIED_SINCE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let path = req.uri().path().trim_start_matches('/').to_string();
+
+    // Grade SPA-shell access through the policy: AnonymousFallbackAuthorizer
+    // accepts every request and cannot enforce access by itself. Assets remain public.
+    let level = match state.authorizer.as_ref() {
+        Some(authz) => {
+            let ctx = crate::auth::AuthContext {
+                method: req.method(),
+                path: req.uri().path(),
+                query: req.uri().query(),
+                headers: req.headers(),
+            };
+            authz
+                .authorize(&ctx)
+                .map(|o| {
+                    o.grant
+                        .unwrap_or_else(|| state.access_policy.level_for(o.username.as_deref()))
+                })
+                .unwrap_or(crate::auth::AccessLevel::None)
+        }
+        None => crate::auth::AccessLevel::Write,
+    };
+    let authorized = level >= crate::auth::AccessLevel::Read;
+
+    let s = state.clone();
+    let p = path.clone();
+    let direct = run_blocking(move || s.client_bundle.read_file(&p)).await;
+    if let Ok((data, meta)) = direct {
+        let last_modified = http_date(meta.last_modified);
+        if !last_modified.is_empty() && if_modified_since.as_deref() == Some(last_modified.as_str())
+        {
+            return Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(axum::http::header::LAST_MODIFIED, &last_modified)
+                .header(axum::http::header::CACHE_CONTROL, cache_control_for(&path))
+                .body(Body::empty())
+                .unwrap();
+        }
+        let mut builder = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", &meta.content_type)
+            .header(axum::http::header::CACHE_CONTROL, cache_control_for(&path));
+        if !last_modified.is_empty() {
+            builder = builder.header(axum::http::header::LAST_MODIFIED, &last_modified);
+        }
+        return builder.body(Body::from(data)).unwrap();
+    }
+
+    let s = state.clone();
+    let shell = run_blocking(move || s.client_bundle.read_file(".client/index.html")).await;
+    let shell = match shell {
+        Ok((data, _)) => data,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap();
+        }
+    };
+
+    // Unauthenticated page navigation → send the browser to the login page.
+    // `.md` paths get 401+Location (like API paths); other page paths get a 302
+    // with a percent-encoded `?from=` so login returns the user to where they
+    // were. The empty path ("/") is never redirected here — its shell loads and
+    // the client's `/.config` fetch triggers the redirect instead.
+    if !authorized && !path.is_empty() {
+        let prefix = &state.host_url_prefix;
+        if path.ends_with(".md") {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header(axum::http::header::LOCATION, format!("{prefix}/.auth"))
+                .body(Body::from("Unauthorized"))
+                .unwrap();
+        }
+        use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+        const FROM_SET: &AsciiSet = &CONTROLS
+            .add(b' ')
+            .add(b'"')
+            .add(b'#')
+            .add(b'%')
+            .add(b'&')
+            .add(b'+')
+            .add(b'<')
+            .add(b'>')
+            .add(b'=')
+            .add(b'?')
+            .add(b'`')
+            .add(b'{')
+            .add(b'}');
+        let destination = format!(
+            "{prefix}{}",
+            req.uri()
+                .path_and_query()
+                .map_or("/", |value| value.as_str())
+        );
+        let from = utf8_percent_encode(&destination, FROM_SET);
+        return Response::builder()
+            .status(StatusCode::FOUND)
+            .header(
+                axum::http::header::LOCATION,
+                format!("{prefix}/.auth?from={from}"),
+            )
+            .body(Body::empty())
+            .unwrap();
+    }
+
+    let server_name = req
+        .extensions()
+        .get::<ServerName>()
+        .map(|name| name.0.as_str())
+        .unwrap_or("SilverBullet");
+    let (title, content_html) = server_side_content(&state, &path, server_name).await;
+    let body = template_index_html(
+        &shell,
+        &state.host_url_prefix,
+        &title,
+        &state.additional_head_html,
+        &content_html,
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html")
+        // The shell names the entry points and is templated per request (title,
+        // SSR'd content, URL prefix), so it must never be served from a cache.
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// Decide the `<title>` and content HTML for the fallback shell. Real page
+/// content renders only where anonymous visitors may read the space *and* may
+/// not write it, so the markdown being rendered was authored by the space's
+/// own members. Everything else gets the plain shell with an empty body for
+/// the JS client to take over.
+async fn server_side_content(
+    state: &Arc<ServerState>,
+    path: &str,
+    server_name: &str,
+) -> (String, String) {
+    if !state.anonymous_readable || state.anonymous_writable {
+        return (server_name.to_owned(), String::new());
+    }
+
+    let page_name = if path.is_empty() {
+        state.boot_config.index_page.clone()
+    } else {
+        path.to_string()
+    };
+    let title = page_name
+        .rsplit('/')
+        .next()
+        .unwrap_or(&page_name)
+        .to_string();
+
+    let md_path = format!("{page_name}.md");
+    let s = state.clone();
+    let p = md_path.clone();
+    let content = match run_blocking(move || s.space.read_file(&p)).await {
+        Ok((data, _)) => {
+            let s = state.clone();
+            let links = run_blocking(move || s.space.fetch_file_list())
+                .await
+                .ok()
+                .map(|files| {
+                    SpaceLinks::new(files.into_iter().map(|f| f.name), &state.host_url_prefix)
+                });
+            let text = String::from_utf8_lossy(&data);
+            render_markdown(&convert_wiki_links(&text, &md_path, links.as_ref()))
+        }
+        Err(_) => String::new(),
+    };
+    (title, content)
+}
+
+/// Render the `index.html` SPA shell with minijinja. The template exposes
+/// `host_prefix`, `title`, `description`, `additional_head_html` and `content`;
+/// HTML autoescaping is on, so `title`/`description` are escaped while the
+/// pre-rendered `additional_head_html` and `content` are emitted via the
+/// template's `| safe` filter. The latter two are NOT sanitized: raw HTML in a
+/// page passes straight through. That is acceptable only because SSR runs
+/// exclusively where anonymous visitors may read the space AND may not write
+/// it, so the content is always the space owner's or its members' own pages.
+/// Both halves are load-bearing: "anonymously readable" says nothing about who
+/// authored the bytes, and on an anonymously writable space this filter would
+/// serve a stranger's stored HTML to every later visitor. Do not reuse
+/// `render_markdown` for untrusted input.
+///
+/// On a template error (e.g. a malformed shell) the raw shell bytes are served
+/// so the client JS can still boot — a best-effort fallback.
+fn template_index_html(
+    shell: &[u8],
+    host_prefix: &str,
+    title: &str,
+    additional_head: &str,
+    content_html: &str,
+) -> Vec<u8> {
+    let shell = String::from_utf8_lossy(shell);
+    let mut env = minijinja::Environment::new();
+    env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
+    let ctx = minijinja::context! {
+        host_prefix => host_prefix,
+        title => title,
+        description => "",
+        additional_head_html => additional_head,
+        content => content_html,
+    };
+    match env.render_str(&shell, ctx) {
+        Ok(rendered) => rendered.into_bytes(),
+        Err(err) => {
+            tracing::error!("index.html template render failed: {err}");
+            shell.into_owned().into_bytes()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ServerName;
+    use crate::state::ServerState;
+
+    use crate::test_support::test_state;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    use crate::auth::{AuthContext, AuthOutcome, RequestAuthorizer};
+
+    struct Deny;
+    impl RequestAuthorizer for Deny {
+        fn authorize(&self, _ctx: &AuthContext) -> Option<AuthOutcome> {
+            None
+        }
+    }
+
+    fn gated_state() -> Arc<ServerState> {
+        let mut s = test_state();
+        s.authorizer = Some(Arc::new(Deny));
+        seed_bundle(&s, ".client/index.html", INDEX_TPL);
+        seed_bundle(&s, ".client/app.js", b"asset");
+        Arc::new(s)
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_page_navigation_redirects_to_auth() {
+        let resp = crate::build_router(gated_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/SomePage")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get("location").unwrap(),
+            "/.auth?from=/SomePage"
+        );
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_md_path_is_401_with_location() {
+        let resp = crate::build_router(gated_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/Page.md")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(resp.headers().get("location").unwrap(), "/.auth");
+    }
+
+    #[tokio::test]
+    async fn assets_and_root_load_without_auth() {
+        let asset = crate::build_router(gated_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/.client/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(asset.status(), StatusCode::OK);
+        let root = crate::build_router(gated_state())
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(root.status(), StatusCode::OK);
+    }
+
+    fn seed_bundle(state: &ServerState, path: &str, body: &[u8]) {
+        state.client_bundle.write_file(path, body, None).unwrap();
+    }
+
+    /// Filenames taken verbatim from a real `build_client.ts` run, since the
+    /// whole rule rests on telling esbuild's hashed chunks apart from the
+    /// entry points it leaves unhashed.
+    #[test]
+    fn only_content_hashed_chunks_are_treated_as_immutable() {
+        // Hashed by esbuild's `chunkNames` — including the lazily loaded
+        // language chunks, which are chunks despite not being named "chunk-".
+        for hashed in [
+            "chunk-2ULWSWV5.js",
+            "chunk-BETBSOB6.js",
+            "clike-M4TQO4MN.js",
+            "dist-EQLOYUAR.js",
+            "javascript-BXTINHDU.js",
+            "r-Y4ICSG6Y.js",
+        ] {
+            assert!(
+                super::is_content_hashed(hashed),
+                "{hashed} should be hashed"
+            );
+        }
+
+        // Entry points: stable names whose content changes every build. Caching
+        // any of these is what strands a client on a stale bundle.
+        for unhashed in [
+            "client.js",
+            "service_worker.js",
+            "dashboard.js",
+            "main.css",
+            "components.css",
+            "index.html",
+            "iAWriterMonoS-Regular.woff2",
+            // Sourcemaps: the hash belongs to the .js, not to this URL.
+            "chunk-2ULWSWV5.js.map",
+            "client.js.map",
+        ] {
+            assert!(
+                !super::is_content_hashed(unhashed),
+                "{unhashed} must not be immutable"
+            );
+        }
+    }
+
+    #[test]
+    fn unrecognised_shapes_fall_back_to_revalidating() {
+        // A false positive pins a mutable file for a year, so anything that is
+        // not unmistakably an esbuild hash must degrade to `no-cache`.
+        for path in [
+            "foo-short.js",       // too short
+            "foo-lowercase.js",   // esbuild's hashes are uppercase
+            "foo-TOOLONGHASH.js", // wrong length
+            "foo-ABCD123.js",     // 7 chars
+            "nodash.js",
+        ] {
+            assert!(!super::is_content_hashed(path), "{path} must not be pinned");
+            assert_eq!(super::cache_control_for(path), "no-cache");
+        }
+        assert_eq!(
+            super::cache_control_for("chunk-2ULWSWV5.js"),
+            "public, max-age=31536000, immutable"
+        );
+    }
+
+    #[tokio::test]
+    async fn entry_points_revalidate_while_chunks_are_pinned() {
+        let s = test_state();
+        seed_bundle(&s, ".client/index.html", INDEX_TPL);
+        seed_bundle(&s, ".client/client.js", b"client");
+        seed_bundle(&s, "service_worker.js", b"sw");
+        seed_bundle(&s, ".client/chunk-2ULWSWV5.js", b"chunk");
+        let st = Arc::new(s);
+
+        let cache_control = |uri: &'static str| {
+            let st = st.clone();
+            async move {
+                let resp = crate::build_router(st)
+                    .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+                resp.headers()
+                    .get(axum::http::header::CACHE_CONTROL)
+                    .expect("every bundle response states a cache policy")
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            }
+        };
+
+        // The service worker above all: it is the browser's only update trigger.
+        assert_eq!(cache_control("/service_worker.js").await, "no-cache");
+        assert_eq!(cache_control("/.client/client.js").await, "no-cache");
+        assert_eq!(
+            cache_control("/.client/chunk-2ULWSWV5.js").await,
+            "public, max-age=31536000, immutable"
+        );
+        // The SPA shell names the entry points, so it must revalidate too.
+        assert_eq!(cache_control("/SomePage").await, "no-cache");
+    }
+
+    fn seed_space(state: &ServerState, path: &str, body: &[u8]) {
+        state.space.write_file(path, body, None).unwrap();
+    }
+
+    async fn body_string(resp: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    const INDEX_TPL: &[u8] = br#"<base href="{{ host_prefix | safe }}/"><title>{{ title }}</title><meta content="{{ description }}">{{ additional_head_html | safe }}<div class="cm-content">{{ content | safe }}</div>"#;
+
+    #[tokio::test]
+    async fn serves_a_bundle_asset_raw() {
+        let state = test_state();
+        seed_bundle(&state, ".client/app.js", b"console.log(1)");
+        let resp = crate::build_router(Arc::new(state))
+            .oneshot(
+                Request::builder()
+                    .uri("/.client/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "console.log(1)");
+    }
+
+    #[tokio::test]
+    async fn bundle_asset_supports_conditional_304() {
+        let state = Arc::new(test_state());
+        seed_bundle(&state, ".client/app.js", b"x");
+        let r1 = crate::build_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/.client/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r1.status(), StatusCode::OK);
+        let last_modified = r1
+            .headers()
+            .get("last-modified")
+            .expect("Last-Modified present")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(!last_modified.is_empty());
+        let r2 = crate::build_router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/.client/app.js")
+                    .header("if-modified-since", &last_modified)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r2.status(), StatusCode::NOT_MODIFIED);
+        let body = axum::body::to_bytes(r2.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn html_assets_are_served_raw_on_the_direct_path() {
+        let state = test_state();
+        seed_bundle(&state, "raw.html", b"<title>{{.Title}}</title>");
+        let resp = crate::build_router(Arc::new(state))
+            .oneshot(
+                Request::builder()
+                    .uri("/raw.html")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, "<title>{{.Title}}</title>");
+    }
+
+    #[tokio::test]
+    async fn fallback_templates_the_spa_shell() {
+        let state = test_state();
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        seed_space(&state, "Home.md", b"# Should not render");
+        let resp = crate::build_router(Arc::new(state))
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>SilverBullet</title>"), "{html}");
+        assert!(!html.contains("{{"), "unresolved placeholder: {html}");
+        assert!(
+            html.contains(r#"<div class="cm-content"></div>"#),
+            "content should be empty: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_server_name_is_escaped_in_the_fallback_title() {
+        let state = test_state();
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        let response = crate::build_router(Arc::new(state))
+            .oneshot(
+                Request::builder()
+                    .uri("/Home")
+                    .extension(ServerName("Notebook & Co".into()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(body_string(response)
+            .await
+            .contains("<title>Notebook &amp; Co</title>"));
+    }
+
+    fn read_only_public_state() -> Arc<ServerState> {
+        let mut s = test_state();
+        s.boot_config.read_only = true;
+        s.authorizer = None;
+        s.anonymous_readable = true;
+        Arc::new(s)
+    }
+
+    #[tokio::test]
+    async fn an_anonymous_readable_space_renders_page_markdown_even_when_not_frozen() {
+        // Public read access permits SSR even when members can still write.
+        let mut s = test_state();
+        s.boot_config.read_only = false;
+        s.anonymous_readable = true;
+        s.anonymous_writable = false;
+        seed_bundle(&s, ".client/index.html", INDEX_TPL);
+        seed_space(&s, "Home.md", b"# Published\n\nCrawl me.");
+        let resp = crate::build_router(Arc::new(s))
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>Home</title>"), "{html}");
+        assert!(html.contains("Published"), "{html}");
+    }
+
+    #[tokio::test]
+    async fn an_anonymously_writable_space_never_server_renders_content() {
+        // The XSS direction. On an `access: "write"` (legacy `public: true`)
+        // space any stranger can author a page, and `render_markdown` passes
+        // raw HTML through verbatim into a `| safe` slot. Rendering it would
+        // serve that stranger's stored HTML to every later visitor and
+        // crawler, so anonymous *readability* alone must never open the gate.
+        let mut s = test_state();
+        s.anonymous_readable = true;
+        s.anonymous_writable = true;
+        seed_bundle(&s, ".client/index.html", INDEX_TPL);
+        seed_space(&s, "Home.md", b"# Hi\n\n<script>alert(1)</script>");
+        let resp = crate::build_router(Arc::new(s))
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>SilverBullet</title>"), "{html}");
+        assert!(
+            !html.contains("alert(1)"),
+            "stranger-authored HTML must never be server-rendered: {html}"
+        );
+        assert!(
+            html.contains(r#"<div class="cm-content"></div>"#),
+            "content should be withheld: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_writable_private_space_withholds_content() {
+        let mut s = test_state();
+        s.boot_config.read_only = false;
+        s.anonymous_readable = false;
+        seed_bundle(&s, ".client/index.html", INDEX_TPL);
+        seed_space(&s, "Home.md", b"# Secret\n\nShould not leak.");
+        let resp = crate::build_router(Arc::new(s))
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>SilverBullet</title>"), "{html}");
+        assert!(!html.contains("Secret"), "leaked page content: {html}");
+    }
+
+    #[tokio::test]
+    async fn public_read_only_space_renders_page_markdown() {
+        let state = read_only_public_state();
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        seed_space(&state, "Home.md", b"# Welcome\n\nSee [[Other]].");
+        let resp = crate::build_router(state)
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>Home</title>"), "{html}");
+        assert!(html.contains("<h1"), "expected rendered h1: {html}");
+        assert!(html.contains("Welcome"), "{html}");
+        assert!(html.contains(r#"href="Other""#), "{html}");
+    }
+
+    #[tokio::test]
+    async fn public_read_only_empty_path_uses_index_page() {
+        let state = read_only_public_state(); // index_page == "index"
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        seed_space(&state, "index.md", b"# Front page");
+        let resp = crate::build_router(state)
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>index</title>"), "{html}");
+        assert!(html.contains("Front page"), "{html}");
+    }
+
+    #[tokio::test]
+    async fn public_read_only_missing_page_renders_empty_content() {
+        let state = read_only_public_state();
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        let resp = crate::build_router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/Nonexistent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(
+            html.contains(r#"<div class="cm-content"></div>"#),
+            "missing page → empty content: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_only_space_that_is_not_anonymous_readable_withholds_content() {
+        // Freezing a private space must not expose its content through SSR.
+        let mut state = test_state();
+        state.boot_config.read_only = true;
+        state.anonymous_readable = false;
+        seed_bundle(&state, ".client/index.html", INDEX_TPL);
+        seed_space(&state, "Home.md", b"# Secret\n\nShould not leak.");
+        let resp = crate::build_router(Arc::new(state))
+            .oneshot(Request::builder().uri("/Home").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let html = body_string(resp).await;
+        assert!(html.contains("<title>SilverBullet</title>"), "{html}");
+        assert!(!html.contains("Secret"), "leaked page content: {html}");
+        assert!(
+            html.contains(r#"<div class="cm-content"></div>"#),
+            "content should be withheld: {html}"
+        );
+    }
+
+    #[test]
+    fn templating_escapes_title_but_passes_content_raw() {
+        // `title` is autoescaped; `content`/`additional_head_html` use `| safe`
+        // and are emitted verbatim (markdown output / config HTML).
+        let out = super::template_index_html(
+            br#"<title>{{ title }}</title>{{ additional_head_html | safe }}<div>{{ content | safe }}</div>"#,
+            "",
+            "a<script>b",
+            "<meta name=\"x\">",
+            "<b>bold</b>",
+        );
+        let html = String::from_utf8(out).unwrap();
+        assert!(html.contains("<title>a&lt;script&gt;b</title>"), "{html}");
+        assert!(html.contains(r#"<meta name="x">"#), "{html}");
+        assert!(html.contains("<div><b>bold</b></div>"), "{html}");
+    }
+
+    #[test]
+    fn renders_the_real_shipped_index_html_without_leftover_placeholders() {
+        // Exercise the shipped template so placeholder changes cannot evade this test.
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../client_bundle/client/.client/index.html"
+        );
+        let shell = std::fs::read(path).expect("shipped client bundle index.html must exist");
+        let out = super::template_index_html(
+            &shell,
+            "/prefix",
+            "MyTitle",
+            "<meta name=\"sb\">",
+            "<p>hello</p>",
+        );
+        let html = String::from_utf8(out).unwrap();
+        assert!(!html.contains("{{"), "leftover placeholder: {html}");
+        assert!(html.contains(r#"<base href="/prefix/""#), "{html}");
+        assert!(html.contains("<title>MyTitle</title>"), "{html}");
+        assert!(html.contains("<meta name=\"sb\">"), "{html}");
+        assert!(html.contains("<p>hello</p>"), "{html}");
+    }
+
+    #[test]
+    fn malformed_template_falls_back_to_raw_shell() {
+        // An unbalanced tag is a render error → serve the shell bytes as-is so
+        // the client JS still loads.
+        let raw = br#"<html>{{ oops"#;
+        let out = super::template_index_html(raw, "", "T", "", "");
+        assert_eq!(out, raw);
+    }
+}

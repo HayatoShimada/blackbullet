@@ -1,0 +1,288 @@
+import { expect, test, vi } from "vitest";
+
+/**
+ * `createActivate` exercised directly against a minimal fake engine, pinning
+ * the carried-dropdown contract: a `dropdown` value in the activation applies
+ * to that activation only (never persisted), and the next open without one
+ * restores the remembered selection.
+ */
+
+const datastore = {
+  get: vi.fn<(key: unknown[]) => Promise<unknown>>(),
+  set: vi.fn<(key: unknown[], value: unknown) => Promise<void>>(),
+};
+const editor = {
+  getCurrentPage: vi.fn<() => Promise<string>>(async () => "Page"),
+};
+
+vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
+  datastore,
+  editor,
+}));
+
+const { createActivate } = await import("./activation.ts");
+
+function makeHarness(
+  remembered: unknown,
+  dropdownDefault?: string,
+  followEditor = false,
+  slot = "rhs",
+) {
+  datastore.get.mockReset();
+  datastore.set.mockReset();
+  datastore.get.mockImplementation((key: unknown[]) =>
+    Promise.resolve(
+      Array.isArray(key) && key[2] === "dropdown" ? remembered : undefined,
+    ),
+  );
+  const state = {
+    meta: {
+      name: "inbox",
+      dropdown: { placeholder: "Recipient" },
+      followEditor,
+    },
+    ctx: { phrase: "" },
+    dropdownOptions: [
+      { label: "Pete", value: "People/Pete" },
+      { label: "Sales", value: "recipient:sales" },
+    ],
+    dropdownDefault,
+  };
+  const engine = {
+    dropIfRedefined: vi.fn(async () => false),
+    dropIfEphemeral: vi.fn(),
+    isLoaded: vi.fn(() => false),
+    activate: vi.fn(async () => state),
+    activeState: vi.fn(() => state),
+    refresh: vi.fn(async () => {}),
+  };
+  const ref = <T>(value: T) => ({ current: value });
+  const refs = {
+    displayed: ref<string | undefined>(undefined),
+    handledToken: ref<number | undefined>(undefined),
+    segmentForced: ref(false),
+    dropdownForced: ref(false),
+    revealedFor: ref<string | undefined>(undefined),
+    revealedPage: ref<string | undefined>(undefined),
+    view: ref<any>(undefined),
+    phrase: ref(""),
+    interaction: ref<"typing" | "navigating">("typing"),
+    returnTo: ref<string | undefined>(undefined),
+    segmentDirty: ref(false),
+    dropdownDirty: ref(false),
+    expandedDirty: ref(false),
+    lastQueried: ref<string | undefined>(undefined),
+    readySignaledToken: ref<number | undefined>(undefined),
+    treeHost: ref(undefined),
+  };
+  const setDropdownValue = vi.fn();
+  const set = {
+    setView: vi.fn(),
+    setBootError: vi.fn(),
+    setPhrase: vi.fn(),
+    setSegmentIndex: vi.fn(),
+    setDropdownValue,
+    setSelectedIndex: vi.fn(),
+    setSelectedPath: vi.fn(),
+    setExpanded: vi.fn(),
+  };
+  const applyReveal = vi.fn();
+  const focusInput = vi.fn();
+  const activate = createActivate({
+    slot,
+    engine: engine as any,
+    refs: refs as any,
+    listenForRefresh: vi.fn(),
+    set: set as any,
+    publish: vi.fn(),
+    syncReadOnly: vi.fn(async () => {}),
+    applyReveal,
+    focusInput,
+    signalReady: vi.fn(),
+  });
+  return {
+    activate,
+    engine,
+    setDropdownValue,
+    refs,
+    applyReveal,
+    focusInput,
+    set,
+    state,
+  };
+}
+
+async function settled() {
+  // Lets the fire-and-forget datastore reads inside activate land.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+test("a carried dropdown value applies to that activation only, unpersisted", async () => {
+  const { activate, setDropdownValue } = makeHarness("People/Pete");
+
+  await activate({
+    view: "inbox",
+    token: 1,
+    dropdown: "recipient:sales",
+    focus: false,
+  });
+  await settled();
+  expect(setDropdownValue).toHaveBeenCalledWith("recipient:sales");
+  expect(datastore.set).not.toHaveBeenCalled();
+
+  // The next open without a carried value restores the remembered
+  // (hand-picked) selection rather than staying on the forced one.
+  setDropdownValue.mockClear();
+  await activate({ view: "inbox", token: 2 });
+  await settled();
+  expect(setDropdownValue).toHaveBeenCalledWith(undefined);
+  expect(setDropdownValue).toHaveBeenLastCalledWith("People/Pete");
+});
+
+test("without a remembered value, the open after a carried one is back on All", async () => {
+  const { activate, setDropdownValue } = makeHarness(undefined);
+
+  await activate({
+    view: "inbox",
+    token: 1,
+    dropdown: "recipient:sales",
+    focus: false,
+  });
+  await settled();
+  expect(setDropdownValue).toHaveBeenLastCalledWith("recipient:sales");
+
+  setDropdownValue.mockClear();
+  await activate({ view: "inbox", token: 2 });
+  await settled();
+  expect(setDropdownValue).toHaveBeenLastCalledWith(undefined);
+});
+
+test("dropdown.default applies when nothing is remembered", async () => {
+  const { activate, setDropdownValue } = makeHarness(
+    undefined,
+    "recipient:sales",
+  );
+
+  await activate({ view: "inbox", token: 1 });
+  await settled();
+  expect(setDropdownValue).toHaveBeenLastCalledWith("recipient:sales");
+});
+
+test("a remembered value wins over dropdown.default", async () => {
+  const { activate, setDropdownValue } = makeHarness(
+    "People/Pete",
+    "recipient:sales",
+  );
+
+  await activate({ view: "inbox", token: 1 });
+  await settled();
+  expect(setDropdownValue).toHaveBeenLastCalledWith("People/Pete");
+});
+
+test("a dropdown.default that is not among the options is ignored", async () => {
+  const { activate, setDropdownValue } = makeHarness(
+    undefined,
+    "recipient:ghost",
+  );
+
+  await activate({ view: "inbox", token: 1 });
+  await settled();
+  expect(setDropdownValue).not.toHaveBeenCalledWith("recipient:ghost");
+  expect(setDropdownValue).toHaveBeenLastCalledWith(undefined);
+});
+
+test("the open after a carried value falls back to dropdown.default", async () => {
+  const { activate, setDropdownValue } = makeHarness(
+    undefined,
+    "recipient:sales",
+  );
+
+  await activate({
+    view: "inbox",
+    token: 1,
+    dropdown: "People/Pete",
+    focus: false,
+  });
+  await settled();
+
+  setDropdownValue.mockClear();
+  await activate({ view: "inbox", token: 2 });
+  await settled();
+  expect(setDropdownValue).toHaveBeenLastCalledWith("recipient:sales");
+});
+
+test("a remembered 'All' outranks dropdown.default", async () => {
+  // `pickDropdown` persists the built-in All as null, distinct from the
+  // undefined of a view whose dropdown was never touched.
+  const { activate, setDropdownValue } = makeHarness(null, "recipient:sales");
+
+  await activate({ view: "inbox", token: 1 });
+  await settled();
+  expect(setDropdownValue).not.toHaveBeenCalledWith("recipient:sales");
+  expect(setDropdownValue).toHaveBeenLastCalledWith(undefined);
+});
+
+test("restoring a follow-editor dock reveals the current page without taking focus", async () => {
+  const { activate, applyReveal, focusInput, set } = makeHarness(
+    undefined,
+    undefined,
+    true,
+  );
+  await activate({ view: "inbox", token: 1, passive: true });
+  expect(applyReveal).toHaveBeenCalledWith(
+    "Page",
+    expect.objectContaining({ name: "inbox" }),
+  );
+  expect(focusInput).not.toHaveBeenCalled();
+  expect(set.setPhrase).not.toHaveBeenCalled();
+});
+
+test("restoring a dock without follow-editor leaves its selection alone", async () => {
+  const { activate, applyReveal } = makeHarness(undefined);
+  await activate({ view: "inbox", token: 1, passive: true });
+  expect(applyReveal).not.toHaveBeenCalled();
+});
+
+test("restoring a tree waits for remembered expansion before revealing the page", async () => {
+  const { activate, applyReveal, state } = makeHarness(
+    undefined,
+    undefined,
+    true,
+  );
+  Object.assign(state.meta, { mode: "tree" });
+  const saved = Promise.withResolvers<unknown>();
+  datastore.get.mockImplementation((key) =>
+    key[2] === "expanded" ? saved.promise : Promise.resolve(undefined),
+  );
+  const activation = activate({ view: "inbox", token: 1, passive: true });
+  await settled();
+  expect(applyReveal).not.toHaveBeenCalled();
+  saved.resolve(["Archive"]);
+  await activation;
+  expect(applyReveal).toHaveBeenCalledWith(
+    "Page",
+    expect.objectContaining({ name: "inbox" }),
+  );
+});
+
+test("typing during a slow modal activation survives its completion", async () => {
+  const { activate, engine, set, state } = makeHarness(
+    undefined,
+    undefined,
+    false,
+    "modal",
+  );
+  let finish!: () => void;
+  engine.activate.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(state);
+      }),
+  );
+  const pending = activate({ view: "inbox", token: 1, phrase: "initial" });
+  expect(set.setPhrase).toHaveBeenLastCalledWith("initial");
+  set.setPhrase.mockClear();
+  finish();
+  await pending;
+  expect(set.setPhrase).not.toHaveBeenCalled();
+});

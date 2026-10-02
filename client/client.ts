@@ -1,0 +1,1567 @@
+import type {
+  CompletionContext,
+  CompletionResult,
+} from "@codemirror/autocomplete";
+import { history } from "@codemirror/commands";
+import { syntaxTree } from "@codemirror/language";
+import type { Compartment, EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import type { SyntaxNode } from "@lezer/common";
+import { jitter, sleep } from "@silverbulletmd/silverbullet/lib/async";
+import { deriveDbName } from "@silverbulletmd/silverbullet/lib/crypto";
+import {
+  encodePageURI,
+  encodeRef,
+  getNameFromPath,
+  isMarkdownPath,
+  type Path,
+  parseToRef,
+  type Ref,
+} from "@silverbulletmd/silverbullet/lib/ref";
+import type {
+  AppEvent,
+  ClickEvent,
+  CompleteEvent,
+  EnrichedClickEvent,
+  SlashCompletions,
+} from "@silverbulletmd/silverbullet/type/client";
+import type { IndexQueueBody } from "@silverbulletmd/silverbullet/type/datastore";
+import type {
+  FileMeta,
+  PageMeta,
+} from "@silverbulletmd/silverbullet/type/index";
+import type { SyncState } from "@silverbulletmd/silverbullet/type/revisions";
+import { keyboardHint } from "../plug-api/lib/shortcut.ts";
+import type { StyleObject } from "../plugs/index/space_style.ts";
+import { isSafeUrl } from "./markdown_renderer/sanitize_html.ts";
+import type { ResolveAnchorResult } from "../plugs/index/types.ts";
+import { version as publicVersion } from "../version.json";
+import { ClientSystem } from "./client_system.ts";
+import { withCompletionInfo } from "./codemirror/completion_info.ts";
+import { createEditorState } from "./codemirror/editor_state.ts";
+import { originLabel } from "./codemirror/external_presence.ts";
+import type { Config } from "./config.ts";
+import { ContentManager } from "./content_manager.ts";
+import { Augmenter } from "./data/data_augmenter.ts";
+import { DataStore } from "./data/datastore.ts";
+import { EncryptedKvPrimitives } from "./data/encrypted_kv_primitives.ts";
+import { IndexedDBKvPrimitives } from "./data/indexeddb_kv_primitives.ts";
+import type { KvPrimitives } from "./data/kv_primitives.ts";
+import { DataStoreMQ } from "./data/mq.datastore.ts";
+import { ObjectIndex } from "./data/object_index.ts";
+import { MainUI } from "./editor_ui.tsx";
+import { setGitSyncStreamConnected } from "./git_sync_status.ts";
+import { isValidEditor } from "./lib/command_filters.ts";
+import { isMobileDevice } from "./lib/mobile.ts";
+import { timedSpan } from "./lib/perf.ts";
+import {
+  logoutInProgress,
+  registerLogoutParticipant,
+  saveCurrentEditor,
+} from "./logout.ts";
+import { waitForLogout } from "./logout_state.ts";
+import { open as openNavigatorView } from "./navigator/navigator.ts";
+import {
+  REVISIONS_CHANGED_EVENT,
+  SYNC_CONFLICT,
+  SYNC_ERROR,
+  SYNC_PAUSED,
+} from "./navigator/views/revisions.ts";
+import { PathPageNavigator, parseRefFromURI } from "./navigator.ts";
+import { EventHook } from "./plugos/hooks/event.ts";
+import {
+  fileListPollDue,
+  REALTIME_HEALTH_TTL_MS,
+  RealtimeEvents,
+  type RealtimeFsEventOrigin,
+} from "./realtime_events.ts";
+import { Space } from "./space.ts";
+import { LuaBudgetStopped } from "./space_lua/budget.ts";
+import { evalStatement } from "./space_lua/eval.ts";
+import {
+  parseExpressionString,
+  parseBlock as parseLua,
+} from "./space_lua/parse.ts";
+import type { LuaCollectionQuery } from "./space_lua/query_collection.ts";
+import {
+  LuaEnv,
+  LuaRuntimeError,
+  LuaStackFrame,
+  luaValueToJS,
+} from "./space_lua/runtime.ts";
+import { resolveASTReference } from "./space_lua.ts";
+import { CheckedSpacePrimitives } from "./spaces/checked_space_primitives.ts";
+import { getOrCreateClientId } from "./spaces/client_id.ts";
+import { fsEndpoint } from "./spaces/constants.ts";
+import {
+  type ChangedFile,
+  EventedSpacePrimitives,
+} from "./spaces/evented_space_primitives.ts";
+import { HttpSpacePrimitives } from "./spaces/http_space_primitives.ts";
+import { shouldFlashSyncNotification } from "./sync_notification.ts";
+import type { Command, PaletteCommand } from "./types/command.ts";
+import type {
+  BootConfig,
+  ServiceWorkerSourceMessage,
+  ServiceWorkerTargetMessage,
+} from "./types/ui.ts";
+import { syncMessageNotification } from "./types/ui.ts";
+import { WidgetCache } from "./widget_cache.ts";
+
+// Fetch the file list ever so often, this will implicitly kick off a snapshot comparison resulting in the indexing of changed pages
+const fetchFileListInterval = 10000;
+
+// Cap on waiting for the sync engine to record a divergent base: a wedged
+// worker must delay a save, never block it indefinitely.
+const declareDivergentBaseTimeout = 5000;
+
+/**
+ * The page navigator's browsing modes, as segments of `std.pages`. "page" is
+ * that view's default segment, so it asks for nothing.
+ */
+function pickerSegment(mode: "page" | "meta" | "document" | "all") {
+  switch (mode) {
+    case "meta":
+      return "Meta";
+    case "document":
+      return "Documents";
+    case "all":
+      return "All";
+    default:
+      return undefined;
+  }
+}
+
+// Runtime API bridge: written by the client when running headless to evaluate Lua in the live client.
+export type SBRuntime = {
+  headless?: boolean;
+  captureId?: string;
+  ready?: boolean;
+  evalLua?: (expr: string) => Promise<unknown>;
+  evalLuaScript?: (script: string) => Promise<unknown>;
+};
+
+declare global {
+  var client: Client;
+  var sbRuntime: SBRuntime;
+}
+
+// How long a realtime event's attribution stays usable while the sync
+// round-trip it describes completes; matches the performFileSync timeout so
+// an origin can't outlive the sync it belongs to.
+const REALTIME_ORIGIN_TTL_MS = 30_000;
+
+const SYNC_FLASH_DEDUP_MS = 5_000;
+
+const SYNC_PROGRESS_MESSAGES = new Set([
+  "file-synced",
+  "file-sync-complete",
+  "space-sync-complete",
+  "sync-status",
+]);
+
+export class Client {
+  eventHook: EventHook;
+
+  space!: Space;
+
+  clientSystem!: ClientSystem;
+  eventedSpacePrimitives!: EventedSpacePrimitives;
+  httpSpacePrimitives!: HttpSpacePrimitives;
+  realtimeEvents?: RealtimeEvents;
+  private realtimeHealthyUntil = 0;
+  private lastFileListPoll = 0;
+  private syncNotificationId?: number;
+  private lastSyncState?: SyncState;
+  private realtimeOrigins = new Map<
+    string,
+    { origin: RealtimeFsEventOrigin; time: number }
+  >();
+  private recentSyncFlashes = new Map<string, number>();
+
+  ui!: MainUI;
+  ds!: DataStore;
+  mq!: DataStoreMQ;
+  // Used to store additional pageMeta outside the page index itself persistent between client runs (specifically: lastOpened)
+  pageMetaAugmenter!: Augmenter;
+  // Used to store additional command data outside the objects themselves persistent between client rusn (specifically: lastRun)
+  commandAugmenter!: Augmenter;
+
+  editorView!: EditorView;
+  commandKeyHandlerCompartment?: Compartment;
+  vimCompartment?: Compartment;
+  themeCompartment?: Compartment;
+  indentUnitCompartment?: Compartment;
+  undoHistoryCompartment?: Compartment;
+  markdownLanguageCompartment?: Compartment;
+
+  contentManager!: ContentManager;
+  fullSyncCompleted = false;
+  // Paths the sync engine has pulled down this session, fed by "file-synced"
+  // messages
+  readonly syncedPaths = new Set<string>();
+  // Seeded at boot so a client that never hears from the sync engine at all
+  // still has a point to measure the stall from.
+  lastSyncProgressAt = Date.now();
+  // Boot-time server round trip in ms; undefined when the ping failed
+  serverPingMs?: number;
+  private versionMismatchNotified = false;
+  // True once we've confirmed the server reports the same publicVersion as
+  // this client bundle and the plugs the server is shipping are aligned with the running build.
+  private versionsInSync = false;
+
+  // Set to true once the system is ready (plugs loaded)
+  public systemReady: boolean = false;
+  // Set to true once the object index has been fully built at least once
+  public fullIndexCompleted: boolean = false;
+  // Set to true once viewState.allPages has been populated from the index
+  public pageListLoaded: boolean = false;
+  // Guard so we only fire the loading→ready editor:reloadState once.
+  private widgetReadyDispatched: boolean = false;
+  // Resolves once the widget-ready transition has been dispatched and the
+  // resulting editor state rebuild has settled. Headless tests wait on
+  // this to avoid typing into the editor mid-rebuild.
+  public widgetsReady!: Promise<void>;
+  private resolveWidgetsReady!: () => void;
+  private pageNavigator!: PathPageNavigator;
+  private onLoadRef: Ref;
+  dbPrefix?: string;
+  syncMode = false;
+  widgetCache!: WidgetCache;
+  objectIndex!: ObjectIndex;
+
+  constructor(
+    private parent: Element,
+    public bootConfig: BootConfig,
+    readonly config: Config,
+  ) {
+    this.eventHook = new EventHook(this.config);
+    // The third case should only ever happen when the user provides an invalid index env variable
+    this.onLoadRef = parseRefFromURI() || this.getIndexRef();
+    this.widgetsReady = new Promise<void>((resolve) => {
+      this.resolveWidgetsReady = resolve;
+    });
+  }
+
+  /**
+   * This is a separated from the constructor to allow for async initialization
+   */
+  async init(encryptionKey?: CryptoKey) {
+    performance.mark("sb:client-init");
+    const dbName = await deriveDbName(
+      "data",
+      this.bootConfig.spaceFolderPath,
+      document.baseURI.replace(/\/$/, ""),
+      encryptionKey,
+    );
+    const idbKvPrimitives = new IndexedDBKvPrimitives(dbName);
+    await timedSpan("idb-open", () => idbKvPrimitives.init());
+    let kvPrimitives: KvPrimitives = idbKvPrimitives;
+
+    console.log("Using IndexedDB database", dbName);
+
+    if (encryptionKey) {
+      kvPrimitives = new EncryptedKvPrimitives(kvPrimitives, encryptionKey);
+      await (kvPrimitives as EncryptedKvPrimitives).init();
+      console.log("Enabled client-side encryption");
+    }
+    this.ds = new DataStore(kvPrimitives);
+
+    this.pageMetaAugmenter = new Augmenter(this.ds, ["aug", "pageMeta"]);
+    this.commandAugmenter = new Augmenter(this.ds, ["aug", "command"]);
+
+    this.mq = new DataStoreMQ(this.ds, this.eventHook);
+
+    this.widgetCache = new WidgetCache(this.ds);
+    this.contentManager = new ContentManager(this);
+    if (!(await waitForLogout())) {
+      this.ds.kv.close();
+      return;
+    }
+    registerLogoutParticipant(() => saveCurrentEditor(this));
+
+    this.objectIndex = new ObjectIndex(
+      this.ds,
+      this.config,
+      this.eventHook,
+      this.mq,
+    );
+
+    // Seed the full-index readiness flag from persistent state so a
+    // warm reload doesn't unnecessarily flash loading spinners. A stale
+    // stored version (older than `desiredIndexVersion`) still counts as
+    // ready: the entries are queryable while `ensureFullIndex` waits for
+    // sync + version confirmation. See `ObjectIndex.isIndexAvailable`.
+    this.fullIndexCompleted = await this.objectIndex.isIndexAvailable();
+
+    // After the initial index completes (object_index.ts dispatches this),
+    // mark the flag and — if the page list cache previously took the
+    // fallback branch (so `pageListLoaded` stayed false) — re-run it
+    // so it reflects the now-indexed, transform-applied values. The
+    // editor itself will be rebuilt by client_system's listener for
+    // the same event; we don't need to dispatch a fresh one here.
+    this.eventHook.addLocalListener("editor:reloadState", () => {
+      this.fullIndexCompleted = true;
+      if (!this.pageListLoaded) {
+        this.updatePageListCache().catch(console.error);
+      }
+    });
+
+    // If widget rendering is still gated waiting on a full index, the
+    // initial-index handler in ObjectIndex may have unsubscribed or never
+    // fired for this client — the index may have been completed by another
+    // window, which produces no event here at all. Poll until the page list
+    // cache can take its index-backed branch, then stop for good.
+    void this.pollForWidgetReadiness();
+
+    this.clientSystem = new ClientSystem(
+      this,
+      this.mq,
+      this.ds,
+      this.eventHook,
+      this.objectIndex,
+      this.bootConfig.readOnly,
+    );
+
+    await timedSpan("init-space", () => this.initSpace());
+
+    this.ui = new MainUI(this);
+    this.ui.render(this.parent);
+    this.registerUnsavedChangesWarning();
+
+    this.editorView = new EditorView({
+      state: createEditorState(this, { kind: "page", pageName: "" }, "", true),
+      parent: document.getElementById("sb-editor")!,
+    });
+
+    this.focus();
+
+    this.clientSystem.init();
+
+    if (this.bootConfig.performWipe) {
+      if (confirm("Are you sure you want to wipe the client?")) {
+        await this.wipeClient();
+        alert("Wipe done. Please reload the page or navigate away.");
+        return;
+      }
+    }
+    if (this.bootConfig.performReset) {
+      if (
+        confirm(
+          "Are you sure you want to reset the client? This will wipe all local data and re-sync everything.",
+        )
+      ) {
+        await this.wipeClient();
+        location.reload();
+        return;
+      }
+    }
+
+    await timedSpan("widget-cache-load", () => this.widgetCache.load());
+
+    // Let's ping the remote space to ensure we're authenticated properly, if not will result in a redirect to auth page
+    try {
+      const pingStart = performance.now();
+      await timedSpan("ping", () => this.httpSpacePrimitives.ping());
+      this.serverPingMs = performance.now() - pingStart;
+    } catch (e: any) {
+      if (e.message === "Not authenticated") {
+        console.warn("Not authenticated, redirecting to auth page");
+        return;
+      }
+      console.warn(
+        "Could not reach remote server, we're offline or the server is down",
+        e,
+      );
+    }
+
+    await timedSpan("load-plugs", () => this.loadPlugs());
+    performance.mark("sb:plugs-loaded");
+
+    if (
+      this.fullIndexCompleted &&
+      !(await this.mq.isQueueEmpty("indexQueue"))
+    ) {
+      // A reload can interrupt replacement of indexed scripts after their
+      // old records were cleared. Recover the queued work before reading them.
+      void this.objectIndex
+        .awaitIndexQueueDrain()
+        .then(() => this.eventHook.dispatchEvent("editor:reloadState"))
+        .catch(console.error);
+    } else {
+      await timedSpan("load-lua-scripts", () =>
+        this.clientSystem.loadLuaScripts(),
+      );
+    }
+    await timedSpan("init-navigator", () => this.initNavigator());
+    await this.eventHook.dispatchEvent("system:ready");
+    this.systemReady = true;
+    performance.mark("sb:system-ready");
+    this.maybeDispatchWidgetsReady();
+
+    // When the service worker is disabled (desktop app / headless) there's no
+    // SW proxy performing the `server-version` handshake that normally sets
+    // `versionsInSync`. The bundled client and server are a matching set, so
+    // treat versions as in sync. This both lets us check the index immediately
+    // AND lets `space-sync-complete` signals — bridged in from the native sync
+    // engine — drive the version-bump reindex after each sync cycle (otherwise
+    // the gate in `handleServiceWorkerMessage` would stay permanently closed).
+    if (this.bootConfig.disableServiceWorker) {
+      this.versionsInSync = true;
+      void this.objectIndex.ensureFullIndex(this.space);
+    }
+
+    this.initHeadlessRuntime();
+
+    await this.eventedSpacePrimitives.enable();
+
+    setInterval(() => {
+      void this.dispatchAppEvent("cron:secondPassed");
+    }, 1000);
+
+    this.loadCustomStyles().catch(console.error);
+
+    await timedSpan("editor-init", () => this.dispatchAppEvent("editor:init"));
+
+    client.editorView.dispatch({
+      effects: client.undoHistoryCompartment?.reconfigure([]),
+    });
+    client.editorView.dispatch({
+      effects: client.undoHistoryCompartment?.reconfigure([history()]),
+    });
+
+    this.updatePageListCache().catch(console.error);
+  }
+
+  private registerUnsavedChangesWarning() {
+    globalThis.addEventListener("beforeunload", (event) => {
+      if (!this.ui.viewState.unsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = true;
+    });
+  }
+
+  async initSpace() {
+    const clientId = await getOrCreateClientId(this.ds.kv);
+    this.httpSpacePrimitives = new HttpSpacePrimitives(
+      document.baseURI.replace(/\/*$/, "") + fsEndpoint,
+      this.bootConfig.spaceFolderPath,
+      (message, actionOrRedirectHeader) => {
+        if (logoutInProgress()) return;
+        alert(message);
+        if (!actionOrRedirectHeader || actionOrRedirectHeader === "reload") {
+          location.reload();
+        } else {
+          location.href = actionOrRedirectHeader;
+        }
+      },
+      // Bearer token injected by an embedder (e.g. the Tauri App) as
+      // `globalThis.silverbullet.bearerToken` before the bundle loads.
+      // Undefined in a normal browser deployment, which leaves
+      // HttpSpacePrimitives in its default cookie-only auth mode.
+      (globalThis as { silverbullet?: { bearerToken?: string } }).silverbullet
+        ?.bearerToken,
+      clientId,
+      // These fetches only actually reach the network when the service
+      // worker isn't intercepting them.
+      "editor",
+      this.bootConfig.disableServiceWorker || !globalThis.isSecureContext
+        ? (isOnline) => {
+            if (this.ui.viewState.isOnline !== isOnline) {
+              this.ui.viewDispatch({
+                type: "online-status-change",
+                isOnline,
+              });
+            }
+          }
+        : undefined,
+    );
+
+    this.eventedSpacePrimitives = new EventedSpacePrimitives(
+      new CheckedSpacePrimitives(
+        this.httpSpacePrimitives,
+        this.bootConfig.readOnly,
+      ),
+      this.eventHook,
+      this.ds,
+    );
+
+    setInterval(() => {
+      const now = Date.now();
+      if (
+        !fileListPollDue(
+          now,
+          this.lastFileListPoll,
+          this.realtimeHealthyUntil,
+          !!globalThis.navigator?.serviceWorker?.controller,
+        )
+      ) {
+        return;
+      }
+      this.lastFileListPoll = now;
+      void this.eventedSpacePrimitives.fetchFileList();
+    }, fetchFileListInterval + jitter());
+
+    this.eventHook.addLocalListener(
+      "file:changedBatch",
+      async (changed: ChangedFile[]) => {
+        console.log("Queueing index for", changed.length, "file(s)");
+        await this.mq.batchSend(
+          "indexQueue",
+          changed.map(
+            ({ name, isNew }): IndexQueueBody => ({
+              path: name,
+              cleared: isNew,
+            }),
+          ),
+        );
+      },
+    );
+
+    const space = new Space(
+      this.eventedSpacePrimitives,
+      this.eventHook,
+      (name, page) =>
+        this.clientSystem.localSyscall("index.resolveAnchor", [name, page]),
+    );
+
+    this.space = space;
+
+    this.eventHook.addLocalListener(
+      "file:changed",
+      (path: string, oldHash: number, _newHash: number, ownWrite: boolean) => {
+        if (
+          !this.space.watchInterval ||
+          this.currentPath() !== path ||
+          oldHash === undefined ||
+          ownWrite
+        ) {
+          return;
+        }
+        const entry = this.realtimeOrigins.get(path);
+        this.realtimeOrigins.delete(path);
+        const origin =
+          entry && Date.now() - entry.time < REALTIME_ORIGIN_TTL_MS
+            ? entry.origin
+            : undefined;
+        if (isMarkdownPath(path)) {
+          this.contentManager
+            .reloadPageContent(originLabel(origin))
+            .catch(console.error);
+        } else {
+          this.ui.flashNotification("Document changed elsewhere, reloading");
+          void this.reloadEditor();
+        }
+      },
+    );
+
+    this.eventHook.addLocalListener("file:changed", (fileName: string) => {
+      this.clientSystem.allKnownFiles.add(fileName);
+    });
+    this.eventHook.addLocalListener("file:deleted", (fileName: string) => {
+      this.clientSystem.allKnownFiles.delete(fileName);
+    });
+    this.eventHook.addLocalListener("file:listed", (allFiles: FileMeta[]) => {
+      this.clientSystem.allKnownFiles.clear();
+      allFiles.forEach((f) => {
+        this.clientSystem.allKnownFiles.add(f.name);
+      });
+      this.clientSystem.knownFilesLoaded = true;
+    });
+
+    this.space.watch();
+
+    this.realtimeEvents = new RealtimeEvents({
+      noteOrigin: (name, origin) => {
+        const now = Date.now();
+        for (const [k, v] of this.realtimeOrigins) {
+          if (now - v.time >= REALTIME_ORIGIN_TTL_MS) {
+            this.realtimeOrigins.delete(k);
+          }
+        }
+        this.realtimeOrigins.set(name, { origin, time: now });
+      },
+      probeFile: (name) =>
+        this.eventedSpacePrimitives.getFileMeta(name, false, "cheap"),
+      syncFile: (name, lastModified, revisionHash) =>
+        this.clientSystem
+          .localSyscall("sync.performFileSync", [
+            name,
+            lastModified,
+            revisionHash,
+          ])
+          .catch((e) => console.warn("[realtime] sync nudge failed", e)),
+      syncSpace: () =>
+        this.clientSystem
+          .localSyscall("sync.performSpaceSync", [])
+          .catch((e) => console.warn("[realtime] sync nudge failed", e)),
+      refreshFileList: () =>
+        this.eventedSpacePrimitives.fetchFileListWhenIdle(),
+      serviceWorkerActive: () =>
+        !!globalThis.navigator?.serviceWorker?.controller,
+      notifyStatus: (connected) => {
+        this.realtimeHealthyUntil = connected
+          ? Date.now() + REALTIME_HEALTH_TTL_MS
+          : 0;
+        if (setGitSyncStreamConnected(connected)) {
+          void this.eventHook.dispatchEvent(REVISIONS_CHANGED_EVENT, {});
+        }
+        void this.postServiceWorkerMessage({
+          type: "realtime-status",
+          connected,
+        });
+      },
+    });
+    this.realtimeEvents.onSyncState((state) => this.handleSyncState(state));
+    this.realtimeEvents.start(
+      `${document.baseURI.replace(/\/*$/, "")}/.events`,
+    );
+  }
+
+  private handleSyncState(state: SyncState) {
+    void this.eventHook.dispatchEvent(REVISIONS_CHANGED_EVENT, {});
+
+    const isNewProblem = shouldFlashSyncNotification(state, this.lastSyncState);
+    this.lastSyncState = state;
+
+    if (state.state === "conflicted" && state.paths.length > 0) {
+      if (!isNewProblem) return;
+      this.flashSyncNotification(SYNC_CONFLICT(state.paths.length), [
+        {
+          name: "Review conflicts",
+          run: () => {
+            void this.openNavigatorView("std.gitConflicts");
+          },
+        },
+      ]);
+      return;
+    }
+    if (state.state === "error") {
+      if (!isNewProblem) return;
+      this.flashSyncNotification(SYNC_ERROR, [
+        {
+          name: "View Git status",
+          run: () => {
+            void this.openNavigatorView("std.gitStatus");
+          },
+        },
+      ]);
+      return;
+    }
+    if (state.state === "paused") {
+      if (!isNewProblem) return;
+      this.flashSyncNotification(SYNC_PAUSED(state.reason), [
+        {
+          name: "View Git status",
+          run: () => {
+            void this.openNavigatorView("std.gitStatus");
+          },
+        },
+      ]);
+      return;
+    }
+    if (this.syncNotificationId !== undefined) {
+      this.ui.dismissNotification(this.syncNotificationId);
+      this.syncNotificationId = undefined;
+    }
+  }
+
+  private flashSyncNotification(
+    message: string,
+    actions: { name: string; run: () => void }[],
+  ) {
+    if (this.syncNotificationId !== undefined) {
+      this.ui.dismissNotification(this.syncNotificationId);
+    }
+    this.syncNotificationId = this.ui.flashNotification(message, "error", {
+      timeout: 0,
+      actions,
+    });
+  }
+
+  currentPath(): Path {
+    return this.ui.viewState.current?.path || this.onLoadRef.path;
+  }
+
+  currentName(): string {
+    return getNameFromPath(
+      this.ui.viewState.current?.path || this.onLoadRef.path,
+    );
+  }
+
+  currentPageMeta(): PageMeta | undefined {
+    return this.ui.viewState.current?.meta;
+  }
+
+  dispatchAppEvent(name: AppEvent, ...args: any[]): Promise<any[]> {
+    return this.eventHook.dispatchEvent(name, ...args);
+  }
+
+  dispatchClickEvent(clickEvent: ClickEvent) {
+    const editorState = this.editorView.state;
+    const sTree = syntaxTree(editorState);
+    const currentNode = sTree.resolveInner(clickEvent.pos);
+
+    const parentNodes: string[] = this.extractParentNodes(
+      editorState,
+      currentNode,
+    );
+    const enrichedEvent: EnrichedClickEvent = {
+      ...clickEvent,
+      parentNodes,
+    };
+    return this.dispatchAppEvent("page:click", enrichedEvent);
+  }
+
+  save(immediate = false): Promise<void> {
+    return this.contentManager.save(immediate);
+  }
+
+  reportError(e: any, context: string = "") {
+    if (e instanceof LuaBudgetStopped) {
+      console.info(
+        `Script stopped by the user during ${context || "execution"}`,
+      );
+      return;
+    }
+
+    console.error(`Error during ${context}:`, e);
+
+    if (
+      e.message === "Offline" ||
+      e.name === "AbortError" ||
+      e.name === "TimeoutError"
+    ) {
+      return;
+    }
+
+    if (e instanceof LuaRuntimeError) {
+      this.ui.flashNotification(`Lua error: ${e.message}`, "error");
+      const origin = resolveASTReference(e.sf.astCtx!);
+      if (origin) {
+        void client.navigate(origin);
+      }
+    } else {
+      this.ui.flashNotification(`Error: ${e.message}`, "error");
+    }
+  }
+
+  /**
+   * Opens a navigator view, reporting whether it actually got one.
+   */
+  async openNavigatorView(
+    name: string,
+    opts?: {
+      segment?: string;
+      phrase?: string;
+      dropdown?: unknown;
+      focus?: boolean;
+    },
+  ): Promise<boolean> {
+    try {
+      // `quiet`, because an unknown view here is not an error the user made:
+      // it means the space redefined this picker in Space Lua that hasn't
+      // been indexed yet, and the caller may have a fallback of its own.
+      return (await openNavigatorView(name, { ...opts, quiet: true })) === true;
+    } catch (e: any) {
+      console.warn("Could not open navigator view", name, e);
+      return false;
+    }
+  }
+
+  async startPageNavigate(
+    mode: "page" | "meta" | "document" | "all",
+  ): Promise<void> {
+    await this.openNavigatorView("std.pages", {
+      segment: pickerSegment(mode),
+    });
+  }
+
+  queryLuaObjects<T>(
+    tag: string,
+    query: LuaCollectionQuery,
+    scopedVariables?: Record<string, any>,
+  ): Promise<T[]> {
+    return this.objectIndex.queryLuaObjects(
+      this.clientSystem.spaceLuaEnv.env,
+      tag,
+      query,
+      scopedVariables,
+    );
+  }
+
+  /**
+   * In headless mode, expose Lua eval functions on globalThis for CDP access
+   * and signal readiness once the full index is complete.
+   */
+  private initHeadlessRuntime() {
+    if (!globalThis.sbRuntime.headless) {
+      return;
+    }
+    console.log("[RuntimeAPI] Headless mode, exposing eval functions");
+    const spaceLuaEnv = this.clientSystem.spaceLuaEnv;
+
+    const evalLuaCode = async (code: string) => {
+      const ast = parseLua(code);
+      const scriptEnv = new LuaEnv(spaceLuaEnv.env);
+      const tl = new LuaEnv();
+      tl.setLocal("_GLOBAL", spaceLuaEnv.env);
+      const sf = new LuaStackFrame(tl, ast.ctx);
+      const result = await evalStatement(ast, scriptEnv, sf);
+      const returnValue =
+        result &&
+        typeof result === "object" &&
+        "ctrl" in result &&
+        result.ctrl === "return" &&
+        Array.isArray(result.values)
+          ? result.values[0]
+          : result;
+      return (await Promise.resolve(luaValueToJS(returnValue, sf))) ?? null;
+    };
+
+    globalThis.sbRuntime.evalLua = (expr: string) =>
+      evalLuaCode(`return ${expr}`);
+    globalThis.sbRuntime.evalLuaScript = evalLuaCode;
+
+    // Signal readiness after widgets are fully ready (index complete +
+    // editor state rebuild settled). Waiting on the widget-ready
+    // transition ensures tests don't type into the editor mid-rebuild.
+    void this.widgetsReady.then(() => {
+      console.log(
+        "[RuntimeAPI] Ready (eval functions exposed + widgets ready)",
+      );
+      globalThis.sbRuntime.ready = true;
+    });
+  }
+
+  async updatePageListCache() {
+    console.log("Updating page list cache");
+    // Use the looser `isIndexAvailable` check: stale-but-present index
+    // entries are still queryable, so we can take the index branch.
+    const indexAvailable = await this.objectIndex.isIndexAvailable();
+
+    let allPages: PageMeta[] = [];
+
+    if (indexAvailable) {
+      console.log("Initial index complete, loading full page list via index.");
+      allPages = await timedSpan("page-list-query", () =>
+        this.queryLuaObjects<PageMeta>("page", {}),
+      );
+      await timedSpan("page-list-augment", () =>
+        this.pageMetaAugmenter.augmentObjectArray(allPages, "ref"),
+      );
+      const aspiringPageNames = await timedSpan("aspiring-page-query", () =>
+        this.queryLuaObjects<string>("aspiring-page", {
+          select: parseExpressionString("name"),
+          distinct: true,
+        }),
+      );
+      allPages.push(
+        ...aspiringPageNames.map(
+          (name): PageMeta => ({
+            ref: name,
+            tag: "page",
+            _isAspiring: true,
+            name: name,
+            created: "", // Aspiring pages don't have timestamps yet
+            lastModified: "", // Aspiring pages don't have timestamps yet
+            perm: "rw",
+          }),
+        ),
+      );
+    } else {
+      console.log(
+        "Initial sync not complete or index plug not loaded. Fetching page list directly using space.fetchPageList().",
+      );
+      try {
+        allPages = await this.space.fetchPageList();
+
+        for (const page of allPages) {
+          if (page.name.startsWith("Library/")) {
+            page.tags = ["meta"];
+          }
+        }
+      } catch (e) {
+        console.error("Failed to list pages directly from space:", e);
+        this.ui.flashNotification(
+          "Could not fetch page list directly.",
+          "error",
+        );
+        return;
+      }
+    }
+
+    // Only flip the readiness flag if allPages reflects the indexed,
+    // transform-applied values (the index branch). The fallback branch
+    // produces raw page meta without pageDecoration, so we keep
+    // showing loading widgets until the index is back.
+    // Flipped before the view dispatch below: widgets shouldn't wait for the
+    // page-list reducer + UI re-render.
+    if (indexAvailable) {
+      this.pageListLoaded = true;
+      performance.mark("sb:page-list-loaded");
+      this.maybeDispatchWidgetsReady();
+    }
+
+    this.ui.viewDispatch({
+      type: "update-page-list",
+      allPages: allPages,
+    });
+
+    void this.space.spacePrimitives.fetchFileList();
+  }
+
+  private async pollForWidgetReadiness() {
+    while (!this.widgetReadyDispatched && !this.pageListLoaded) {
+      await sleep(2000);
+      if (this.widgetReadyDispatched || this.pageListLoaded) {
+        return;
+      }
+      if (await this.objectIndex.hasFullIndexCompleted()) {
+        this.fullIndexCompleted = true;
+        await this.updatePageListCache();
+      }
+    }
+  }
+
+  /**
+   * If we just transitioned from "loading" to "ready" for widget
+   * rendering, dispatch editor:reloadState so the editor rebuilds and
+   * the loading placeholders get replaced with real widgets. Fires at
+   * most once per session.
+   */
+  public maybeDispatchWidgetsReady() {
+    if (this.widgetReadyDispatched) return;
+    if (
+      this.systemReady &&
+      this.clientSystem.scriptsLoaded &&
+      this.fullIndexCompleted &&
+      this.pageListLoaded
+    ) {
+      this.widgetReadyDispatched = true;
+      this.rebuildEditorState();
+      this.resolveWidgetsReady();
+      performance.mark("sb:widgets-ready");
+      const marks = performance
+        .getEntriesByType("mark")
+        .filter((m) => m.name.startsWith("sb:"));
+      console.log(
+        "[Boot]",
+        marks
+          .map((m) => `${m.name.slice(3)}=${Math.round(m.startTime)}ms`)
+          .join(" "),
+      );
+      const spans = performance
+        .getEntriesByType("measure")
+        .filter(
+          (m) =>
+            m.name.startsWith("sb:") &&
+            !m.name.startsWith("sb:lua-script:") &&
+            !m.name.startsWith("sb:widget:"),
+        );
+      console.log(
+        "[Boot spans]",
+        spans
+          .map((m) => `${m.name.slice(3)}=${Math.round(m.duration)}ms`)
+          .join(" "),
+      );
+      const idbStats = (globalThis as any).sbIdbStats;
+      if (idbStats) {
+        console.log("[Boot idb]", JSON.stringify(idbStats));
+      }
+    }
+  }
+
+  /**
+   * The command palette's data, as data: everything a navigator source needs
+   * to draw and order the palette, with the two things no query can reach
+   * (`lastRun`, and the AST context the cursor is in) already applied.
+   */
+  async listPaletteCommands(): Promise<PaletteCommand[]> {
+    // Built fresh rather than read off `viewState`: that map is only as
+    // current as the last `commandsUpdated` the UI happened to receive, and
+    // Space Lua's commands register after it. The hook is the authority.
+    const commands = this.clientSystem.commandHook.buildAllCommands();
+    await this.commandAugmenter.augmentObjectMap(commands);
+    const out: PaletteCommand[] = [];
+    for (const def of this.getCommandsByContext(
+      commands,
+      this.getContext(),
+    ).values()) {
+      if (def.hide) continue;
+      out.push({
+        name: def.name,
+        priority: Number(def.priority) || 0,
+        lastRun: def.lastRun,
+        // Prettified here rather than in the source: which shortcut applies
+        // (and how it is written) is a property of this client's platform --
+        // as is having a keyboard at all. A touch client gets no hint, so the
+        // palette spends that width on the command's name instead.
+        hint: isMobileDevice() ? undefined : keyboardHint(def),
+      });
+    }
+    return out;
+  }
+
+  async startCommandPalette(): Promise<void> {
+    await this.openNavigatorView("std.commands");
+  }
+
+  /**
+   * Saves when a command was last run to the datastore for command palette ordering
+   */
+  async registerCommandRun(name: string) {
+    await this.commandAugmenter.setAugmentation(name, {
+      lastRun: Date.now(),
+    });
+  }
+
+  async loadPlugs() {
+    await this.clientSystem.reloadPlugsFromSpace(this.space);
+    await this.dispatchAppEvent("plugs:loaded");
+  }
+
+  reconfigureLanguage() {
+    this.contentManager.reconfigureLanguage();
+  }
+
+  rebuildEditorState() {
+    this.contentManager.rebuildEditorState();
+  }
+
+  async completeWithEvent(
+    context: CompletionContext,
+    eventName: AppEvent,
+  ): Promise<CompletionResult | SlashCompletions | null> {
+    const editorState = context.state;
+    const selection = editorState.selection.main;
+    const line = editorState.doc.lineAt(selection.from);
+    const linePrefix = line.text.slice(0, selection.from - line.from);
+
+    const sTree = syntaxTree(editorState);
+    const currentNode = sTree.resolveInner(editorState.selection.main.from);
+
+    const parentNodes: string[] = this.extractParentNodes(
+      editorState,
+      currentNode,
+    );
+
+    const results = await this.dispatchAppEvent(eventName, {
+      pageName: this.currentName(),
+      linePrefix,
+      pos: selection.from,
+      parentNodes,
+    } as CompleteEvent);
+
+    let currentResult: CompletionResult | null = null;
+    for (const result of results) {
+      if (!result) {
+        continue;
+      }
+      if (currentResult) {
+        if (currentResult.from !== result.from) {
+          console.error(
+            "Got completion results from multiple sources with different `from` locators, cannot deal with that",
+          );
+          console.error(
+            "Previously had",
+            currentResult,
+            "now also got",
+            result,
+          );
+          return null;
+        } else {
+          currentResult = {
+            from: result.from,
+            options: [...currentResult.options, ...result.options],
+          };
+        }
+      } else {
+        currentResult = result;
+      }
+    }
+    if (!currentResult) {
+      return null;
+    }
+    return {
+      ...currentResult,
+      options: currentResult.options.map(withCompletionInfo),
+    };
+  }
+
+  isReadOnlyMode(): boolean {
+    return this.bootConfig.readOnly || this.currentPageMeta()?.perm === "ro";
+  }
+
+  public extractParentNodes(editorState: EditorState, currentNode: SyntaxNode) {
+    const parentNodes: string[] = [];
+    if (currentNode) {
+      let node: SyntaxNode | null = currentNode;
+      do {
+        if (["FencedCode", "FrontMatter"].includes(node.name)) {
+          const body = editorState.sliceDoc(node.from + 3, node.to - 3);
+          parentNodes.push(`${node.name}:${body}`);
+        } else if (node.name === "LuaDirective") {
+          const body = editorState.sliceDoc(node.from + 2, node.to - 1);
+          parentNodes.push(`${node.name}:${body}`);
+        } else {
+          parentNodes.push(node.name);
+        }
+        node = node.parent;
+      } while (node);
+    }
+    return parentNodes;
+  }
+
+  editorComplete(context: CompletionContext): Promise<CompletionResult | null> {
+    return this.completeWithEvent(
+      context,
+      "editor:complete",
+    ) as Promise<CompletionResult | null>;
+  }
+
+  reloadEditor() {
+    return this.contentManager.reloadEditor();
+  }
+
+  focus() {
+    const viewState = this.ui.viewState;
+    if (
+      [
+        viewState.showFilterBox,
+        viewState.showConfirm,
+        viewState.showPrompt,
+      ].some(Boolean) ||
+      document.querySelector(".sb-anchored-menu")
+    ) {
+      return;
+    }
+
+    if (this.contentManager.isDocumentEditor()) {
+      this.contentManager.documentEditor.focus();
+    } else {
+      this.editorView.focus();
+    }
+  }
+
+  getIndexRef(): Ref {
+    return parseToRef(this.bootConfig.indexPage) || { path: "index.md" };
+  }
+
+  /**
+   * Navigates the client to a particular ref (ingoring previous state)
+   */
+  navigate(ref: Ref | null, replaceState = false, newWindow = false) {
+    return this._navigate(ref, replaceState, newWindow, false);
+  }
+
+  /**
+   * Opens a particular ref in the client restoring previous state if available
+   */
+  open(ref: Ref | null, replaceState = false, newWindow = false) {
+    return this._navigate(ref, replaceState, newWindow, true);
+  }
+
+  private async _navigate(
+    ref: Ref | null,
+    replaceState = false,
+    newWindow = false,
+    restore = false,
+  ) {
+    ref ??= this.getIndexRef();
+
+    // Resolve $-anchor refs into a concrete page + position. The page
+    // navigator only knows about position/header/linecolumn details, so
+    // we have to translate here.
+    if (ref.details?.type === "anchor") {
+      const anchorName = ref.details.name;
+      const pageFilter = ref.path
+        ? ref.path.endsWith(".md")
+          ? ref.path.slice(0, -3)
+          : ref.path
+        : undefined;
+      const result: ResolveAnchorResult = await this.clientSystem.localSyscall(
+        "index.resolveAnchor",
+        [anchorName, pageFilter],
+      );
+      if (!result.ok) {
+        if (result.reason === "missing") {
+          this.ui.flashNotification(
+            `Anchor not found: $${anchorName}`,
+            "error",
+          );
+        } else {
+          const pages = result.hits.map((h) => h.page).join(", ");
+          this.ui.flashNotification(
+            `Duplicate anchor $${anchorName} on pages: ${pages}`,
+            "error",
+          );
+        }
+        return;
+      }
+      ref = {
+        ...ref,
+        path: `${result.page}.md`,
+        details: { type: "position", pos: result.range[0] },
+      };
+    }
+
+    if (newWindow) {
+      console.log(
+        "Navigating to new page in new window",
+        `${document.baseURI}${encodePageURI(encodeRef(ref))}`,
+      );
+      const win = globalThis.open(
+        `${document.baseURI}${encodePageURI(encodeRef(ref))}`,
+        "_blank",
+      );
+      if (win) {
+        win.focus();
+      }
+      return;
+    }
+
+    await this.pageNavigator!.navigate(ref, replaceState, restore);
+    this.focus();
+  }
+
+  openUrl(url: string, existingWindow = false) {
+    if (!isSafeUrl(url, true)) return;
+    if (!existingWindow) {
+      const win = globalThis.open(url, "_blank");
+      if (win) {
+        win.focus();
+      }
+    } else {
+      location.href = url;
+    }
+  }
+
+  async loadCustomStyles() {
+    if (this.bootConfig.disableSpaceStyle) {
+      console.warn("Not loading custom styles, since space style is disabled");
+      return;
+    }
+    if (!(await this.objectIndex.isIndexAvailable())) {
+      console.warn(
+        "Not loading custom styles, since no index is available yet",
+      );
+      return;
+    }
+
+    const spaceStyles = await this.queryLuaObjects<StyleObject>("space-style", {
+      objectVariable: "_",
+      orderBy: [
+        {
+          expr: parseExpressionString("_.priority"),
+          desc: true,
+        },
+      ],
+    });
+    if (!spaceStyles) {
+      return;
+    }
+
+    const customStylesContent = spaceStyles
+      .map((s) => `<style>${s.style}</style>`)
+      .join("\n\n");
+    this.ui.viewDispatch({
+      type: "set-ui-option",
+      key: "customStyles",
+      value: customStylesContent,
+    });
+    document.getElementById("custom-styles")!.innerHTML = customStylesContent;
+  }
+
+  async runCommandByName(name: string, args?: any[]) {
+    // `viewState.commands` is only as current as the last `commandsUpdated`
+    // the UI received; the hook is the authority, and Space Lua's commands in
+    // particular register after that snapshot is taken.
+    const cmd =
+      this.ui.viewState.commands.get(name) ??
+      this.clientSystem.commandHook.buildAllCommands().get(name);
+    if (!cmd) {
+      throw new Error(`Command ${name} not found`);
+    }
+    return args ? await cmd.run!(args) : await cmd.run!();
+  }
+
+  getCommandsByContext(
+    allCommands: Map<string, Command>,
+    context?: string,
+  ): Map<string, Command> {
+    const currentEditor = client.contentManager.documentEditor?.name;
+    const readOnly = this.isReadOnlyMode();
+    const commands = new Map(allCommands);
+    for (const [k, v] of allCommands.entries()) {
+      if (v.contexts && (!context || !v.contexts.includes(context))) {
+        commands.delete(k);
+      }
+
+      const requiredEditor = v.requireEditor;
+      if (!isValidEditor(currentEditor, requiredEditor)) {
+        commands.delete(k);
+      }
+
+      // Hide write-mode commands when the current page (or space) is read-only.
+      // CommandHook only filters on the space-wide read-only flag, so per-page
+      // read-only pages would otherwise still expose "rw" commands here.
+      if (readOnly && v.requireMode === "rw") {
+        commands.delete(k);
+      }
+    }
+
+    return commands;
+  }
+
+  getContext(): string | undefined {
+    const state = this.editorView.state;
+    const selection = state.selection.main;
+    if (selection.empty) {
+      return syntaxTree(state).resolveInner(selection.from).type.name;
+    }
+    return;
+  }
+
+  async handleServiceWorkerMessage(message: ServiceWorkerSourceMessage) {
+    const notification = syncMessageNotification(message);
+    if (notification) {
+      // One conflict can surface through more than one reconcile site (the
+      // background sync cycle and the save path), each broadcasting its own
+      // report — show the identical flash once, not per site.
+      const now = Date.now();
+      const lastShown = this.recentSyncFlashes.get(notification.text);
+      if (lastShown === undefined || now - lastShown > SYNC_FLASH_DEDUP_MS) {
+        this.recentSyncFlashes.set(notification.text, now);
+        this.ui.flashNotification(notification.text, notification.style);
+      }
+    }
+    if (SYNC_PROGRESS_MESSAGES.has(message.type)) {
+      this.lastSyncProgressAt = Date.now();
+    }
+    switch (message.type) {
+      case "file-synced": {
+        if (!this.fullSyncCompleted) {
+          this.syncedPaths.add(message.path);
+        }
+        break;
+      }
+      case "space-sync-complete": {
+        const isFirstSync = !this.fullSyncCompleted;
+        this.fullSyncCompleted = true;
+        // fullSyncCompleted supersedes per-path tracking
+        this.syncedPaths.clear();
+        // Only trigger a version-bump reindex once we've also confirmed the
+        // server is on the same publicVersion as this client — otherwise the
+        // reindex could run against stale plug code that's about to be
+        // replaced by the in-progress upgrade.
+        if (this.versionsInSync) {
+          void this.objectIndex.ensureFullIndex(this.space);
+        }
+
+        if (isFirstSync && message.operations > 0) {
+          // First sync pulled new content — reload the current page
+          // (it may have been empty because the file didn't exist locally yet)
+          void this.reloadEditor();
+          void this.clientSystem.reloadState();
+        }
+        break;
+      }
+      case "online-status": {
+        this.ui.viewDispatch({
+          type: "online-status-change",
+          isOnline: message.isOnline,
+        });
+        break;
+      }
+      case "auth-error": {
+        if (logoutInProgress()) break;
+        alert(message.message);
+        if (
+          !message.actionOrRedirectHeader ||
+          message.actionOrRedirectHeader === "reload"
+        ) {
+          location.reload();
+        } else {
+          location.href = message.actionOrRedirectHeader;
+        }
+        break;
+      }
+      case "server-version": {
+        if (message.serverVersion === publicVersion) {
+          const wasInSync = this.versionsInSync;
+          this.versionsInSync = true;
+          // If sync already completed before we learned versions were aligned,
+          // kick off the deferred reindex check now.
+          if (!wasInSync && this.fullSyncCompleted) {
+            void this.objectIndex.ensureFullIndex(this.space);
+          }
+        } else if (!this.versionMismatchNotified) {
+          this.versionMismatchNotified = true;
+          this.ui.flashNotification(
+            "A new version of SilverBullet client is available. A reload or two is required to update.",
+            "warning",
+            {
+              timeout: 0,
+              actions: [{ name: "Reload", run: () => location.reload() }],
+            },
+          );
+        }
+        break;
+      }
+    }
+
+    await this.eventHook.dispatchEvent(
+      `service-worker:${message.type}`,
+      message,
+    );
+  }
+
+  private async initNavigator() {
+    this.pageNavigator = new PathPageNavigator(this);
+
+    this.pageNavigator.subscribe(async (locationState) => {
+      console.log(`Now navigating to ${encodeRef(locationState)}`);
+
+      if (isMarkdownPath(locationState.path)) {
+        await this.contentManager.loadPage(locationState);
+      } else {
+        await this.contentManager.loadDocumentEditor(locationState);
+      }
+
+      // Persist this page as the last opened page, we'll use this for cold start PWA loads
+      await this.ds.set(["client", "lastOpenedPath"], locationState.path);
+    });
+
+    let ref = this.onLoadRef;
+
+    if (ref.details?.type === "header" && ref.details.header === "boot") {
+      const path = (await this.ds.get(["client", "lastOpenedPath"])) as Path;
+
+      if (path) {
+        console.log("Navigating to last opened page", getNameFromPath(path));
+        ref = { path };
+      } else {
+        // Strip the #boot detail — it's not a real header
+        delete ref.details;
+      }
+    }
+
+    await this.navigate(ref, true);
+
+    console.log("Focusing editor");
+    this.focus();
+  }
+
+  async wipeClient() {
+    console.log("Wiping IndexedDB databses not connected to this space...");
+    const dbName = (this.ds.kv as any).dbName;
+    const suffix = dbName.replace("sb_data", "");
+    if (indexedDB.databases) {
+      const allDbs = await indexedDB.databases();
+      for (const db of allDbs) {
+        if (!db.name?.endsWith(suffix)) {
+          console.log("Deleting database", db.name);
+          indexedDB.deleteDatabase(db.name!);
+        }
+      }
+    }
+    if (navigator.serviceWorker?.controller) {
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener("message", async (e: any) => {
+          const message: ServiceWorkerSourceMessage = e.data;
+          if (message.type === "dataWiped") {
+            console.log(
+              "Got data wipe confirm, uninstalling service worker now",
+            );
+            const registrations =
+              await navigator.serviceWorker.getRegistrations();
+            for (const registration of registrations) {
+              await registration.unregister();
+            }
+            console.log("Unregistered all service workers");
+            resolve();
+          }
+        });
+        navigator.serviceWorker?.getRegistration().then((registration) => {
+          console.log(
+            "Sending data wipe request to service worker",
+            registration,
+          );
+          registration?.active?.postMessage({
+            type: "wipe-data",
+          } as ServiceWorkerTargetMessage);
+        });
+      });
+    } else {
+      console.info(
+        "Service workers not enabled (no HTTPS?), so not unregistering.",
+      );
+    }
+    console.log("Stopping all systems");
+    this.space.unwatch();
+    this.realtimeEvents?.stop();
+
+    console.log("Clearing data store");
+    await this.ds.kv.clear();
+    console.log("Clearing complete.");
+  }
+
+  public async postServiceWorkerMessage(message: ServiceWorkerTargetMessage) {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    if (!registration?.active) {
+      // This causes too much noise
+      // console.warn("No active service worker, skipping message:", message.type);
+      return;
+    }
+    registration.active.postMessage(message);
+  }
+
+  public canDeferExternalUpdate(): boolean {
+    return !!globalThis.navigator?.serviceWorker?.controller;
+  }
+
+  /**
+   * Tells the sync engine that the page about to be written descends from
+   * `baseText` rather than from whatever the local replica holds now (see
+   * SyncEngine.declareDivergentBase for what it does with that).
+   */
+  public async declareDivergentBase(
+    path: string,
+    baseText: string,
+  ): Promise<void> {
+    const worker = (
+      await globalThis.navigator?.serviceWorker?.getRegistration()
+    )?.active;
+    if (!worker) {
+      return;
+    }
+    const channel = new MessageChannel();
+    const acknowledged = new Promise<boolean>((resolve) => {
+      const settle = (delivered: boolean) => {
+        clearTimeout(timer);
+        channel.port1.close();
+        resolve(delivered);
+      };
+      const timer = setTimeout(
+        () => settle(false),
+        declareDivergentBaseTimeout,
+      );
+      channel.port1.onmessage = () => settle(true);
+      worker.postMessage(
+        {
+          type: "declare-divergent-base",
+          path,
+          baseText,
+        } as ServiceWorkerTargetMessage,
+        [channel.port2],
+      );
+    });
+    if (!(await acknowledged)) {
+      console.warn(
+        "Service worker did not acknowledge divergent base, saving anyway:",
+        path,
+      );
+    }
+  }
+}

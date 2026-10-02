@@ -1,0 +1,243 @@
+import {
+  cloneTree,
+  findParentMatching,
+  type ParseTree,
+  renderToText,
+  traverseTree,
+} from "@silverbulletmd/silverbullet/lib/tree";
+import { cleanTags, collectTags, updateITags } from "./tags.ts";
+import { cleanAnchor, collectAnchor } from "./anchor.ts";
+import { isPositionAttribute } from "./position_attributes.ts";
+import type { FrontMatter } from "./frontmatter.ts";
+import type {
+  ObjectValue,
+  PageMeta,
+} from "@silverbulletmd/silverbullet/type/index";
+import { system } from "@silverbulletmd/silverbullet/syscalls";
+import { cleanAttributes, collectAttributes } from "./attribute.ts";
+import { collectPageLinks } from "./relation.ts";
+
+export type ItemObject = ObjectValue<
+  {
+    page: string;
+    name: string;
+    text: string;
+    // Deprecated, use range instead
+    pos: number;
+    // Deprecated, use range instead
+    toPos: number;
+    parent?: string;
+    links?: string[];
+    ilinks?: string[];
+    pageLastModified: string;
+  } & Record<string, any>
+>;
+
+export type TaskObject = ObjectValue<
+  ItemObject & {
+    done: boolean;
+    state: string;
+  } & Record<string, any>
+>;
+
+const completeStates = ["x", "X"];
+
+export async function indexItems(
+  pageMeta: PageMeta,
+  frontmatter: FrontMatter,
+  tree: ParseTree,
+) {
+  const shouldIndexAllItems = await system.getConfig("index.item.all", true);
+  const shouldIndexAllTasks = await system.getConfig("index.task.all", true);
+
+  const taskStates = await system.getConfig("taskStates", {});
+  const allCompleteStates = completeStates.concat(
+    Object.values(taskStates)
+      .filter((ts: any) => ts.done)
+      .map((ts: any) => ts.name),
+  );
+
+  let items: ObjectValue<ItemObject | TaskObject>[] = [];
+  // Cache extracted items by node position to avoid re-extracting parents
+  const itemCache = new Map<number, ItemObject | TaskObject>();
+
+  traverseTree(
+    tree,
+    (n) => {
+      if (n.type !== "ListItem") {
+        return false;
+      }
+
+      if (!n.children) {
+        return true;
+      }
+
+      items.push(
+        extractItemFromNode(
+          pageMeta.name,
+          n,
+          frontmatter,
+          true,
+          allCompleteStates,
+          itemCache,
+          pageMeta.lastModified,
+        ),
+      );
+
+      return false;
+    },
+    true,
+  );
+
+  if (!shouldIndexAllItems) {
+    items = items.filter((item) => item.tag !== "item" || item.tags?.length);
+  }
+  if (!shouldIndexAllTasks) {
+    items = items.filter((item) => item.tag !== "task" || item.tags?.length);
+  }
+
+  return items;
+}
+
+export function extractItemFromNode(
+  name: string,
+  itemNode: ParseTree,
+  frontmatter: FrontMatter,
+  withParents = true,
+  allCompleteStates: string[] = completeStates,
+  itemCache: Map<number, ItemObject | TaskObject> | undefined,
+  pageLastModified: string,
+): ItemObject | TaskObject {
+  if (itemCache?.has(itemNode.from!)) {
+    return itemCache.get(itemNode.from!)!;
+  }
+  const item: ItemObject | TaskObject = {
+    ref: `${name}@${itemNode.from}`,
+    tag: "item",
+    pos: itemNode.from!,
+    toPos: itemNode.to!,
+    range: [itemNode.from!, itemNode.to!],
+    name: "", // to be replaced
+    text: "", // to be replaced
+    page: name,
+    pageLastModified: pageLastModified,
+  };
+
+  // This will only be valid for items, not task
+  let nameNode = itemNode.children!.find((n) => n.type === "Paragraph");
+
+  const taskNode = itemNode.children!.find((n) => n.type === "Task");
+  if (taskNode) {
+    item.tag = "task";
+    item.state = taskNode.children![0].children![1].text!;
+    item.done = allCompleteStates.includes(item.state);
+    // Fake a paragraph node for text rendering later
+    nameNode = { type: "Paragraph", children: taskNode.children!.slice(1) };
+  }
+
+  // Collect anchor from nameNode only (not the whole itemNode) so that
+  // child sublist anchors don't bleed into the parent item's ref.
+  const anchor = nameNode ? collectAnchor(nameNode) : null;
+
+  const tags = collectTags(itemNode);
+  const attributes = collectAttributes(itemNode);
+  const links = collectPageLinks(itemNode);
+
+  item.text = renderToText(nameNode).trim();
+
+  if (nameNode) {
+    const nameNodeClone = cloneTree(nameNode);
+    cleanTags(nameNodeClone);
+    cleanAttributes(nameNodeClone);
+    cleanAnchor(nameNodeClone);
+    item.name = renderToText(nameNodeClone).trim();
+  } else {
+    item.name = item.text;
+  }
+
+  // First anchor wins; T12 lint flags duplicates.
+  if (anchor) {
+    item.ref = anchor.name;
+  }
+
+  if (tags.length > 0) {
+    item.tags = tags;
+  }
+
+  if (links.length > 0) {
+    item.links = links;
+    item.ilinks = links;
+  }
+
+  for (const [key, value] of Object.entries(attributes)) {
+    // `pos`/`range` are the item's own source offsets, not user data (#2028).
+    if (isPositionAttribute(key)) continue;
+    item[key] = value;
+  }
+
+  updateITags(item, frontmatter);
+
+  if (withParents) {
+    enrichItemFromParents(
+      itemNode,
+      item,
+      name,
+      frontmatter,
+      allCompleteStates,
+      itemCache,
+      pageLastModified,
+    );
+  }
+
+  if (itemCache) {
+    itemCache.set(itemNode.from!, item);
+  }
+
+  return item;
+}
+
+export function enrichItemFromParents(
+  n: ParseTree,
+  item: ItemObject,
+  pageName: string,
+  frontmatter: FrontMatter,
+  allCompleteStates: string[] = completeStates,
+  itemCache: Map<number, ItemObject | TaskObject> | undefined,
+  pageLastModified: string,
+) {
+  let directParent = true;
+  let parentItemNode = findParentMatching(n, (n) => n.type === "ListItem");
+  while (parentItemNode) {
+    const parentItem = extractItemFromNode(
+      pageName,
+      parentItemNode,
+      frontmatter,
+      false,
+      allCompleteStates,
+      itemCache,
+      pageLastModified,
+    );
+    if (directParent) {
+      item.parent = parentItem.ref;
+      directParent = false;
+    }
+    item.itags = [
+      ...new Set([
+        ...(item.itags || []),
+        ...parentItem.itags!.filter((t) => !["item", "task"].includes(t)),
+      ]),
+    ];
+
+    const ilinks = [
+      ...new Set([...(item.ilinks || []), ...(parentItem.ilinks || [])]),
+    ];
+    if (ilinks.length > 0) {
+      item.ilinks = ilinks;
+    }
+
+    parentItemNode = findParentMatching(
+      parentItemNode,
+      (n) => n.type === "ListItem",
+    );
+  }
+}

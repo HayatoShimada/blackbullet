@@ -1,0 +1,989 @@
+import { beforeEach, expect, test, vi } from "vitest";
+
+/**
+ * The panel-slot lifecycle behind the navigator's docks and modal (see
+ * `navigator.ts` for the consumer, and its own `navigator.test.ts` for the
+ * content-specific pinning of these same behaviors through navigator's
+ * wrappers). These tests exercise `createPanelLifecycle` directly, against a
+ * minimal fake `config` and a mocked mount surface.
+ */
+
+const datastore = {
+  get: vi.fn<(key: unknown[]) => Promise<unknown>>(),
+  set: vi.fn<(key: unknown[], value: unknown) => Promise<void>>(),
+  del: vi.fn<(key: unknown[]) => Promise<void>>(),
+};
+const editor = {
+  focus: vi.fn<() => Promise<void>>(),
+  flashNotification: vi.fn<(msg: string, kind?: string) => Promise<void>>(),
+};
+const slots = {
+  showSlot: vi.fn<(...args: unknown[]) => void>(),
+  hideSlot: vi.fn<(slot: string) => void>(),
+  focusedSlot: vi.fn<() => string | undefined>(),
+  setDockTarget: vi.fn<(slot: string, view?: string) => void>(),
+};
+const mobile = {
+  isNarrowScreen: vi.fn<() => boolean>(),
+};
+
+vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
+  datastore,
+  editor,
+}));
+vi.mock("./ui/slots.ts", () => slots);
+vi.mock("../lib/mobile.ts", () => mobile);
+
+const { createPanelLifecycle } = await import("./panel_lifecycle.ts");
+type Meta = { dock: string; supportedDocks?: string[] };
+
+function makeConfig(
+  overrides: Partial<Parameters<typeof createPanelLifecycle>[0]> = {},
+) {
+  const getMeta = vi.fn<(name: string) => Meta | undefined>();
+  const onSuperseded = vi.fn();
+  const onSlotClosedWithoutSuccessor = vi.fn();
+  const getForcedOpens = vi.fn<() => { name: string; dock: string }[]>(
+    () => [],
+  );
+  const config = {
+    getMeta,
+    getForcedOpens,
+    onSuperseded,
+    onSlotClosedWithoutSuccessor,
+    ...overrides,
+  };
+  return {
+    config,
+    getMeta,
+    onSuperseded,
+    onSlotClosedWithoutSuccessor,
+    getForcedOpens,
+  };
+}
+
+beforeEach(() => {
+  // Reset mock implementations too: unresolved datastore promises must not
+  // leak into subsequent tests.
+  vi.resetAllMocks();
+  mobile.isNarrowScreen.mockReturnValue(false);
+  slots.focusedSlot.mockReturnValue(undefined);
+});
+
+test("current echoes the activation a slot is showing, undefined otherwise", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  expect(lc.current("lhs")).toBeUndefined();
+  await lc.open("a");
+  const activation = lc.current("lhs");
+  expect(activation?.view).toBe("a");
+  expect(typeof activation?.token).toBe("number");
+});
+
+test("open on an unknown view flashes a notification naming the view kind and returns false", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue(undefined);
+  const lc = createPanelLifecycle(config);
+
+  expect(await lc.open("nope")).toBe(false);
+  expect(editor.flashNotification).toHaveBeenCalledWith(
+    "No navigator view named nope",
+    "error",
+  );
+});
+
+test("open on an unknown view with quiet:true suppresses the notification", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue(undefined);
+  const lc = createPanelLifecycle(config);
+
+  expect(await lc.open("nope", { quiet: true })).toBe(false);
+  expect(editor.flashNotification).not.toHaveBeenCalled();
+});
+
+test("open echoes extra opts fields (minus quiet) onto the activation the slot is shown with", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a", { quiet: true, phrase: "hello", segment: "s1" });
+
+  const activation = lc.current("lhs");
+  expect(activation).toMatchObject({
+    view: "a",
+    phrase: "hello",
+    segment: "s1",
+  });
+  expect(activation).not.toHaveProperty("quiet");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    "0 0 260px",
+    expect.objectContaining({ view: "a", phrase: "hello", segment: "s1" }),
+    false,
+  );
+});
+
+test("the modal is shown paint-gated; a dock never is", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "modal",
+    100,
+    expect.anything(),
+    true,
+  );
+
+  getMeta.mockReturnValue({ dock: "lhs" });
+  await lc.open("b");
+  expect(slots.showSlot).toHaveBeenLastCalledWith(
+    "lhs",
+    "0 0 260px",
+    expect.anything(),
+    false,
+  );
+});
+
+test("open on an already-focused sidebar slot toggles it closed instead of re-opening", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  slots.focusedSlot.mockReturnValue("lhs");
+  slots.showSlot.mockClear();
+
+  expect(await lc.open("a")).toBe(true);
+  expect(slots.hideSlot).toHaveBeenCalledWith("lhs");
+  expect(editor.focus).toHaveBeenCalled();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a focus=false open never takes the toggle-closed branch, and carries its opts into the activation", async () => {
+  // A dropdown preset must not toggle an already-focused view closed.
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  slots.focusedSlot.mockReturnValue("lhs");
+  slots.showSlot.mockClear();
+
+  expect(await lc.open("a", { focus: false, dropdown: "People/Pete" })).toBe(
+    true,
+  );
+  expect(slots.hideSlot).not.toHaveBeenCalled();
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    expect.anything(),
+    expect.objectContaining({
+      view: "a",
+      focus: false,
+      dropdown: "People/Pete",
+    }),
+    false,
+  );
+});
+
+test("restoreDocks' passive restore never takes the toggle-closed branch, even if the slot reports focused", async () => {
+  // Passive boot restores must show a focused slot rather than toggling it.
+  const { config, getMeta } = makeConfig({ sidebarSlots: ["lhs"] } as any);
+  datastore.get.mockResolvedValue("a");
+  getMeta.mockReturnValue({ dock: "lhs" });
+  slots.focusedSlot.mockReturnValue("lhs");
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(slots.hideSlot).not.toHaveBeenCalled();
+  expect(slots.showSlot).toHaveBeenCalled();
+});
+
+test("a newer open() supersedes the previous occupant of the same slot after the slot is shown", async () => {
+  const { config, getMeta, onSuperseded } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  expect(onSuperseded).not.toHaveBeenCalled();
+
+  const callOrder: string[] = [];
+  slots.showSlot.mockImplementation(() => callOrder.push("show"));
+  onSuperseded.mockImplementation(() => callOrder.push("superseded"));
+
+  await lc.open("b");
+  expect(onSuperseded).toHaveBeenCalledWith("a");
+  // Supersede must run after the success-path show.
+  expect(callOrder).toEqual(["show", "superseded"]);
+});
+
+test("a throw mid-activation still supersedes the previous occupant (finally, not a trailing call)", async () => {
+  // Supersede must also run if the datastore read rejects.
+  const { config, getMeta, onSuperseded } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  datastore.get.mockRejectedValueOnce(new Error("boom"));
+
+  await expect(lc.open("b")).rejects.toThrow("boom");
+  expect(onSuperseded).toHaveBeenCalledWith("a");
+});
+
+test("open() does not supersede when re-opening the same view already occupying the slot", async () => {
+  const { config, getMeta, onSuperseded } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  await lc.open("a");
+  expect(onSuperseded).not.toHaveBeenCalled();
+});
+
+test("hide fires onSlotClosedWithoutSuccessor only when the expected token matches the current activation", async () => {
+  const { config, getMeta, onSlotClosedWithoutSuccessor } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  const staleToken = lc.current("modal")!.token;
+  await lc.open("b"); // b now occupies "modal" with a newer token
+
+  // A stale activation token must not settle the current pick.
+  await lc.hide("modal", staleToken);
+  expect(onSlotClosedWithoutSuccessor).not.toHaveBeenCalled();
+  expect(slots.hideSlot).not.toHaveBeenCalled();
+
+  const freshToken = lc.current("modal")!.token;
+  await lc.hide("modal", freshToken);
+  expect(onSlotClosedWithoutSuccessor).toHaveBeenCalledWith("b");
+  expect(slots.hideSlot).toHaveBeenCalledWith("modal");
+});
+
+test("hide with no expected token closes whatever occupies the slot", async () => {
+  const { config, getMeta, onSlotClosedWithoutSuccessor } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  await lc.hide("modal");
+  expect(onSlotClosedWithoutSuccessor).toHaveBeenCalledWith("a");
+  expect(lc.current("modal")).toBeUndefined();
+});
+
+test("hide un-remembers a sidebar dock (datastore.del) but never touches the modal slot's dockedKey", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  await lc.hide("lhs");
+  expect(datastore.del).toHaveBeenCalledWith(["navigator", "docked", "lhs"]);
+
+  datastore.del.mockClear();
+  getMeta.mockReturnValue({ dock: "modal" });
+  await lc.open("b");
+  await lc.hide("modal");
+  expect(datastore.del).not.toHaveBeenCalled();
+});
+
+test("dismissing a mobile drawer keeps its reopen target and saved occupant", async () => {
+  const { config, getMeta } = makeConfig({ sidebarSlots: ["rhs"] });
+  getMeta.mockReturnValue({ dock: "rhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("history");
+  await lc.hide("rhs", undefined, { recordIntent: false });
+
+  expect(lc.current("rhs")).toBeUndefined();
+  expect(datastore.del).not.toHaveBeenCalledWith([
+    "navigator",
+    "docked",
+    "rhs",
+  ]);
+  expect(slots.setDockTarget).toHaveBeenCalledWith("rhs", "history");
+  expect(slots.setDockTarget).not.toHaveBeenCalledWith("rhs", undefined);
+});
+
+test("replaceInSlot never persists to dockedKey, unlike open", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.replaceInSlot("lhs", "a", {});
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "docked", "lhs"],
+    expect.anything(),
+  );
+});
+
+test("replaceInSlot reuses the slot's current width mode rather than the target's own saved width", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a"); // no saved width -> default 260 -> "0 0 260px"
+  await lc.resize({ slot: "lhs", width: 321, commit: true });
+  slots.showSlot.mockClear();
+
+  await lc.replaceInSlot("lhs", "b", {});
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    "0 0 321px",
+    expect.objectContaining({ view: "b" }),
+    false,
+  );
+  expect(datastore.get).not.toHaveBeenCalledWith(["navigator", "b", "width"]);
+});
+
+test("replaceInSlot also supersedes the previous occupant", async () => {
+  const { config, getMeta, onSuperseded } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  await lc.replaceInSlot("lhs", "b", {});
+  expect(onSuperseded).toHaveBeenCalledWith("a");
+});
+
+test("resize re-shows the dock at the clamped width, and only a commit persists it", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  slots.showSlot.mockClear();
+
+  await lc.resize({ slot: "lhs", width: 900 }); // above max
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "a", "width"],
+    expect.anything(),
+  );
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    "0 0 600px",
+    lc.current("lhs"),
+  );
+
+  await lc.resize({ slot: "lhs", width: 321, commit: true });
+  expect(datastore.set).toHaveBeenCalledWith(["navigator", "a", "width"], 321);
+});
+
+test("bhs opens at its configured height and persists a dragged height separately", async () => {
+  const { config, getMeta } = makeConfig({
+    defaultHeight: (name: string) => (name === "bottom" ? 360 : undefined),
+  });
+  getMeta.mockReturnValue({ dock: "bhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("bottom");
+  expect(slots.showSlot).toHaveBeenLastCalledWith(
+    "bhs",
+    "0 0 360px",
+    expect.objectContaining({ view: "bottom" }),
+    false,
+  );
+
+  await lc.resize({ slot: "bhs", height: 420, commit: true });
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "bottom", "height"],
+    420,
+  );
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "bottom", "width"],
+    420,
+  );
+});
+
+test("bhs restores the saved height before its configured height", async () => {
+  const { config, getMeta } = makeConfig({ defaultHeight: () => 360 });
+  getMeta.mockReturnValue({ dock: "bhs" });
+  datastore.get.mockImplementation((key: unknown[]) =>
+    Promise.resolve(key.at(-1) === "height" ? 410 : undefined),
+  );
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("bottom");
+  expect(slots.showSlot).toHaveBeenLastCalledWith(
+    "bhs",
+    "0 0 410px",
+    expect.objectContaining({ view: "bottom" }),
+    false,
+  );
+});
+
+test("a resize keeps the slot's activation identity, so it never re-activates the panel", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.open("a");
+  const activation = lc.current("lhs");
+  await lc.resize({ slot: "lhs", width: 300 });
+
+  expect(slots.showSlot).toHaveBeenLastCalledWith(
+    "lhs",
+    "0 0 300px",
+    activation,
+  );
+  expect(lc.current("lhs")).toBe(activation);
+});
+
+test("a stray resize with nothing in the slot is dropped", async () => {
+  const { config } = makeConfig();
+  const lc = createPanelLifecycle(config);
+
+  await lc.resize({ slot: "lhs", width: 300 });
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a resize tick that lands after a real close is dropped", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+  await lc.open("a");
+  await lc.hide("lhs");
+  slots.showSlot.mockClear();
+
+  await lc.resize({ slot: "lhs", width: 300 });
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a resize whose commit is interleaved by a close never re-shows the panel", async () => {
+  // A width commit must not reopen a dock closed mid-drag.
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+  await lc.open("a");
+  slots.showSlot.mockClear();
+
+  let resolveSet!: () => void;
+  datastore.set.mockImplementation(
+    () => new Promise<void>((resolve) => (resolveSet = resolve)),
+  );
+  const resizePromise = lc.resize({ slot: "lhs", width: 300, commit: true });
+  datastore.set.mockResolvedValue(undefined);
+  await lc.hide("lhs");
+
+  resolveSet();
+  await resizePromise;
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("an open cleared during its size lookup never publishes or persists its stale activation", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "bhs" });
+  let resolveHeight!: (value: number) => void;
+  datastore.get.mockImplementation((key: unknown[]) => {
+    if (key.at(-1) === "height") {
+      return new Promise<number>((resolve) => (resolveHeight = resolve));
+    }
+    return Promise.resolve(undefined);
+  });
+  const lifecycle = createPanelLifecycle(config);
+
+  const opening = lifecycle.open("tree");
+  await vi.waitFor(() => expect(resolveHeight).toBeTypeOf("function"));
+  await lifecycle.hide("bhs", undefined, { restoreDisplaced: false });
+  resolveHeight(420);
+
+  await expect(opening).resolves.toBe(false);
+  expect(lifecycle.current("bhs")).toBeUndefined();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "docked", "bhs"],
+    expect.anything(),
+  );
+});
+
+test("an open cleared during dock resolution never creates an activation", async () => {
+  let resolveDock!: (slot: string) => void;
+  const { config, getMeta } = makeConfig({
+    resolveDock: () =>
+      new Promise<string>((resolve) => {
+        resolveDock = resolve;
+      }),
+  });
+  getMeta.mockReturnValue({ dock: "bhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config);
+
+  const opening = lifecycle.open("tree");
+  await vi.waitFor(() => expect(resolveDock).toBeTypeOf("function"));
+  await lifecycle.hide("bhs", undefined, { restoreDisplaced: false });
+  resolveDock("bhs");
+
+  await expect(opening).resolves.toBe(false);
+  expect(lifecycle.current("bhs")).toBeUndefined();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("restoreDocks keeps a saved right dock available without opening its drawer on a narrow screen", async () => {
+  const { config, getMeta } = makeConfig({ sidebarSlots: ["rhs"] });
+  mobile.isNarrowScreen.mockReturnValue(true);
+  datastore.get.mockResolvedValue("history");
+  getMeta.mockReturnValue({ dock: "rhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+  expect(slots.setDockTarget).toHaveBeenCalledWith("rhs", "history");
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a configured-open left dock gets a mobile button without opening the drawer", async () => {
+  const { config, getMeta } = makeConfig({
+    sidebarSlots: ["lhs"],
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen: async () => true,
+  });
+  mobile.isNarrowScreen.mockReturnValue(true);
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(slots.setDockTarget).toHaveBeenCalledWith("lhs", "tree");
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("restoreDocks: a forced (openOnStart-equivalent) view beats a saved dockedKey for the same slot", async () => {
+  const { config, getMeta, getForcedOpens } = makeConfig({
+    sidebarSlots: ["lhs"],
+  } as any);
+  getForcedOpens.mockReturnValue([{ name: "forced", dock: "lhs" }]);
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(datastore.get).not.toHaveBeenCalledWith([
+    "navigator",
+    "docked",
+    "lhs",
+  ]);
+  expect(slots.showSlot).toHaveBeenCalled();
+  expect(lc.current("lhs")).toMatchObject({
+    view: "forced",
+    passive: true,
+  });
+});
+
+test("restoreDocks: a dock mismatch between the saved slot and the view's current meta is decisive (datastore.del, no restore)", async () => {
+  const { config, getMeta } = makeConfig({ sidebarSlots: ["lhs"] } as any);
+  datastore.get.mockResolvedValue("moved");
+  getMeta.mockReturnValue({ dock: "rhs" }); // lives elsewhere now
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(datastore.del).toHaveBeenCalledWith(["navigator", "docked", "lhs"]);
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("restoreDocks: a view re-docked via moveDock still restores -- resolveDock decides, not the static meta.dock", async () => {
+  // The saved dockedKey remembers "v" in rhs (where moveDock last put it),
+  // but "v"'s declared meta.dock is still its original default (modal).
+  // Without resolveDock in the loop this reads as a stale mismatch and the
+  // dock would be forgotten on every reload after a switch.
+  const { config, getMeta } = makeConfig({
+    sidebarSlots: ["rhs"],
+    resolveDock: () => Promise.resolve("rhs"),
+  } as any);
+  datastore.get.mockResolvedValue("v");
+  getMeta.mockReturnValue({ dock: "modal", supportedDocks: ["modal", "rhs"] });
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(datastore.del).not.toHaveBeenCalledWith([
+    "navigator",
+    "docked",
+    "rhs",
+  ]);
+  expect(slots.showSlot).toHaveBeenCalled();
+  expect(lc.current("rhs")).toMatchObject({ view: "v", passive: true });
+});
+
+test("restoreDocks: a currently-unresolvable saved name is skipped, not deleted", async () => {
+  // An unresolved view may still be indexing; keep its persisted dock.
+  const { config, getMeta } = makeConfig({ sidebarSlots: ["lhs"] } as any);
+  datastore.get.mockResolvedValue("not-yet-indexed");
+  getMeta.mockReturnValue(undefined);
+  const lc = createPanelLifecycle(config);
+
+  await lc.restoreDocks();
+
+  expect(datastore.del).not.toHaveBeenCalled();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("resolveDock overrides the meta's declared dock", async () => {
+  const { config, getMeta } = makeConfig({
+    resolveDock: () => Promise.resolve("rhs"),
+  });
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lc = createPanelLifecycle(config);
+  await lc.open("v");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "rhs",
+    expect.anything(),
+    expect.objectContaining({ view: "v" }),
+    false,
+  );
+});
+
+test("closing a displacing view restores the displaced one (one-deep)", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockImplementation((name: string) =>
+    name === "a" || name === "b" ? { dock: "rhs" } : undefined,
+  );
+  const lc = createPanelLifecycle(config);
+  await lc.open("a");
+  await lc.open("b"); // displaces a
+  slots.showSlot.mockClear();
+  await lc.hide("rhs");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "rhs",
+    expect.anything(),
+    expect.objectContaining({ view: "a", passive: true }),
+    false,
+  );
+});
+
+test("closing a view that displaced nothing just closes", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "rhs" });
+  const lc = createPanelLifecycle(config);
+  await lc.open("a");
+  slots.showSlot.mockClear();
+  await lc.hide("rhs");
+  expect(slots.showSlot).not.toHaveBeenCalled();
+  expect(slots.hideSlot).toHaveBeenCalledWith("rhs");
+});
+
+test("an A -> B -> A sequence restores B on close: the latest displacement wins, one-deep", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockImplementation((name: string) =>
+    name === "a" || name === "b" ? { dock: "rhs" } : undefined,
+  );
+  const lc = createPanelLifecycle(config);
+  await lc.open("a");
+  await lc.open("b"); // displaces a
+  await lc.open("a"); // re-opening a now displaces b
+  slots.showSlot.mockClear();
+  await lc.hide("rhs");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "rhs",
+    expect.anything(),
+    expect.objectContaining({ view: "b", passive: true }),
+    false,
+  );
+});
+
+test("a configured width is used when the client has none saved", async () => {
+  const { config, getMeta } = makeConfig({
+    defaultWidth: (name: string) => (name === "wide" ? 400 : undefined),
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("wide");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    "0 0 400px",
+    expect.anything(),
+    false,
+  );
+});
+
+test("a saved width still beats the configured one", async () => {
+  const { config, getMeta } = makeConfig({ defaultWidth: () => 400 });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(300);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("wide");
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    "0 0 300px",
+    expect.anything(),
+    false,
+  );
+});
+
+test("showing a sidebar view records it as open", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("tree");
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    true,
+  );
+});
+
+test("closing a sidebar records the view as closed", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("tree");
+  datastore.set.mockClear();
+  await lifecycle.hide("lhs");
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    false,
+  );
+});
+
+test("closing after a route hop records both views as closed", async () => {
+  // Close both the hopped-to view and the resident so neither reopens at boot.
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const store = new Map<string, unknown>();
+  datastore.get.mockImplementation((key: unknown[]) =>
+    Promise.resolve(store.get(JSON.stringify(key))),
+  );
+  datastore.set.mockImplementation((key: unknown[], value: unknown) => {
+    store.set(JSON.stringify(key), value);
+    return Promise.resolve();
+  });
+  datastore.del.mockImplementation((key: unknown[]) => {
+    store.delete(JSON.stringify(key));
+    return Promise.resolve();
+  });
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("pages");
+  await lifecycle.replaceInSlot("lhs", "tags", {});
+  await lifecycle.hide("lhs");
+
+  expect(store.get(JSON.stringify(["navigator", "tags", "open"]))).toBe(false);
+  expect(store.get(JSON.stringify(["navigator", "pages", "open"]))).toBe(false);
+});
+
+test("a close the client did not ask for preserves the dock and open preference", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("tree");
+  datastore.set.mockClear();
+  await lifecycle.hide("lhs", undefined, { recordIntent: false });
+  expect(datastore.del).not.toHaveBeenCalledWith([
+    "navigator",
+    "docked",
+    "lhs",
+  ]);
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    expect.anything(),
+  );
+
+  await lifecycle.open("tree");
+  datastore.set.mockClear();
+  await lifecycle.hide("lhs");
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    false,
+  );
+});
+
+test("a displaced view is left open, the closed one is not", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("tree");
+  await lifecycle.open("mentions"); // displaces "tree" without closing it
+  datastore.set.mockClear();
+
+  await lifecycle.hide("lhs");
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "mentions", "open"],
+    false,
+  );
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    true,
+  );
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    false,
+  );
+});
+
+test("evicting a shared slot closes its displaced predecessor instead of restoring it", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "bhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("tree");
+  await lifecycle.open("mentions");
+  datastore.set.mockClear();
+  slots.showSlot.mockClear();
+
+  await lifecycle.hide("bhs", undefined, { restoreDisplaced: false });
+  expect(lifecycle.current("bhs")).toBeUndefined();
+  expect(slots.hideSlot).toHaveBeenCalledWith("bhs");
+  expect(slots.showSlot).not.toHaveBeenCalled();
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "mentions", "open"],
+    false,
+  );
+  expect(datastore.set).toHaveBeenCalledWith(
+    ["navigator", "tree", "open"],
+    false,
+  );
+});
+
+test("the modal has no open state to record", async () => {
+  const { config, getMeta } = makeConfig();
+  getMeta.mockReturnValue({ dock: "modal" });
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.open("palette");
+  await lifecycle.hide("modal");
+  expect(datastore.set).not.toHaveBeenCalledWith(
+    ["navigator", "palette", "open"],
+    expect.anything(),
+  );
+});
+
+test("boot restore opens a configured-open sidebar view", async () => {
+  const sidebarDefaultOpen = vi.fn(async (name: string) => name === "tree");
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  expect(slots.showSlot).toHaveBeenCalledWith(
+    "lhs",
+    expect.anything(),
+    expect.objectContaining({ view: "tree", passive: true }),
+    false,
+  );
+});
+
+test("boot restore respects a client that closed the view", async () => {
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen: async () => false,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a contested sidebar slot goes to one view only", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["zebra", "apple"],
+    sidebarDefaultOpen: async () => true,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  const shown = slots.showSlot.mock.calls.map((call: any[]) => call[2].view);
+  expect(shown).toEqual(["apple"]);
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining('"zebra" is configured open on lhs'),
+  );
+  warn.mockRestore();
+});
+
+test("boot restore says nothing when the slot already holds the configured view", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen: async () => true,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockImplementation((key: unknown[]) =>
+    Promise.resolve(
+      JSON.stringify(key) === JSON.stringify(["navigator", "docked", "lhs"])
+        ? "tree"
+        : undefined,
+    ),
+  );
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  expect(slots.showSlot).toHaveBeenCalledTimes(1);
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
+
+test("a slot the client left to another view is skipped without a warning", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen: async () => true,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  datastore.get.mockImplementation((key: unknown[]) =>
+    Promise.resolve(
+      JSON.stringify(key) === JSON.stringify(["navigator", "docked", "lhs"])
+        ? "mentions"
+        : undefined,
+    ),
+  );
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  const shown = slots.showSlot.mock.calls.map((call: any[]) => call[2].view);
+  expect(shown).toEqual(["mentions"]);
+  expect(warn).not.toHaveBeenCalled();
+  expect(debug).toHaveBeenCalledWith(
+    expect.stringContaining('"tree" is configured open on lhs'),
+  );
+  warn.mockRestore();
+  debug.mockRestore();
+});
+
+test("a page-docked configured-open view is not restored into a sidebar", async () => {
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["mentions"],
+    sidebarDefaultOpen: async () => true,
+  });
+  getMeta.mockReturnValue({ dock: "page-bottom" });
+  datastore.get.mockResolvedValue(undefined);
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});
+
+test("a narrow screen skips the configured-open pass", async () => {
+  mobile.isNarrowScreen.mockReturnValue(true);
+  const { config, getMeta } = makeConfig({
+    getDefaultOpens: () => ["tree"],
+    sidebarDefaultOpen: async () => true,
+  });
+  getMeta.mockReturnValue({ dock: "lhs" });
+  const lifecycle = createPanelLifecycle(config as any);
+
+  await lifecycle.restoreDocks();
+  expect(slots.showSlot).not.toHaveBeenCalled();
+});

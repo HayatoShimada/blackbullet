@@ -1,0 +1,579 @@
+import { yaml as yamlLanguage } from "@codemirror/legacy-modes/mode/yaml";
+import { styleTags, tags as t } from "@lezer/highlight";
+import {
+  type Line,
+  type MarkdownConfig,
+  Strikethrough,
+  Subscript,
+  Superscript,
+} from "@lezer/markdown";
+import { markdown } from "@codemirror/lang-markdown";
+import { foldNodeProp, StreamLanguage } from "@codemirror/language";
+import * as ct from "./customtags.ts";
+import { TaskList } from "./extended_task.ts";
+import { Table } from "./table_parser.ts";
+import { FootnoteDefinition, FootnoteRef, InlineFootnote } from "./footnote.ts";
+import {
+  anchorRegex,
+  atMentionRegex,
+  nakedUrlRegex,
+  pWikiLinkRegex,
+  tagRegex,
+} from "./constants.ts";
+import { HTMLBlockParsing } from "./html_block.ts";
+import { ConflictMarkers } from "./conflict_marker.ts";
+import { parse } from "./parse_tree.ts";
+import type { ParseTree } from "@silverbulletmd/silverbullet/lib/tree";
+import { luaLanguage } from "../space_lua/parse.ts";
+import {
+  buildCustomSyntaxExtensions,
+  type CustomSyntaxSpecs,
+} from "./custom_syntax.ts";
+
+const WikiLink: MarkdownConfig = {
+  defineNodes: [
+    { name: "WikiLink" },
+    { name: "WikiLinkPage", style: ct.WikiLinkPartTag },
+    { name: "WikiLinkAlias", style: ct.WikiLinkPartTag },
+    { name: "WikiLinkDimensions", style: ct.WikiLinkPartTag },
+    { name: "WikiLinkMark", style: t.processingInstruction },
+  ],
+  parseInline: [
+    {
+      name: "WikiLink",
+      parse(cx, next, pos) {
+        // Do a preliminary check for performance
+        if (next !== 91 /* '[' */ && next !== 33 /* '!' */) {
+          return -1;
+        }
+
+        pWikiLinkRegex.lastIndex = 0;
+        const match = pWikiLinkRegex.exec(cx.slice(pos, cx.end));
+        if (!match || !match.groups) {
+          return -1;
+        }
+
+        const { leadingTrivia, stringRef, alias } = match.groups;
+        const endPos = pos + match[0].length;
+        let aliasElts: any[] = [];
+        if (alias) {
+          const pipeStartPos = pos + leadingTrivia.length + stringRef.length;
+          aliasElts = [
+            cx.elt("WikiLinkMark", pipeStartPos, pipeStartPos + 1),
+            cx.elt(
+              "WikiLinkAlias",
+              pipeStartPos + 1,
+              pipeStartPos + 1 + alias.length,
+            ),
+          ];
+        }
+
+        let allElts = cx.elt("WikiLink", pos, endPos, [
+          cx.elt("WikiLinkMark", pos, pos + leadingTrivia.length),
+          cx.elt(
+            "WikiLinkPage",
+            pos + leadingTrivia.length,
+            pos + leadingTrivia.length + stringRef.length,
+          ),
+          ...aliasElts,
+          cx.elt("WikiLinkMark", endPos - 2, endPos),
+        ]);
+
+        if (next === 33) {
+          allElts = cx.elt("Image", pos, endPos, [allElts]);
+        }
+
+        return cx.addElement(allElts);
+      },
+      after: "Emphasis",
+    },
+  ],
+};
+
+const LuaDirectives: MarkdownConfig = {
+  defineNodes: [
+    { name: "LuaDirective" },
+    { name: "LuaExpressionDirective" },
+    { name: "LuaDirectiveMark", style: ct.DirectiveMarkTag },
+  ],
+  parseInline: [
+    {
+      name: "LuaDirective",
+      parse(cx, next, pos) {
+        const textFromPos = cx.slice(pos, cx.end);
+        if (next !== 36 /* '$' */ || cx.slice(pos, pos + 2) !== "${") {
+          return -1;
+        }
+
+        let bracketNestingDepth = 0;
+        let valueLength = 0;
+        // We need to ensure balanced { and } pairs
+        loopLabel: for (; valueLength < textFromPos.length; valueLength++) {
+          switch (textFromPos[valueLength]) {
+            case "{":
+              bracketNestingDepth++;
+              break;
+            case "}":
+              bracketNestingDepth--;
+              if (bracketNestingDepth === 0) {
+                break loopLabel;
+              }
+              break;
+          }
+        }
+        if (bracketNestingDepth !== 0) {
+          return -1;
+        }
+
+        const bodyText = textFromPos.slice(2, valueLength);
+        const endPos = pos + valueLength + 1;
+
+        const parsedExpression = luaLanguage.parser.parse(`_(${bodyText})`);
+
+        // If bodyText starts with whitespace, we need to offset this later
+        const whiteSpaceOffset = bodyText.match(/^\s*/)?.[0].length ?? 0;
+
+        const node = parsedExpression.resolveInner(2, 0).firstChild?.nextSibling
+          ?.nextSibling;
+
+        if (!node) {
+          return -1;
+        }
+        const bodyEl = cx.elt("LuaExpressionDirective", pos + 2, endPos - 1, [
+          cx.elt(node.toTree()!, pos + 2 + whiteSpaceOffset),
+        ]);
+
+        return cx.addElement(
+          cx.elt("LuaDirective", pos, endPos, [
+            cx.elt("LuaDirectiveMark", pos, pos + 2),
+            bodyEl,
+            cx.elt("LuaDirectiveMark", endPos - 1, endPos),
+          ]),
+        );
+      },
+      after: "Emphasis",
+    },
+  ],
+};
+
+const HighlightDelim = { resolve: "Highlight", mark: "HighlightMark" };
+
+export const Highlight: MarkdownConfig = {
+  defineNodes: [
+    {
+      name: "Highlight",
+      style: { "Highlight/...": ct.Highlight },
+    },
+    {
+      name: "HighlightMark",
+      style: t.processingInstruction,
+    },
+  ],
+  parseInline: [
+    {
+      name: "Highlight",
+      parse(cx, next, pos) {
+        if (next !== 61 /* '=' */ || cx.char(pos + 1) !== 61) return -1;
+        return cx.addDelimiter(HighlightDelim, pos, pos + 2, true, true);
+      },
+      after: "Emphasis",
+    },
+  ],
+};
+
+export const attributeStartRegex = /^\[([\w$]+)(::?\s*)/;
+
+export const Attribute: MarkdownConfig = {
+  defineNodes: [
+    { name: "Attribute", style: { "Attribute/...": ct.AttributeTag } },
+    { name: "AttributeName", style: ct.AttributeNameTag },
+    { name: "AttributeValue", style: ct.AttributeValueTag },
+    { name: "AttributeMark", style: t.processingInstruction },
+    { name: "AttributeColon", style: t.processingInstruction },
+  ],
+  parseInline: [
+    {
+      name: "Attribute",
+      parse(cx, next, pos) {
+        let match: RegExpMatchArray | null;
+        const textFromPos = cx.slice(pos, cx.end);
+        if (
+          next !== 91 /* '[' */ ||
+          !(match = attributeStartRegex.exec(textFromPos))
+        ) {
+          return -1;
+        }
+        const [fullMatch, attributeName, attributeColon] = match;
+        let bracketNestingDepth = 1;
+        let valueLength = fullMatch.length;
+        loopLabel: for (; valueLength < textFromPos.length; valueLength++) {
+          switch (textFromPos[valueLength]) {
+            case "[":
+              bracketNestingDepth++;
+              break;
+            case "]":
+              bracketNestingDepth--;
+              if (bracketNestingDepth === 0) {
+                break loopLabel;
+              }
+              break;
+          }
+        }
+        if (bracketNestingDepth !== 0) {
+          console.log("Failed to parse attribute", fullMatch, textFromPos);
+          return -1;
+        }
+
+        if (textFromPos[valueLength + 1] === "(") {
+          return -1;
+        }
+
+        return cx.addElement(
+          cx.elt("Attribute", pos, pos + valueLength + 1, [
+            cx.elt("AttributeMark", pos, pos + 1), // [
+            cx.elt("AttributeName", pos + 1, pos + 1 + attributeName.length),
+            cx.elt(
+              "AttributeColon",
+              pos + 1 + attributeName.length,
+              pos + 1 + attributeName.length + attributeColon.length,
+            ),
+            cx.elt(
+              "AttributeValue",
+              pos + 1 + attributeName.length + attributeColon.length,
+              pos + valueLength,
+            ),
+            cx.elt("AttributeMark", pos + valueLength, pos + valueLength + 1), // [
+          ]),
+        );
+      },
+      after: "Emphasis",
+    },
+  ],
+};
+
+type RegexParserExtension = {
+  // unicode char code for efficiency .charCodeAt(0)
+  firstCharCode: number;
+  regex: RegExp;
+  nodeType: string;
+};
+
+function regexParser({
+  regex,
+  firstCharCode,
+  nodeType,
+}: RegexParserExtension): MarkdownConfig {
+  return {
+    defineNodes: [nodeType],
+    parseInline: [
+      {
+        name: nodeType,
+        parse(cx, next, pos) {
+          if (firstCharCode !== next) {
+            return -1;
+          }
+          const match = regex.exec(cx.slice(pos, cx.end));
+          if (!match) {
+            return -1;
+          }
+          return cx.addElement(cx.elt(nodeType, pos, pos + match[0].length));
+        },
+      },
+    ],
+  };
+}
+
+const NakedURL = regexParser({
+  firstCharCode: 104, // h
+  regex: new RegExp(`^${nakedUrlRegex.source}`),
+  nodeType: "NakedURL",
+});
+
+const Hashtag = regexParser({
+  firstCharCode: 35, // #
+  regex: new RegExp(`^${tagRegex.source}`),
+  nodeType: "Hashtag",
+});
+
+// NamedAnchor: $name with the leading `$` exposed as a NamedAnchorMark
+// child node so live-preview / HTML render can style the sigil
+// distinctly from the name.
+const namedAnchorRegex = new RegExp(`^${anchorRegex.source}`);
+const NamedAnchor: MarkdownConfig = {
+  defineNodes: ["NamedAnchor", "NamedAnchorMark"],
+  parseInline: [
+    {
+      name: "NamedAnchor",
+      parse(cx, next, pos) {
+        if (next !== 36 /* $ */) {
+          return -1;
+        }
+        const match = namedAnchorRegex.exec(cx.slice(pos, cx.end));
+        if (!match) {
+          return -1;
+        }
+        const end = pos + match[0].length;
+        return cx.addElement(
+          cx.elt("NamedAnchor", pos, end, [
+            cx.elt("NamedAnchorMark", pos, pos + 1),
+          ]),
+        );
+      },
+    },
+  ],
+};
+
+// AtMention: @nickname with the leading `@` exposed as an AtMentionMark
+// child node. Guarded on the preceding character so emails
+// (pete@example.com) never parse as mentions.
+const pAtMentionRegex = new RegExp(`^${atMentionRegex.source}`);
+const AtMention: MarkdownConfig = {
+  defineNodes: ["AtMention", "AtMentionMark"],
+  parseInline: [
+    {
+      name: "AtMention",
+      parse(cx, next, pos) {
+        if (next !== 64 /* @ */) {
+          return -1;
+        }
+        if (pos > cx.offset) {
+          const prev = cx.slice(pos - 1, pos);
+          if (/[\w.@+-]/.test(prev)) {
+            return -1;
+          }
+        }
+        const match = pAtMentionRegex.exec(cx.slice(pos, cx.end));
+        if (!match) {
+          return -1;
+        }
+        const end = pos + match[0].length;
+        return cx.addElement(
+          cx.elt("AtMention", pos, end, [
+            cx.elt("AtMentionMark", pos, pos + 1),
+          ]),
+        );
+      },
+    },
+  ],
+};
+
+// AtMentionSignature: a line-ending `-- @name` marking text as written
+// BY someone rather than addressed TO them. Fires on the marker, which comes
+// before the `@` the AtMention parser waits for, so it wins the position and
+// the mentions it consumes are not re-parsed.
+//
+// The AtMention nodes stay nested, so every existing AtMention consumer keeps
+// working; the relation indexer is the one place that tells the two apart.
+const AtMentionSignature: MarkdownConfig = {
+  defineNodes: ["AtMentionSignature", "AtMentionSignatureMark"],
+  parseInline: [
+    {
+      name: "AtMentionSignature",
+      parse(cx, next, pos) {
+        // `--`, em dash, en dash. A single hyphen is deliberately not a
+        // marker: a trailing prose dash before a real recipient would
+        // silently turn a mention into an attribution.
+        let markerLen: number;
+        if (next === 45 /* - */) {
+          if (cx.slice(pos, Math.min(pos + 2, cx.end)) !== "--") return -1;
+          markerLen = 2;
+        } else if (next === 8212 /* em dash */ || next === 8211 /* en dash */) {
+          markerLen = 1;
+        } else {
+          return -1;
+        }
+
+        // A signature starts its block or follows whitespace: `re--@zef` is
+        // not one.
+        if (pos > cx.offset && !/\s/.test(cx.slice(pos - 1, pos))) {
+          return -1;
+        }
+
+        const children = [
+          cx.elt("AtMentionSignatureMark", pos, pos + markerLen),
+        ];
+        let at = pos + markerLen;
+        let count = 0;
+        for (;;) {
+          const gap = /^[ \t]*/.exec(cx.slice(at, cx.end))![0];
+          // Names must be separated; the marker itself needs no gap.
+          if (count > 0 && gap.length === 0) break;
+          const nameStart = at + gap.length;
+          const match = pAtMentionRegex.exec(cx.slice(nameStart, cx.end));
+          if (!match) break;
+          const nameEnd = nameStart + match[0].length;
+          children.push(
+            cx.elt("AtMention", nameStart, nameEnd, [
+              cx.elt("AtMentionMark", nameStart, nameStart + 1),
+            ]),
+          );
+          at = nameEnd;
+          count++;
+        }
+        if (count === 0) return -1;
+
+        const rest = cx.slice(at, cx.end);
+        if (!/^[ \t]*(?:\n|$)/.test(rest)) {
+          return -1;
+        }
+        return cx.addElement(cx.elt("AtMentionSignature", pos, at, children));
+      },
+    },
+  ],
+};
+
+const yamlLang = StreamLanguage.define(yamlLanguage);
+
+export const FrontMatter: MarkdownConfig = {
+  defineNodes: [
+    { name: "FrontMatter", block: true },
+    { name: "FrontMatterMarker" },
+    { name: "FrontMatterCode" },
+  ],
+  parseBlock: [
+    {
+      name: "FrontMatter",
+      parse: (cx, line: Line) => {
+        if (cx.parsedPos !== 0) {
+          return false;
+        }
+        if (line.text !== "---") {
+          return false;
+        }
+        const frontStart = cx.parsedPos;
+        const elts = [
+          cx.elt(
+            "FrontMatterMarker",
+            cx.parsedPos,
+            cx.parsedPos + line.text.length + 1,
+          ),
+        ];
+        cx.nextLine();
+        const startPos = cx.parsedPos;
+        let endPos = startPos;
+        let text = "";
+        let lastPos = cx.parsedPos;
+        do {
+          text += `${line.text}\n`;
+          endPos += line.text.length + 1;
+          cx.nextLine();
+          if (cx.parsedPos === lastPos) {
+            // End of file, no progress made, there may be a better way to do this but :shrug:
+            return false;
+          }
+          lastPos = cx.parsedPos;
+        } while (line.text !== "---");
+        const yamlTree = yamlLang.parser.parse(text);
+
+        elts.push(
+          cx.elt("FrontMatterCode", startPos, endPos, [
+            cx.elt(yamlTree, startPos),
+          ]),
+        );
+        endPos = cx.parsedPos + line.text.length;
+        elts.push(
+          cx.elt(
+            "FrontMatterMarker",
+            cx.parsedPos,
+            cx.parsedPos + line.text.length,
+          ),
+        );
+        cx.nextLine();
+        cx.addElement(cx.elt("FrontMatter", frontStart, endPos, elts));
+        return true;
+      },
+      before: "HorizontalRule",
+    },
+  ],
+};
+
+const baseMarkdownExtensions: MarkdownConfig[] = [
+  HTMLBlockParsing,
+  ConflictMarkers,
+  WikiLink,
+  Attribute,
+  FrontMatter,
+  TaskList,
+  Highlight,
+  LuaDirectives,
+  FootnoteRef,
+  FootnoteDefinition,
+  InlineFootnote,
+  Strikethrough,
+  Table,
+  NakedURL,
+  Hashtag,
+  NamedAnchor,
+  AtMention,
+  AtMentionSignature,
+  Superscript,
+  Subscript,
+  {
+    props: [
+      foldNodeProp.add({
+        BulletList: () => null,
+        OrderedList: () => null,
+        ListItem: (tree, state) => ({
+          from: state.doc.lineAt(tree.from).to,
+          to: tree.to,
+        }),
+        FrontMatter: (tree) => ({
+          from: tree.from,
+          to: tree.to,
+        }),
+      }),
+
+      styleTags({
+        Task: ct.TaskTag,
+        TaskMark: ct.TaskMarkTag,
+        Comment: ct.CommentTag,
+        CommentMarker: ct.CommentMarkerTag,
+        CommentMarkerBlock: ct.CommentTag,
+        Subscript: ct.SubscriptTag,
+        Superscript: ct.SuperscriptTag,
+        "TableDelimiter StrikethroughMark": t.processingInstruction,
+        "TableHeader/...": t.heading,
+        TableCell: t.content,
+        // @lezer/markdown already styles these, and at equal specificity its
+        // rules win. The `*/` parent context makes ours take precedence.
+        "*/CodeInfo": ct.CodeInfoTag,
+        "*/HorizontalRule": ct.HorizontalRuleTag,
+        Hashtag: ct.HashtagTag,
+        NakedURL: ct.NakedURLTag,
+        NamedAnchor: ct.NamedAnchorTag,
+        NamedAnchorMark: ct.NamedAnchorMarkTag,
+        AtMention: ct.AtMentionTag,
+        AtMentionMark: ct.AtMentionMarkTag,
+        AtMentionSignature: ct.AtMentionSignatureTag,
+        AtMentionSignatureMark: ct.AtMentionSignatureMarkTag,
+        // A mention nested inside a signature (`-- @zef`) is an authorship
+        // mark, not a recipient pill: style its name and `@` with the muted
+        // signature look. The contextual path outranks the bare `AtMention`/
+        // `AtMentionMark` rules above for these nested nodes.
+        "AtMentionSignature/AtMention": ct.AtMentionSignatureTag,
+        "AtMentionSignature/AtMention/AtMentionMark":
+          ct.AtMentionSignatureMarkTag,
+      }),
+    ],
+  },
+];
+
+export const extendedMarkdownLanguage = markdown({
+  extensions: baseMarkdownExtensions,
+}).language;
+
+export function buildExtendedMarkdownLanguage(
+  syntaxExtensions?: CustomSyntaxSpecs,
+) {
+  if (!syntaxExtensions || Object.keys(syntaxExtensions).length === 0) {
+    return extendedMarkdownLanguage;
+  }
+  const customConfigs = buildCustomSyntaxExtensions(syntaxExtensions);
+  return markdown({
+    extensions: [...baseMarkdownExtensions, ...customConfigs],
+  }).language;
+}
+
+export function parseMarkdown(text: string, offset?: number): ParseTree {
+  return parse(extendedMarkdownLanguage, text, offset);
+}

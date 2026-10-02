@@ -1,0 +1,25 @@
+import type { KV, KvKey } from "../../plug-api/types/datastore.ts";
+
+export type KvQueryOptions = {
+  prefix?: KvKey;
+};
+
+export interface KvPrimitives {
+  batchGet(keys: KvKey[]): Promise<(any | undefined)[]>;
+
+  batchSet(entries: KV[]): Promise<void>;
+
+  batchDelete(keys: KvKey[]): Promise<void>;
+
+  query<T = any>(options: KvQueryOptions): AsyncIterableIterator<KV<T>>;
+
+  /**
+   * A more efficient way to do counts
+   */
+  countQuery(options: KvQueryOptions): Promise<number>;
+
+  // Completely clear all data from this datastore
+  clear(): Promise<void>;
+
+  close(): void;
+}

@@ -1,0 +1,314 @@
+import { expect, test } from "vitest";
+import { parse } from "./parse_tree.ts";
+import { extendedMarkdownLanguage } from "./parser.ts";
+import type { ParseTree } from "../../plug-api/lib/tree.ts";
+
+function parseHtml(md: string): ParseTree {
+  return parse(extendedMarkdownLanguage, md);
+}
+
+/** Recursively collect all node types in tree order. */
+function collectTypes(tree: ParseTree): (string | undefined)[] {
+  const result: (string | undefined)[] = [];
+  if (tree.type) result.push(tree.type);
+  if (tree.children) {
+    for (const child of tree.children) {
+      result.push(...collectTypes(child));
+    }
+  }
+  return result;
+}
+
+/** Depth-first search for the first node of a given type. */
+function findNode(tree: ParseTree, type: string): ParseTree | undefined {
+  if (tree.type === type) return tree;
+  for (const child of tree.children ?? []) {
+    const hit = findNode(child, type);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Get the first child of the Document node. */
+function topNode(tree: ParseTree): ParseTree {
+  return tree.children![0];
+}
+
+/** Get the text content of a node (from its text children). */
+function nodeText(tree: ParseTree): string {
+  if (tree.text !== undefined) return tree.text;
+  return tree.children?.map((c) => nodeText(c)).join("") ?? "";
+}
+
+test("simple table produces HTMLBlock with structured children", () => {
+  const tree = parseHtml("<table><tr><td>hello</td></tr></table>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+
+  const childTypes = block.children!.filter((c) => c.type).map((c) => c.type);
+  expect(childTypes).toEqual([
+    "HTMLOpenTag",
+    "HTMLOpenTag",
+    "HTMLOpenTag",
+    "HTMLCloseTag",
+    "HTMLCloseTag",
+    "HTMLCloseTag",
+  ]);
+});
+
+test("tag text is preserved in children", () => {
+  const tree = parseHtml("<div>content</div>");
+  const block = topNode(tree);
+  const openTag = block.children!.find((c) => c.type === "HTMLOpenTag")!;
+  expect(nodeText(openTag)).toBe("<div>");
+
+  const closeTag = block.children!.find((c) => c.type === "HTMLCloseTag")!;
+  expect(nodeText(closeTag)).toBe("</div>");
+
+  const textNodes = block.children!.filter((c) => !c.type);
+  expect(textNodes.some((t) => t.text === "content")).toBe(true);
+});
+
+test("attributes are preserved in HTMLOpenTag text", () => {
+  const tree = parseHtml('<td data-type="number" class="cell">42</td>');
+  const block = topNode(tree);
+  const openTag = block.children!.find((c) => c.type === "HTMLOpenTag")!;
+  expect(nodeText(openTag)).toBe('<td data-type="number" class="cell">');
+});
+
+test("self-closing tag produces HTMLSelfClosingTag", () => {
+  const tree = parseHtml("<div><br /><hr /></div>");
+  const block = topNode(tree);
+  const selfClosing = block.children!.filter(
+    (c) => c.type === "HTMLSelfClosingTag",
+  );
+  expect(selfClosing).toHaveLength(2);
+  expect(nodeText(selfClosing[0])).toBe("<br />");
+  expect(nodeText(selfClosing[1])).toBe("<hr />");
+});
+
+test("bold markdown inside td is parsed", () => {
+  const tree = parseHtml("<td>hello **world**</td>");
+  const block = topNode(tree);
+  const types = collectTypes(block);
+  expect(types).toContain("StrongEmphasis");
+});
+
+test("wiki link inside td is parsed", () => {
+  const tree = parseHtml("<td>see [[MyPage]]</td>");
+  const block = topNode(tree);
+  const types = collectTypes(block);
+  expect(types).toContain("WikiLink");
+  expect(types).toContain("WikiLinkPage");
+});
+
+test("hashtag inside td is parsed", () => {
+  const tree = parseHtml("<td>#sometag</td>");
+  const block = topNode(tree);
+  const types = collectTypes(block);
+  expect(types).toContain("Hashtag");
+});
+
+test("italic and bold in list item", () => {
+  const tree = parseHtml("<ul><li>_italic_ and **bold**</li></ul>");
+  const block = topNode(tree);
+  const types = collectTypes(block);
+  expect(types).toContain("Emphasis");
+  expect(types).toContain("StrongEmphasis");
+});
+
+test("multi-line table is parsed correctly", () => {
+  const md = `<table>
+<tr><td>row1</td></tr>
+<tr><td>row2</td></tr>
+</table>`;
+  const tree = parseHtml(md);
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+
+  const openTags = block.children!.filter((c) => c.type === "HTMLOpenTag");
+  expect(openTags).toHaveLength(5);
+});
+
+test("nested same-name tags are handled", () => {
+  const tree = parseHtml("<div><div>inner</div></div>");
+  const block = topNode(tree);
+  const opens = block.children!.filter((c) => c.type === "HTMLOpenTag");
+  const closes = block.children!.filter((c) => c.type === "HTMLCloseTag");
+  expect(opens).toHaveLength(2);
+  expect(closes).toHaveLength(2);
+});
+
+test("table with data attributes and markdown in cells", () => {
+  const md = `<table>
+<thead><tr><th>name</th><th>age</th></tr></thead>
+<tbody>
+<tr><td data-table-cell-type="string">[[Alice]]</td><td data-table-cell-type="number">30</td></tr>
+</tbody>
+</table>`;
+  const tree = parseHtml(md);
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+
+  const types = collectTypes(block);
+  expect(types).toContain("WikiLink");
+
+  const openTags = block.children!.filter((c) => c.type === "HTMLOpenTag");
+  const tdWithAttr = openTags.find((t) =>
+    nodeText(t).includes("data-table-cell-type"),
+  );
+  expect(tdWithAttr).toBeDefined();
+  expect(nodeText(tdWithAttr!)).toContain('data-table-cell-type="string"');
+});
+
+test("HTML comments produce CommentBlock", () => {
+  const tree = parseHtml("<!-- this is a comment -->");
+  expect(topNode(tree).type).toBe("CommentBlock");
+});
+
+test("multi-line comment produces CommentBlock", () => {
+  const md = `<!--
+multi-line
+comment
+-->`;
+  const tree = parseHtml(md);
+  expect(topNode(tree).type).toBe("CommentBlock");
+});
+
+test("script block produces HTMLBlock (not structured)", () => {
+  const tree = parseHtml("<script>alert(1)</script>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+  const hasOpenTag = block.children?.some((c) => c.type === "HTMLOpenTag");
+  expect(hasOpenTag).toBeFalsy();
+});
+
+test("pre block produces HTMLBlock (not structured)", () => {
+  const tree = parseHtml("<pre>code here</pre>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+  const hasOpenTag = block.children?.some((c) => c.type === "HTMLOpenTag");
+  expect(hasOpenTag).toBeFalsy();
+});
+
+test("processing instruction produces ProcessingInstructionBlock", () => {
+  const tree = parseHtml("<?xml version='1.0'?>");
+  expect(topNode(tree).type).toBe("ProcessingInstructionBlock");
+});
+
+test("regular paragraph is not affected", () => {
+  const tree = parseHtml("Just some text");
+  expect(topNode(tree).type).toBe("Paragraph");
+});
+
+test("inline HTML in paragraph still works", () => {
+  const tree = parseHtml("Hello <b>bold</b> world");
+  const para = topNode(tree);
+  expect(para.type).toBe("Paragraph");
+  const types = collectTypes(para);
+  expect(types).toContain("HTMLTag");
+});
+
+test("markdown table is not affected", () => {
+  const md = `| a | b |
+| -- | -- |
+| 1 | 2 |`;
+  const tree = parseHtml(md);
+  expect(topNode(tree).type).toBe("Table");
+});
+
+test("empty div", () => {
+  const tree = parseHtml("<div></div>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+  const opens = block.children!.filter((c) => c.type === "HTMLOpenTag");
+  const closes = block.children!.filter((c) => c.type === "HTMLCloseTag");
+  expect(opens).toHaveLength(1);
+  expect(closes).toHaveLength(1);
+});
+
+test("table with empty cells", () => {
+  const tree = parseHtml("<table><tr><td></td><td></td></tr></table>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+  const opens = block.children!.filter((c) => c.type === "HTMLOpenTag");
+  expect(opens).toHaveLength(4);
+});
+
+test("data-table-empty attribute on table", () => {
+  const tree = parseHtml("<table data-table-empty></table>");
+  const block = topNode(tree);
+  expect(block.type).toBe("HTMLBlock");
+  const openTag = block.children!.find((c) => c.type === "HTMLOpenTag")!;
+  expect(nodeText(openTag)).toContain("data-table-empty");
+});
+
+test("a comment body is parsed as markdown", () => {
+  const tree = parseHtml("<!--\n\n* [ ] Hello\n\n-->\n");
+  const node = topNode(tree);
+  expect(node.type).toBe("CommentBlock");
+  const types = collectTypes(node);
+  expect(types).toContain("BulletList");
+  expect(types).toContain("Task");
+  expect(types).toContain("CommentMarker");
+});
+
+test("a single-line comment parses its body too", () => {
+  const tree = parseHtml("<!-- TODO: fix this -->\n");
+  const node = topNode(tree);
+  expect(node.type).toBe("CommentBlock");
+  expect(collectTypes(node)).toContain("Paragraph");
+  expect(nodeText(node)).toBe("<!-- TODO: fix this -->");
+});
+
+test("marker comments stay flat", () => {
+  for (const src of ["<!--#lua 3 + 4 -->\n", "<!--/lua-->\n"]) {
+    const node = topNode(parseHtml(src));
+    expect(node.type).toBe("CommentMarkerBlock");
+    expect(collectTypes(node)).not.toContain("Paragraph");
+  }
+});
+
+test("an unclosed comment consumes the rest of the document", () => {
+  const tree = parseHtml("before\n\n<!--\nstill inside\n");
+  const node = tree.children![tree.children!.length - 1];
+  expect(node.type).toBe("CommentBlock");
+  expect(nodeText(node)).toContain("still inside");
+});
+
+// Enclosing quote/list prefixes are reparsed as structure inside comments.
+// Offsets remain valid, but the resulting node types are wrong.
+test("a quoted comment reparses its own quote markers", () => {
+  const doc = "> <!--\n> * item\n> -->\n";
+  const tree = parseHtml(doc);
+  const comment = findNode(tree, "CommentBlock")!;
+  expect(collectTypes(comment)).toContain("Blockquote");
+  expect(doc.slice(comment.from!, comment.to!)).toBe("<!--\n> * item\n> -->");
+});
+
+test("a deeply indented comment reparses its indent as a code block", () => {
+  const doc = "* outer\n\n    <!--\n    * inner\n    -->\n";
+  const tree = parseHtml(doc);
+  const comment = findNode(tree, "CommentBlock")!;
+  const types = collectTypes(comment);
+  expect(types).toContain("CodeBlock");
+  expect(types).not.toContain("BulletList");
+  const code = findNode(comment, "CodeText")!;
+  expect(doc.slice(code.from!, code.to!)).toBe("* inner");
+});
+
+test("spliced children keep document offsets", () => {
+  const doc = "lead\n\n<!--\n* item\n-->\n";
+  const tree = parseHtml(doc);
+  const comment = tree.children!.find((c) => c.type === "CommentBlock")!;
+  const findItem = (t: typeof tree): typeof tree | undefined => {
+    if (t.type === "ListItem") return t;
+    for (const child of t.children ?? []) {
+      const hit = findItem(child);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const item = findItem(comment)!;
+  expect(doc.slice(item.from!, item.to!)).toBe("* item");
+});

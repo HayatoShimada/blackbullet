@@ -1,0 +1,37 @@
+name: sync
+functions:
+  # Commands
+  syncSpaceCommand:
+    path: "./sync.ts:syncSpaceCommand"
+    command:
+      name: "Sync: Space"
+      requireServiceWorker: true
+      menu:
+        location: space
+        group: "1_sync"
+        order: 1
+        label: "Sync Space"
+
+  syncFileCommand:
+    path: "./sync.ts:syncFileCommand"
+    command:
+      name: "Sync: File"
+      requireServiceWorker: true
+      menu:
+        location: space
+        group: "1_sync"
+        order: 2
+        label: "Sync File"
+
+  spaceSyncComplete:
+    path: "./sync.ts:spaceSyncComplete"
+    events:
+      - "service-worker:space-sync-complete"
+  fileSyncComplete:
+    path: "./sync.ts:fileSyncComplete"
+    events:
+      - "service-worker:file-sync-complete"
+  updateSyncStatus:
+    path: "./sync.ts:updateSyncStatus"
+    events:
+      - "service-worker:sync-status"

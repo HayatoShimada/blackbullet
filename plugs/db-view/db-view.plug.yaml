@@ -1,0 +1,20 @@
+name: db-view
+build:
+  - in: ./ui/index.tsx
+    out: ./assets/db-view.js
+  - type: sass
+    in: ./ui/db-view.scss
+    out: ./assets/db-view.css
+assets:
+  - "assets/**"
+functions:
+  render:
+    path: ./src/functions.ts:render
+  query:
+    path: ./src/functions.ts:query
+  indexedModified:
+    path: ./src/functions.ts:indexedModified
+  updatePageValue:
+    path: ./src/functions.ts:updatePageValue
+  updateTask:
+    path: ./src/functions.ts:updateTask

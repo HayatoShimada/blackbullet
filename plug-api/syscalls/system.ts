@@ -1,0 +1,167 @@
+import { syscall } from "../syscall.ts";
+import type { CommandDef } from "../types/manifest.ts";
+import type { SyscallMeta } from "@silverbulletmd/silverbullet/type/index";
+import type { Account, ClientProfile } from "../types/profile.ts";
+
+/**
+ * System level syscalls
+ * @module
+ */
+
+/**
+ * Invoke a plug function
+ * @param name a string representing the name of the function to invoke ("plug.functionName")
+ * @param args arguments to pass to the function
+ * @returns
+ */
+export function invokeFunction(name: string, ...args: any[]): Promise<any> {
+  return syscall("system.invokeFunction", name, ...args);
+}
+
+/**
+ * Invoke a client command by name
+ * Note: only available on the client
+ * @param name name of the command
+ * @param args arguments to pass to the command
+ */
+export function invokeCommand(name: string, args?: string[]): Promise<any> {
+  return syscall("system.invokeCommand", name, args);
+}
+
+/**
+ * Lists all commands available
+ * @returns a map of all available commands
+ */
+export function listCommands(): Promise<Record<string, CommandDef>> {
+  return syscall("system.listCommands");
+}
+
+/**
+ * Lists the commands the command palette would show right now: context- and
+ * mode-filtered, hidden ones dropped, each with its prettified key hint and
+ * the time it was last run on this client.
+ * Note: only available on the client
+ */
+export function listPaletteCommands(): Promise<
+  {
+    name: string;
+    priority: number;
+    lastRun?: number;
+    hint?: string;
+  }[]
+> {
+  return syscall("system.listPaletteCommands");
+}
+
+/**
+ * Runs a command as if it had been picked from the command palette: records
+ * it as the most recently run (which is what orders the palette), then
+ * invokes it.
+ * Note: only available on the client
+ * @returns whatever the command returned
+ */
+export function runPaletteCommand(name: string): Promise<any> {
+  return syscall("system.runPaletteCommand", name);
+}
+
+/**
+ * Lists all syscalls available
+ * @returns a list of all available syscalls
+ */
+export function listSyscalls(): Promise<SyscallMeta[]> {
+  return syscall("system.listSyscalls");
+}
+
+/**
+ * Trigger a reload of all plugs
+ * @returns
+ */
+export function reloadPlugs(): Promise<void> {
+  return syscall("system.reloadPlugs");
+}
+
+/**
+ * Make edited-on-disk state live and wait until the client is ready again.
+ */
+export function reboot(): Promise<void> {
+  return syscall("system.reboot");
+}
+
+/**
+ * Load (or reload) a single plug from a space file path.
+ */
+export function loadPlug(path: string): Promise<void> {
+  return syscall("system.loadPlug", path);
+}
+
+/**
+ * Unload a plug previously loaded from the given space file path.
+ * Returns true if a plug was unloaded.
+ */
+export function unloadPlug(path: string): Promise<boolean> {
+  return syscall("system.unloadPlug", path);
+}
+
+/**
+ * Returns the current mode of the system, either "ro" (read-only) or "rw" (read-write)
+ */
+export function getMode(): Promise<"ro" | "rw"> {
+  return syscall("system.getMode");
+}
+
+/**
+ * Returns the prefix set by SB_URL_PREFIX or "/" if the variable isn't set
+ */
+export function getURLPrefix(): Promise<string> {
+  return syscall("system.getURLPrefix");
+}
+
+/**
+ * Returns the base URI for this SilverBullet isntance
+ */
+export function getBaseURI(): Promise<string> {
+  return syscall("system.getBaseURI");
+}
+
+/**
+ * Returns the SilverBullet version
+ */
+export function getVersion(): Promise<string> {
+  return syscall("system.getVersion");
+}
+
+/**
+ * The current user's identity. `username` falls back to "me" when the
+ * deployment has no accounts.
+ */
+export function getProfile(): Promise<ClientProfile> {
+  return syscall("system.getProfile");
+}
+
+/**
+ * Every account with access to this space. `username` falls back to "me" for a
+ * deployment without accounts, and exactly one entry is marked `me` whenever
+ * the current user is known.
+ */
+export function listAccounts(): Promise<Account[]> {
+  return syscall("system.listAccounts");
+}
+
+export function getConfig<T = any>(
+  key: string,
+  defaultValue: any = undefined,
+): Promise<T> {
+  return syscall("system.getConfig", key, defaultValue);
+}
+
+export function wipeClient(logout = false): Promise<void> {
+  return syscall("system.wipeClient", logout);
+}
+
+/**
+ * DEPRECATED
+ * Deletes all IndexedDB databases that are not connected to client (e.g. legacy databases)
+ */
+export function cleanDatabases(): Promise<boolean> {
+  return syscall("system.cleanDatabases");
+}

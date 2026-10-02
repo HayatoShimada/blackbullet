@@ -1,0 +1,369 @@
+---
+description: Defines built-in tags.
+tags: meta
+---
+Defined via [[^Library/Std/APIs/Tag]].
+
+```space-lua
+-- priority: 10
+local function readOnlyType(type)
+  return {
+    type = type,
+    readOnly = true
+  }
+end
+
+local rangeType = {
+  type = "array",
+  items = { schema.number(), schema.number() },
+  minItems = 2,
+  maxItems = 2,
+}
+
+tag.define {
+  name = "page",
+  schema = {
+    type = "object",
+    additionalProperties = true,
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = {
+        anyOf = {
+          { type = "array", items = schema.string() },
+          schema.string(),
+        },
+      },
+      -- range of where fronmatter appears in the page (if present)
+      range = rangeType,
+      itags = {
+        type = "array",
+        readOnly = true,
+        items = schema.string(),
+        nullable = true,
+      },
+      name = schema.string(),
+      pageDecoration = {
+        type = "object",
+        properties = {
+          prefix = schema.nullable("string"),
+          cssClasses = {
+            type = "array",
+            items = schema.string(),
+            nullable = true,
+          },
+          hide = schema.nullable("boolean"),
+          renderWidgets = schema.nullable("boolean"),
+          icon = schema.nullable("string"),
+          tree = {
+            type = "object",
+            properties = {
+              priority = schema.nullable("number"),
+              hide = schema.nullable("boolean"),
+            },
+            nullable = true,
+          },
+        },
+        nullable = true,
+      },
+      displayName = schema.nullable("string"),
+      aliases = {
+        type = "array",
+        items = schema.string(),
+        nullable = true,
+      },
+      recipients = {
+        description = "Who this page is for, by @name",
+        anyOf = {
+          { type = "array", items = schema.string() },
+          schema.string(),
+        },
+        nullable = true,
+      },
+      authors = {
+        description = "Who wrote this page, by @name.",
+        anyOf = {
+          { type = "array", items = schema.string() },
+          schema.string(),
+        },
+        nullable = true,
+      },
+      created = readOnlyType("string"),
+      contentType = readOnlyType("string"),
+      size = readOnlyType("number"),
+      lastModified = readOnlyType("string"),
+      perm = {
+        type = "string",
+        readOnly = true,
+        enum = { "ro", "rw" },
+      },
+      lastOpened = readOnlyType("number"),
+    },
+  },
+}
+
+tag.define {
+  name = "aspiring-page",
+  schema = {
+    type = "object",
+    additionalProperties = true,
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      name = readOnlyType("string"),
+      page = readOnlyType("string"),
+      pos = readOnlyType("number"),
+    },
+  },
+}
+
+tag.define {
+  name = "document",
+  schema = {
+    type = "object",
+    additionalProperties = true,
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = {
+        type = "array",
+        readOnly = true,
+        items = schema.string(),
+        nullable = true,
+      },
+      itags = {
+        type = "array",
+        readOnly = true,
+        items = schema.string(),
+        nullable = true,
+      },
+      name = readOnlyType("string"),
+      created = readOnlyType("string"),
+      contentType = readOnlyType("string"),
+      size = readOnlyType("number"),
+      lastModified = readOnlyType("string"),
+      perm = readOnlyType("string"),
+      extension = readOnlyType("string"),
+    },
+  },
+}
+
+tag.define {
+  name = "item",
+  schema = {
+    type = "object",
+    additionalProperties = true,
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        readOnly = true,
+        items = schema.string(),
+        nullable = true,
+      },
+      page = readOnlyType("string"),
+      name = readOnlyType("string"),
+      text = readOnlyType("string"),
+      parent = readOnlyType("string"),
+      pageLastModified = readOnlyType("string"),
+      range = rangeType,
+      -- deprecated in favor of range
+      pos = readOnlyType("number"),
+    },
+  },
+}
+
+tag.define {
+  name = "tag",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        readOnly = true,
+        items = schema.string(),
+        nullable = true,
+      },
+      name = readOnlyType("string"),
+      page = readOnlyType("string"),
+      parent = readOnlyType("string"),
+      context = readOnlyType("string"),
+    },
+  },
+}
+
+tag.define {
+  name = "link",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = schema.string(),
+      -- type of link: page, file, url
+      type = schema.string(),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        items = schema.string(),
+        nullable = true,
+        readOnly = true,
+      },
+      name = schema.string(),
+      page = schema.string(),
+      alias = schema.string(),
+      pageLastModified = schema.string(),
+      toFile = schema.nullable("string"),
+      toPage = schema.nullable("string"),
+      toURL = schema.nullable("string"),
+      snippet = schema.string(),
+      range = rangeType,
+      -- deprecated in favor of range
+      pos = schema.number(),
+    },
+  },
+}
+
+tag.define {
+  name = "relation",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        items = schema.string(),
+        nullable = true,
+        readOnly = true,
+      },
+      -- Either a reserved structural value ("mention", "co-mention") or a
+      -- user predicate (e.g. "spouse") taken from an attribute/frontmatter/
+      -- data-block key. Open-ended, so no enum.
+      kind = readOnlyType("string"),
+      from = readOnlyType("string"),
+      fromTag = schema.nullable("string"),
+      to = readOnlyType("string"),
+      toTag = schema.nullable("string"),
+      via = schema.nullable("string"),
+      alias = schema.nullable("string"),
+      snippet = schema.nullable("string"),
+      page = readOnlyType("string"),
+      range = rangeType,
+      pageLastModified = readOnlyType("string"),
+    },
+  },
+}
+
+tag.define {
+  name = "header",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        items = schema.string(),
+        nullable = true,
+      },
+      name = readOnlyType("string"),
+      page = readOnlyType("string"),
+      range = rangeType,
+      level = readOnlyType("number"),
+      -- deprecated in favor of range
+      pos = readOnlyType("number"),
+    },
+  },
+}
+
+tag.define {
+  name = "paragraph",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        items = schema.string(),
+        readOnly = true,
+        nullable = true,
+      },
+      text = readOnlyType("string"),
+      page = readOnlyType("string"),
+      range = rangeType,
+      -- deprecated in favor of range
+      pos = readOnlyType("number"),
+    },
+  },
+}
+
+tag.define {
+  name = "table",
+  schema = {
+    type = "object",
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      page = schema.string(),
+      range = rangeType,
+      -- deprecated in favor of range
+      pos = schema.number(),
+    },
+  },
+}
+
+tag.define {
+  name = "anchor",
+  schema = {
+    type = "object",
+    properties = {
+      -- The anchor name itself (e.g. "tsk1" for $tsk1).
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      -- The page on which the anchor was defined.
+      page = readOnlyType("string"),
+      -- The tag of object the anchor attaches to
+      hostTag = readOnlyType("string"),
+    },
+  },
+}
+
+tag.define {
+  name = "task",
+  schema = {
+    type = "object",
+    additionalProperties = true,
+    properties = {
+      ref = readOnlyType("string"),
+      tag = readOnlyType("string"),
+      tags = schema.array("string"),
+      itags = {
+        type = "array",
+        items = schema.string(),
+        readOnly = true,
+        nullable = true,
+      },
+      name = readOnlyType("string"),
+      page = readOnlyType("string"),
+      parent = readOnlyType("string"),
+      range = rangeType,
+      -- deprecated in favor of range
+      pos = readOnlyType("number"),
+      text = readOnlyType("string"),
+      state = readOnlyType("string"),
+      done = readOnlyType("boolean"),
+      pageLastModified = readOnlyType("string"),
+    },
+  },
+}
+
+```

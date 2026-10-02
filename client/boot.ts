@@ -1,0 +1,414 @@
+import { waitForLogout } from "./logout_state.ts";
+import { logoutInProgress } from "./logout.ts";
+import { safeRun } from "@silverbulletmd/silverbullet/lib/async";
+import {
+  notAuthenticatedError,
+  offlineError,
+} from "@silverbulletmd/silverbullet/constants";
+import { initLogger } from "./lib/logger.ts";
+import { extractSpaceLuaFromPageText, loadConfig } from "./boot_config.ts";
+import { Client } from "./client.ts";
+import type { Config } from "./config.ts";
+import {
+  flushCachesAndUnregisterServiceWorker,
+  unregisterServiceWorkers,
+} from "./service_worker/util.ts";
+import "./lib/polyfills.ts";
+import type { BootConfig } from "./types/ui.ts";
+import { BoxProxy } from "./lib/box_proxy.ts";
+import { exportKey, importKey } from "@silverbulletmd/silverbullet/lib/crypto";
+import "./debug.ts";
+
+// Initialize the runtime-bridge namespace. `??=` preserves any value an
+// earlier init script may have already installed (desktop wrapper does this)
+globalThis.sbRuntime ??= {};
+
+const logger = initLogger("[Client]");
+
+/**
+ * Ask every same-origin SilverBullet service worker for an in-memory client
+ * encryption key. Prefix-bound spaces have separate worker scopes, but an
+ * account-managed server deliberately uses one salt and key across them.
+ */
+async function findEncryptionKey(
+  accountManaged: boolean,
+): Promise<CryptoKey | undefined> {
+  if (!navigator.serviceWorker) {
+    return undefined;
+  }
+  const registrations = accountManaged
+    ? await navigator.serviceWorker.getRegistrations()
+    : [await navigator.serviceWorker.getRegistration(document.baseURI)].filter(
+        (registration): registration is ServiceWorkerRegistration =>
+          !!registration,
+      );
+  if (registrations.length === 0) {
+    return undefined;
+  }
+  return await new Promise<CryptoKey | undefined>((resolve) => {
+    let settled = false;
+    const finish = (key?: CryptoKey) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      navigator.serviceWorker.removeEventListener("message", listener);
+      resolve(key);
+    };
+    const listener = (event: MessageEvent) => {
+      if (event.data?.type === "encryption-key" && event.data.key) {
+        void importKey(event.data.key).then(finish);
+      }
+    };
+    const timeout = setTimeout(() => finish(), 250);
+    navigator.serviceWorker.addEventListener("message", listener);
+    for (const registration of registrations) {
+      registration.active?.postMessage({ type: "get-encryption-key" });
+    }
+  });
+}
+
+safeRun(async () => {
+  if (!(await waitForLogout())) return;
+  const clientReady = Promise.withResolvers<Client>();
+  navigator.serviceWorker?.addEventListener("message", (event) => {
+    // Sync can finish while init is still loading the index and plugins.
+    void clientReady.promise.then((client) =>
+      client.handleServiceWorkerMessage(event.data),
+    );
+  });
+  performance.mark("sb:boot-start");
+  let bootConfig: BootConfig | undefined;
+  let config: Config | undefined;
+  // Placeholder proxy for Client object to be swapped in later
+  const clientProxy = new BoxProxy({});
+  let bootstrapLuaScriptPages: string[] = [];
+  try {
+    let configJSONText: string;
+    [configJSONText, ...bootstrapLuaScriptPages] = await Promise.all([
+      cachedFetch(".config"),
+      cachedFetch(".fs/Library/Std/APIs/Schema.md"),
+      cachedFetch(".fs/Library/Std/Config.md"),
+      cachedFetch(".fs/Library/Std/APIs/Tag.md"),
+      cachedFetch(".fs/CONFIG.md"),
+    ]);
+    bootConfig = JSON.parse(configJSONText);
+    if (!navigator.serviceWorker) bootConfig!.disableServiceWorker = true;
+    if (!globalThis.isSecureContext) bootConfig!.enableClientEncryption = false;
+  } catch (e: any) {
+    if (e.message === offlineError.message) {
+      alert(
+        "Could not process config and no cached copy, please connect to the Internet",
+      );
+      return;
+    }
+    if (e.message === notAuthenticatedError.message) {
+      // A redirect to the login page is already under way; stop booting.
+      return;
+    }
+    // Anything else (e.g. no space is bound at this URL, so `.config` 404s and
+    // parses as empty) leaves bootConfig undefined. Falling through would throw
+    // an opaque TypeError further down and bury the real cause — stop here and
+    // report what actually failed.
+    console.error("Could not load boot config:", e);
+    alert(`Could not load this space: ${e.message}`);
+    return;
+  }
+  try {
+    config = await loadConfig(
+      bootstrapLuaScriptPages.map(extractSpaceLuaFromPageText).join("\n"),
+      clientProxy.buildProxy(),
+      !!bootConfig?.readOnly,
+    );
+  } catch (e: any) {
+    alert(
+      `Failed to run Space Lua code (likely CONFIG), will attempt to boot without. Error: ${e.message}`,
+    );
+    console.error("Error evaluating Space Lua script on boot:", e);
+    try {
+      config = await loadConfig(
+        // Everything but CONFIG (at the end)
+        bootstrapLuaScriptPages
+          .slice(0, bootstrapLuaScriptPages.length - 1)
+          .map(extractSpaceLuaFromPageText)
+          .join("\n"),
+        clientProxy.buildProxy(),
+        false,
+      );
+    } catch (e: any) {
+      console.error("Boot error", e);
+      alert(
+        "Could not load boot scripts, even without CONFIG, check your browser's logs",
+      );
+      return;
+    }
+  }
+
+  let encryptionKey: CryptoKey | undefined;
+  if (
+    localStorage.getItem("enableEncryption") &&
+    bootConfig?.enableClientEncryption
+  ) {
+    console.log("Initializing encryption");
+    console.log("Querying SilverBullet service workers for an encryption key");
+    encryptionKey = await findEncryptionKey(!!bootConfig.accountManaged);
+    if (!encryptionKey) {
+      console.warn(
+        "No client encryption key available, redirecting to auth page",
+      );
+      location.href = ".auth";
+      throw new Error("Not authenticated");
+    }
+  } else {
+    bootConfig!.enableClientEncryption = false;
+  }
+
+  await augmentBootConfig(bootConfig!, config!);
+
+  const isHeadless = new URLSearchParams(location.search).has("headless");
+  globalThis.sbRuntime.captureId =
+    new URLSearchParams(location.search).get("capture") ?? undefined;
+  const reviewGitConflicts =
+    new URLSearchParams(location.search).get("gitConflicts") === "1";
+  // Expose headless flag on the runtime bridge so client.init() can detect
+  // it after URL params are stripped.
+  if (isHeadless) {
+    globalThis.sbRuntime.headless = true;
+  }
+
+  if (location.search) {
+    const newURL = new URL(location.href);
+    newURL.search = "";
+    history.pushState({}, "", newURL.toString());
+  }
+  performance.mark("sb:config-loaded");
+  console.log("Booting SilverBullet client");
+  console.log("Boot config", bootConfig, config.values);
+
+  const swDisabled = !!bootConfig?.disableServiceWorker;
+  if (swDisabled && navigator.serviceWorker) {
+    await flushCachesAndUnregisterServiceWorker();
+  }
+  if (!isHeadless && !swDisabled && navigator.serviceWorker) {
+    const workerURL = new URL("service_worker.js", document.baseURI);
+    const configureWorker = async (registration: ServiceWorkerRegistration) => {
+      const worker = registration.active;
+      if (!worker) return;
+      if (encryptionKey) {
+        worker.postMessage({
+          type: "set-encryption-key",
+          key: await exportKey(encryptionKey),
+        });
+      }
+      worker.postMessage({
+        type: "config",
+        config: bootConfig,
+      });
+    };
+    let startNotificationCount = 0;
+    let lastStartNotification = 0;
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data.type === "service-worker-started") {
+        console.log(
+          "Got notified that service worker has just started, sending config",
+          bootConfig,
+        );
+        navigator.serviceWorker.ready.then(configureWorker);
+        startNotificationCount++;
+        if (Date.now() - lastStartNotification > 5000) {
+          startNotificationCount = 0;
+        }
+        if (startNotificationCount > 2) {
+          // This is not normal. Safari sometimes gets stuck on a database connection if the service worker is updated which means it cannot boot properly
+          // the only know fix is to quit the browser and restart it
+          console.warn(
+            "Something is wrong with the sync engine, please quit your browser and restart it.",
+          );
+        }
+        lastStartNotification = Date.now();
+      }
+    });
+    navigator.serviceWorker
+      .register(workerURL, {
+        type: "module",
+        //limit the scope of the service worker to any potential URL prefix
+        scope: workerURL.pathname.substring(
+          0,
+          workerURL.pathname.lastIndexOf("/") + 1,
+        ),
+      })
+      .then((registration) => {
+        console.log("Service worker registered...");
+
+        // Send the shared encryption key before configuration initializes the
+        // encrypted data store for this prefix.
+        void configureWorker(registration);
+
+        registration.addEventListener("updatefound", () => {
+          const newWorker = registration.installing;
+          console.log("New service worker installing...");
+
+          if (newWorker) {
+            newWorker.addEventListener("statechange", () => {
+              if (
+                newWorker.state === "installed" &&
+                navigator.serviceWorker.controller
+              ) {
+                console.log(
+                  "New service worker installed and ready to take over.",
+                );
+                newWorker.postMessage({ type: "skip-waiting" });
+              }
+            });
+          }
+        });
+      });
+  } else {
+    console.info("Service worker disabled.");
+  }
+  if (!(await waitForLogout())) return;
+  const client = new Client(
+    document.getElementById("sb-root")!,
+    bootConfig!,
+    config!,
+  );
+  if (bootConfig!.logPush) {
+    setInterval(() => {
+      void logger.postToServer(".logs", "client");
+    }, 1000);
+  }
+  globalThis.client = client;
+  clientProxy.setTarget(client);
+  await client.init(encryptionKey);
+  clientReady.resolve(client);
+  if (reviewGitConflicts) await client.openNavigatorView("std.gitConflicts");
+});
+
+/**
+ * Augments the boot config with values from the page's search params
+ * as well as well as Lua-based configuration from CONFIG
+ */
+async function augmentBootConfig(bootConfig: BootConfig, config: Config) {
+  bootConfig.syncDocuments = config.get<boolean>(["sync", "documents"], false);
+  let syncIgnore = config!.get<string | string[]>(["sync", "ignore"], "");
+  if (Array.isArray(syncIgnore)) {
+    syncIgnore = syncIgnore.join("\n");
+  }
+  bootConfig.syncIgnore = syncIgnore;
+
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.has("readOnly")) {
+    bootConfig.readOnly = true;
+  }
+  if (urlParams.has("disableSpaceLua")) {
+    bootConfig.disableSpaceLua = true;
+  }
+  if (urlParams.has("disablePlugs")) {
+    bootConfig.disablePlugs = true;
+  }
+  if (urlParams.has("disableSpaceStyle")) {
+    bootConfig.disableSpaceStyle = true;
+  }
+  if (urlParams.has("wipeClient")) {
+    bootConfig.performWipe = true;
+  }
+  if (urlParams.has("resetClient")) {
+    bootConfig.performReset = true;
+  }
+}
+
+if (!globalThis.indexedDB) {
+  alert(
+    "SilverBullet requires IndexedDB to operate and it is not available in your browser. Please use a recent version of Chrome, Firefox (not in private mode) or Safari.",
+  );
+}
+
+/**
+ * Set once a boot fetch discovers it must navigate away (auth redirect or
+ * service-worker-reset reload). The navigation aborts the sibling in-flight
+ * boot fetches; this flag lets their error handlers report the redirect
+ * instead of misclassifying the abort as being offline.
+ */
+let redirectingAway = false;
+
+async function cachedFetch(path: string): Promise<string> {
+  const cacheKey = `silverbullet.${document.baseURI}.${path}`;
+  try {
+    const response = await fetch(path, {
+      // We don't want to follow redirects, we want to get the redirect header in case of auth issues
+      redirect: "manual",
+      // Tinyauth/forward-auth can take longer than 1s on cold or remote auth checks.
+      // Keep this bounded, but do not abort normal authenticated startup requests too aggressively.
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        "X-Sync-Mode": "1",
+      },
+    });
+    if (response.status >= 500 && response.status < 600) {
+      const text = localStorage.getItem(cacheKey);
+      if (text) {
+        console.info("Falling back to cache for", path);
+        return text;
+      } else {
+        throw offlineError;
+      }
+    }
+    if (response.status === 404) {
+      // File doesn't exist yet (e.g., CONFIG.md before first sync).
+      // Cache the empty body so that, when offline next time, the fallback
+      // path can serve "" instead of throwing a raw fetch error (which the
+      // boot's outer catch would otherwise silently swallow). The cache is
+      // only consulted on network failure, so caching this won't mask a
+      // later 200 response when online.
+      localStorage.setItem(cacheKey, "");
+      return "";
+    }
+    if (logoutInProgress()) throw notAuthenticatedError;
+    if (response.type === "opaqueredirect") {
+      // We received an opaque redirect, there's little sensible we can do than unregister service workers and reload
+      console.log(
+        "Got opaque redirect, going to unregister service workers and reload",
+      );
+      await unregisterServiceWorkers();
+      console.log("Ok, now going to reload, let's hope for the best");
+      redirectingAway = true;
+      location.reload();
+      throw notAuthenticatedError;
+    }
+    const redirectHeader = response.headers.get("location");
+    if (redirectHeader) {
+      console.info(
+        "Received an (authentication) redirect, redirecting to URL: " +
+          redirectHeader,
+      );
+      // Only the first fetch to see the redirect navigates; its siblings just
+      // report the authentication failure.
+      if (!redirectingAway) {
+        redirectingAway = true;
+        location.href = redirectHeader;
+      }
+      throw notAuthenticatedError;
+    }
+    const text = await response.text();
+    localStorage.setItem(cacheKey, text);
+    return text;
+  } catch (e: any) {
+    if (e.message === notAuthenticatedError.message) {
+      throw e;
+    }
+    if (redirectingAway) {
+      // Our own redirect-to-login (or reload) navigation aborted this fetch —
+      // that's an authentication situation, not an offline one.
+      throw notAuthenticatedError;
+    }
+    console.info("Falling back to cache for", path);
+    const text = localStorage.getItem(cacheKey);
+    if (text !== null) {
+      return text;
+    } else {
+      // No cache and the network is unreachable: treat as offline so the
+      // boot path can take its offline-handling branch instead of silently
+      // swallowing the raw fetch error.
+      throw offlineError;
+    }
+  }
+}

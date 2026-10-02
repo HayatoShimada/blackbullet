@@ -1,0 +1,130 @@
+import { expect, test } from "vitest";
+import { parseMarkdown } from "../../client/markdown_parser/parser.ts";
+import { createMockSystem } from "../../plug-api/system_mock.ts";
+import type { PageMeta } from "@silverbulletmd/silverbullet/type/index";
+import { extractFrontMatter } from "./frontmatter.ts";
+import { headerComplete, indexHeaders } from "./header.ts";
+
+const testPage = `
+# Header 1
+## Header 1.1
+# Header 2 [testAttr: 10]
+`.trim();
+
+test("Test header indexing", async () => {
+  createMockSystem();
+  const tree = parseMarkdown(testPage);
+  const frontmatter = await extractFrontMatter(tree);
+
+  const pageMeta: PageMeta = {
+    ref: "test",
+    name: "test",
+    tag: "page",
+    created: "",
+    lastModified: "",
+    perm: "rw",
+  };
+
+  const headers = await indexHeaders(pageMeta, frontmatter, tree);
+  // 1 data 1 tag
+  expect(headers.length).toEqual(3);
+
+  expect(headers[0].name).toEqual("Header 1");
+  expect(headers[0].level).toEqual(1);
+  expect(headers[1].name).toEqual("Header 1.1");
+  expect(headers[1].level).toEqual(2);
+});
+
+function makePageMeta(name = "test"): PageMeta {
+  return {
+    ref: name,
+    name,
+    tag: "page",
+    created: "",
+    lastModified: "",
+    perm: "rw",
+  };
+}
+
+test("header with $anchor uses anchor as ref", async () => {
+  createMockSystem();
+  const src = `# Some heading $sec1`;
+  const tree = parseMarkdown(src);
+  const frontmatter = await extractFrontMatter(tree);
+  const headers = await indexHeaders(makePageMeta(), frontmatter, tree);
+
+  expect(headers.length).toEqual(1);
+  expect(headers[0].ref).toBe("sec1");
+  // $sec1 must not appear in name or text
+  expect(headers[0].name).not.toContain("$sec1");
+  expect(headers[0].text).not.toContain("$sec1");
+  expect(headers[0].name.trim()).toBe("Some heading");
+});
+
+test("header without anchor keeps Page@pos ref shape", async () => {
+  createMockSystem();
+  const src = `# Plain header`;
+  const tree = parseMarkdown(src);
+  const frontmatter = await extractFrontMatter(tree);
+  const headers = await indexHeaders(makePageMeta("MyPage"), frontmatter, tree);
+
+  expect(headers.length).toEqual(1);
+  expect(headers[0].ref).toMatch(/^MyPage@\d+$/);
+});
+
+test("user `range` attribute cannot overwrite a header's source offsets", async () => {
+  createMockSystem();
+  const md = `# Real header [range: 0, 36]`;
+  const tree = parseMarkdown(md);
+  const frontmatter = extractFrontMatter(tree);
+  const pageMeta: PageMeta = {
+    ref: "test",
+    name: "test",
+    tag: "page",
+    created: "",
+    lastModified: "",
+    perm: "rw",
+  };
+  const headers = await indexHeaders(pageMeta, frontmatter, tree);
+  const header = headers.find((h: any) => h.tag === "header")! as any;
+  expect(header).toBeTruthy();
+  expect(header.range).toEqual([0, md.length]);
+  expect(typeof header.pos).toBe("number");
+});
+
+test.each([
+  ["[[page name#he", "page name"],
+  ["[[#he", "Home"],
+  ["[link](page name#he", "page name"],
+])(
+  "header completion replaces only the heading in %s",
+  async (linePrefix, pageName) => {
+    createMockSystem();
+    const source = "# Heading One\n# Other";
+    const tree = parseMarkdown(source);
+    const headers = await indexHeaders(
+      makePageMeta(pageName),
+      await extractFrontMatter(tree),
+      tree,
+    );
+    await (globalThis as any).syscall("index.indexObjects", pageName, headers);
+
+    const result = await headerComplete({
+      linePrefix,
+      pos: linePrefix.length,
+      pageName,
+      parentNodes: [],
+    });
+
+    expect(result).toEqual({
+      from: linePrefix.length - 2,
+      options: [
+        { label: "Heading One", type: "header" },
+        { label: "Other", type: "header" },
+      ],
+    });
+    expect(linePrefix.slice(0, result!.from) + result!.options[0].label).toBe(
+      linePrefix.replace(/he$/, "Heading One"),
+    );
+  },
+);

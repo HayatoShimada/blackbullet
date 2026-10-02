@@ -1,0 +1,201 @@
+import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
+import * as sass from "sass";
+
+import { patchBundledJS } from "../client/plugos/plug_compile.ts";
+
+export async function buildClient(): Promise<void> {
+  await mkdir("client_bundle/client", { recursive: true });
+  await mkdir("client_bundle/base_fs", { recursive: true });
+
+  console.log("Now ESBuilding the client and service workers...");
+
+  const baseBuildConfig: esbuild.BuildOptions = {
+    outdir: "client_bundle/client",
+    absWorkingDir: process.cwd(),
+    bundle: true,
+    treeShaking: true,
+    // Safari 16.4 is the oldest engine the client actually works on (regex lookbehind and CSS
+    // @property need it) and corresponds to macOS 12 Monterey
+    target: ["safari16.4"],
+    sourcemap: "linked",
+    minify: true,
+    jsxFactory: "h",
+    format: "esm",
+    chunkNames: ".client/[name]-[hash]",
+    jsx: "automatic",
+    jsxFragment: "Fragment",
+    jsxImportSource: "preact",
+    // react-icons (the md-* action button icons) would otherwise bundle real
+    // React, whose elements Preact renders as nothing.
+    alias: {
+      react: "preact/compat",
+      "react/jsx-runtime": "preact/jsx-runtime",
+    },
+  };
+
+  const buildConfigs: Array<[String, esbuild.BuildOptions]> = [
+    [
+      "client",
+      {
+        ...baseBuildConfig,
+        entryPoints: [
+          {
+            in: "client/boot.ts",
+            out: ".client/client",
+          },
+        ],
+        splitting: true,
+      },
+    ],
+    [
+      "service worker",
+      {
+        ...baseBuildConfig,
+        entryPoints: [
+          {
+            in: "client/service_worker.ts",
+            out: "service_worker",
+          },
+        ],
+        splitting: false,
+      },
+    ],
+    [
+      "dashboard UI",
+      {
+        ...baseBuildConfig,
+        entryPoints: [
+          {
+            in: "client/dashboard/dashboard.tsx",
+            out: ".client/dashboard",
+          },
+        ],
+        splitting: false,
+      },
+    ],
+    [
+      "setup ui",
+      {
+        ...baseBuildConfig,
+        entryPoints: [
+          {
+            in: "client/dashboard/setup.tsx",
+            out: ".client/setup",
+          },
+        ],
+        splitting: false,
+      },
+    ],
+    [
+      "auth ui",
+      {
+        ...baseBuildConfig,
+        entryPoints: [
+          {
+            in: "client/dashboard/auth.tsx",
+            out: ".client/auth",
+          },
+          { in: "client/dashboard/central.tsx", out: ".client/central" },
+        ],
+        splitting: false,
+      },
+    ],
+  ];
+
+  for (const [buildName, buildConfig] of buildConfigs) {
+    const result = await esbuild.build(buildConfig);
+
+    if (result.metafile) {
+      const text = await esbuild.analyzeMetafile(result.metafile!);
+      console.log(`Bundle info for ${buildName}`, text);
+    }
+  }
+
+  await copyAssets("client_bundle/client/.client");
+  await patchServiceWorker();
+
+  console.log("Built!");
+}
+
+async function copyAssets(dist: string) {
+  await mkdir(dist, { recursive: true });
+  await cp("client/fonts", dist, { recursive: true });
+  await cp("client/html", dist, { recursive: true });
+  await cp("client/images/favicon-96x96.png", `${dist}/favicon-96x96.png`);
+  await cp("client/images/favicon.svg", `${dist}/favicon.svg`);
+  await cp("client/images/favicon.ico", `${dist}/favicon.ico`);
+  await cp(
+    "client/images/apple-touch-icon.png",
+    `${dist}/apple-touch-icon.png`,
+  );
+  await cp("client/images/logo.png", `${dist}/logo.png`);
+  await cp("client/images/logo-dock.png", `${dist}/logo-dock.png`);
+  // Avoid loading the 405 KB original for a ~26 CSS px wordmark.
+  await cp("client/images/logo-dock-96x96.png", `${dist}/logo-dock-96x96.png`);
+
+  // Keep components.css's name: panelStyles() and plug documentation rely on it.
+  for (const [entry, output] of [
+    ["main.scss", "main.css"],
+    ["app.scss", "app.css"],
+    ["components_bundle.scss", "components.css"],
+  ]) {
+    const scss = await readFile(`client/styles/${entry}`, "utf-8");
+    const compiled = sass.compileString(scss, {
+      loadPaths: ["client/styles"],
+      style: "compressed",
+    });
+    await writeFile(`${dist}/${output}`, compiled.css, "utf-8");
+  }
+
+  // HACK: Patch the JS by removing an invalid regex
+  let bundleJs = await readFile(`${dist}/client.js`, "utf-8");
+  bundleJs = patchBundledJS(bundleJs);
+  await writeFile(`${dist}/client.js`, bundleJs, "utf-8");
+}
+
+// Shells and bundles for the server-level surfaces (Dashboard at /.dashboard,
+// the setup wizard at /.setup) and the per-space login page. None of these are
+// part of the offline app shell: they are entry points the service worker must
+// never answer from cache. Add an entry here when adding a bundle entry point.
+const NOT_PRECACHED = new Set([
+  "auth.html",
+  "authorize.html",
+  "auth.js",
+  "index.html",
+  "central.html",
+  "central.js",
+  "dashboard.html",
+  "dashboard.js",
+  "setup.html",
+  "setup.js",
+  "app.css",
+  "LICENSE.md",
+]);
+
+async function patchServiceWorker() {
+  const clientDir = "client_bundle/client/.client";
+  const allFiles = await readdir(clientDir);
+  const precacheFiles = [
+    "/", // The index page
+    ...allFiles
+      .filter((f) => !f.endsWith(".map") && !NOT_PRECACHED.has(f))
+      .map((f) => `/.client/${f}`),
+  ];
+  const precacheFilesStr = precacheFiles.join(",");
+
+  let swCode = await readFile(
+    "client_bundle/client/service_worker.js",
+    "utf-8",
+  );
+  swCode = swCode.replaceAll("{{CACHE_NAME}}", `cache-${Date.now()}`);
+  swCode = swCode.replaceAll("{{PRECACHE_FILES}}", precacheFilesStr);
+  await writeFile("client_bundle/client/service_worker.js", swCode, "utf-8");
+}
+
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
+  await buildClient();
+  await esbuild.stop();
+}

@@ -1,0 +1,779 @@
+// Page chrome for the standalone (non-editor) pages: the login page, the setup
+// wizard and the Dashboard. Everything here is scoped under
+// `body.sb-standalone` so this partial can share one stylesheet with the plug
+// panels, which are the same components without the page furniture.
+@use "tokens";
+
+body.sb-standalone {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--ui-surface-background-color);
+  color: var(--ui-surface-color);
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: var(--ui-font);
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: normal;
+  }
+
+  h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+  }
+
+  section {
+    margin-top: 1.75rem;
+  }
+
+  details {
+    margin-top: 1rem;
+  }
+
+  // These lists have no markers; remove the browser’s unused marker indent.
+  ul,
+  ol {
+    padding-left: 0;
+  }
+
+  input[type="radio"] {
+    accent-color: var(--ui-accent-color);
+    cursor: pointer;
+  }
+
+  form label {
+    display: block;
+    margin-top: 0.75rem;
+    font-weight: 600;
+  }
+
+  form .sb-input,
+  form .sb-select {
+    width: 100%;
+  }
+
+  .row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    align-items: center;
+  }
+
+  // Links used for navigation should look like their button counterparts while
+  // retaining normal link behaviour (copy, open in a new tab, history).
+  a.sb-button,
+  a.sb-button-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+  }
+
+  a.sb-tab {
+    text-decoration: none;
+  }
+
+  .sb-help-text {
+    display: block;
+    margin-top: 0.25rem;
+    font-weight: normal;
+    color: var(--subtle-color);
+    font-size: 0.9em;
+  }
+
+  .sb-dashboard-error {
+    color: var(--danger-color);
+  }
+
+  .sb-dashboard-ok {
+    color: #1a7f37;
+
+    // Live regions are rendered before they have anything to announce; an
+    // empty one must not claim a flex gap next to the buttons it follows.
+    &:empty {
+      display: none;
+    }
+  }
+
+  .sb-dashboard-warn {
+    color: #9a6700;
+  }
+}
+
+body.sb-standalone.sb-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.sb-standalone .floating-island,
+.sb-standalone.sb-page #root {
+  padding: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  background-color: transparent;
+  border: 0;
+  margin-block: 0;
+}
+
+.sb-standalone .center {
+  display: flex;
+  justify-content: center;
+  padding: 72px 24px 40px;
+}
+
+.sb-standalone .floating-island,
+.sb-standalone .sb-auth-content {
+  width: 100%;
+  max-width: 416px;
+  min-width: 0;
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+
+.sb-standalone .sb-auth-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 64px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--ui-surface-border-color);
+  .sb-auth-brand {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 17px;
+    font-weight: 600;
+    img { width: 26px; height: 26px; }
+  }
+}
+
+body.sb-standalone.sb-page:has(.sb-auth-header) {
+  max-width: none;
+  padding: 0;
+  #root { margin: 0; padding: 0; }
+  .sb-auth-content { padding-block: 72px 40px; }
+  .sb-setup-content { max-width: 640px; }
+}
+
+.sb-standalone :is(.floating-island, .sb-auth-content) {
+  h1 { font-size: 24px; line-height: 1.35; font-weight: 700; letter-spacing: -0.03em; }
+  p { line-height: 1.5; }
+  label { margin-bottom: 7px; font-weight: 400; }
+  .sb-input { min-height: 40px; }
+  .sb-button, .sb-button-primary { min-height: 38px; }
+  .sb-auth-description, [role="separator"] { color: var(--subtle-color); }
+  [role="separator"] { font-size: 12px; text-align: center; }
+  .sb-help-text { font-size: 12px; line-height: 1.5; }
+  .password-field {
+    position: relative;
+    .sb-input { padding-right: 68px; }
+    .sb-button {
+      position: absolute;
+      right: 3px;
+      min-height: 34px;
+      padding: 4px 10px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      &:hover { background: var(--ui-surface-hover-background-color); }
+    }
+  }
+  #login [type="submit"] { width: 100%; }
+  footer { border-top: 1px solid var(--ui-surface-border-color); padding-top: 16px; font-size: 12px; }
+}
+
+@media (max-width: 600px) {
+  .sb-standalone .center { padding: 40px 24px; }
+  body.sb-standalone.sb-page:has(.sb-auth-header) .sb-auth-content {
+    padding: 40px 24px;
+    max-width: 464px;
+  }
+  .sb-standalone .sb-auth-header { padding-inline: 18px; }
+}
+
+.sb-standalone .flow {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.sb-standalone .flow>* {
+  margin-block: 0;
+}
+
+.sb-standalone .flow>*+* {
+  margin-block-start: var(--space, 1rem);
+}
+
+.sb-standalone .error-message {
+  color: var(--danger-color);
+}
+
+.sb-standalone .checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-direction: row;
+}
+
+// Undo form-label layout for checkbox labels, which sit beside the control.
+.sb-standalone .checkbox-wrapper label,
+.sb-standalone form .checkbox-wrapper label {
+  display: inline;
+  margin: 0;
+  font-weight: normal;
+}
+
+.sb-standalone .password-field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.sb-standalone .password-field .sb-input {
+  flex: 1;
+}
+
+
+/* Header: wordmark (+ admin tab bar) on the left, quiet log-out link on the
+   right.
+
+   The gap below is 1rem, not the 2rem this had while the screens below it
+   opened with an <h1>. Those headings are gone from the list screens (the tab
+   bar names them), so 2rem left the content stranded — and on a list the first
+   row adds another 0.5rem of its own padding before any text. */
+.sb-standalone .sb-dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #8884;
+  margin-bottom: 1rem;
+}
+
+.sb-standalone .sb-dashboard-header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.sb-standalone .sb-wordmark {
+  min-width: 0;
+  max-width: min(24rem, 55vw);
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  color: inherit;
+  text-decoration: none;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 1.1rem;
+
+  img {
+    flex-shrink: 0;
+    width: 1.5em;
+    height: 1.5em;
+  }
+}
+
+/* Aligned columns: name | binding link | status | edit action. Each row is a
+   subgrid so cells line up across rows while rows keep their borders.
+   Non-admin rows simply leave the last column empty. */
+.sb-standalone .sb-space-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr max-content max-content max-content;
+}
+
+.sb-standalone .sb-space-list li {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  column-gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #8884;
+}
+
+/* Space name: opens the space itself for every account, admin or not. */
+.sb-standalone .sb-space-link {
+  color: var(--ui-accent-color);
+  font-weight: 600;
+}
+
+/* Admin-only per-row edit control, right-aligned at the end of the row. */
+.sb-standalone .sb-space-edit {
+  justify-self: end;
+}
+
+/* Bottom-of-form destructive zone. Delete stays visually destructive (via
+   .sb-button-danger's colour) but is sized like every other button — it
+   shouldn't dominate the page. */
+.sb-standalone .sb-danger-zone {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #8884;
+}
+
+/* Server-side folder picker (client/dashboard/FolderPicker.tsx). */
+.sb-standalone .sb-folder-picker-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  font-size: 0.9em;
+}
+
+.sb-standalone .sb-link-button {
+  background: none;
+  color: var(--ui-accent-color);
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.sb-standalone .sb-link-button:hover {
+  background: none;
+}
+
+/* No focus ring on mouse clicks; keep a subtle one for keyboard focus. */
+.sb-standalone .sb-link-button:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.sb-standalone .sb-link-button:focus-visible {
+  outline: 2px solid var(--ui-accent-color);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.sb-standalone .sb-folder-browser {
+  margin-top: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  background: #fafafa;
+}
+
+.sb-standalone .sb-folder-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.sb-standalone .sb-folder-crumb-sep {
+  color: #999;
+}
+
+// Directory names have no length limit, and a crumb or listing entry is one
+// unbroken word, so without this a single long name pushes the whole page
+// sideways rather than wrapping.
+.sb-standalone .sb-folder-crumbs .sb-link-button,
+.sb-standalone .sb-folder-dirs li {
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.sb-standalone .sb-folder-dirs {
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.sb-standalone .sb-folder-dirs li {
+  padding: 0.15rem 0;
+}
+
+.sb-standalone .sb-folder-empty {
+  color: var(--subtle-color);
+  font-style: italic;
+}
+
+/* Users table. */
+.sb-standalone .sb-user-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.sb-standalone .sb-user-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  color: #555;
+  padding: 0.35rem 0.5rem;
+}
+
+.sb-standalone .sb-user-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #8884;
+  vertical-align: middle;
+}
+
+.sb-standalone .sb-user-link {
+  color: var(--ui-accent-color);
+  font-weight: 600;
+}
+
+.sb-standalone .sb-user-table td:last-child {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.sb-standalone .sb-user-table label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0;
+  font-weight: normal;
+}
+
+.sb-standalone .sb-token-list {
+  padding: 0.5rem;
+  background: #f7f7f7;
+  border-radius: 0.4em;
+  list-style: none;
+  margin: 0 0 0.5rem;
+}
+
+.sb-standalone .sb-token-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+
+.sb-standalone .sb-token-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.sb-standalone .sb-token-reveal .sb-input {
+  font-family: var(--ui-font);
+}
+
+.sb-standalone fieldset {
+  border: 1px solid #ddd;
+  border-radius: 0.4em;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+  // Allow fieldsets to shrink below min-content when placed in flex layouts.
+  min-width: 0;
+}
+
+.sb-standalone .sb-access-table {
+  .sb-access-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+  }
+
+  .sb-access-public {
+    border-bottom: 1px solid var(--subtle-color, #ccc);
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+  }
+
+  .sb-access-grid-scroll {
+    overflow-x: auto;
+  }
+
+  .sb-access-grid {
+    width: 100%;
+    border-collapse: collapse;
+
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--subtle-color);
+      text-align: center;
+    }
+
+    th:first-child {
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+
+    tbody th {
+      font-weight: normal;
+    }
+  }
+}
+
+.sb-standalone fieldset legend {
+  font-weight: 600;
+  padding: 0 0.3em;
+}
+
+@media only screen and (max-width: 600px) {
+  body.sb-standalone.sb-page {
+    padding: 0.75rem;
+  }
+
+  .sb-standalone .floating-island {
+    padding: 0;
+    margin-block: 0;
+  }
+
+  body.sb-standalone {
+    h1 {
+      font-size: 1.35rem;
+    }
+
+    // 16px exactly: anything smaller makes iOS Safari zoom the page in when
+    // the field takes focus, and it never zooms back out.
+    .sb-input,
+    .sb-select {
+      font-size: 16px;
+      min-height: 2.75rem;
+    }
+
+    .sb-button,
+    .sb-button-primary,
+    .sb-button-danger,
+    a.sb-button,
+    a.sb-button-primary {
+      min-height: 2.75rem;
+      padding: 0.5em 1em;
+      font-size: 1rem;
+    }
+
+    input[type="checkbox"],
+    input[type="radio"] {
+      width: 20px;
+      height: 20px;
+    }
+
+    // Wrap field buttons on narrow screens without forcing the card wider.
+    .row,
+    .password-field,
+    .sb-folder-picker-status,
+    .sb-token-list li {
+      flex-wrap: wrap;
+    }
+
+    .row .sb-input,
+    .row .sb-select,
+    .password-field .sb-input {
+      flex: 1 1 10rem;
+      width: auto;
+      min-width: 0;
+    }
+  }
+
+  /* The header's three parts don't fit on one line. `display: contents` lifts
+     the wordmark and tabs out of their wrapper so all three become siblings of
+     the flex container, which lets the tab bar claim a full-width row of its
+     own below the wordmark and the profile menu. */
+  .sb-standalone .sb-dashboard-header {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .sb-standalone .sb-dashboard-header-left {
+    display: contents;
+  }
+
+  .sb-standalone .sb-dashboard-header .sb-tabs {
+    order: 1;
+    flex: 1 0 100%;
+    display: flex;
+    flex-wrap: nowrap;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    margin-top: 0.25rem;
+  }
+
+  .sb-standalone .sb-tab {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    min-height: 2.75rem;
+    padding: 0 0.6rem;
+  }
+
+
+  /* Column alignment across rows stops being worth anything once the columns
+     are too narrow to hold their content: give the name a line of its own and
+     let the binding, status and Edit share the one below it. */
+  .sb-standalone .sb-space-list {
+    display: block;
+  }
+
+  .sb-standalone .sb-space-list li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem 0;
+  }
+
+  .sb-standalone .sb-space-list .sb-space-link {
+    flex: 1 0 100%;
+  }
+
+  .sb-standalone .sb-space-edit {
+    margin-left: auto;
+  }
+
+  .sb-standalone .sb-user-table th,
+  .sb-standalone .sb-user-table td {
+    padding: 0.5rem 0.25rem;
+  }
+
+  .sb-standalone .sb-user-table td:first-child {
+    overflow-wrap: anywhere;
+  }
+
+  /* The origin affix ("https://notes.example.com") is nowrap and often wider
+     than the segment you actually type into, leaving it a few characters
+     wide. Stack it above instead so both get the full width. */
+  .sb-standalone .sb-url-input {
+    flex-wrap: wrap;
+  }
+
+  .sb-standalone .sb-url-affix:first-child {
+    flex: 1 0 100%;
+    border-right: 0;
+    border-bottom: 1px solid #0002;
+  }
+}
+
+body.sb-standalone .sb-git-page {
+  :is(.sb-input, .sb-select) {
+    width: 100%;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 1.5rem 0 1rem;
+  }
+
+  code, h2, h4, dd {
+    overflow-wrap: anywhere;
+  }
+
+  label {
+    display: block;
+    margin-top: 1rem;
+  }
+
+  textarea {
+    width: 100%;
+    font-family: var(--ui-font);
+  }
+
+  dl {
+    display: grid;
+    grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr);
+    gap: 0.6rem 1rem;
+  }
+
+  dd {
+    margin: 0;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .sb-git-check {
+    margin-bottom: 1.5rem;
+  }
+}
+
+body.sb-standalone.sb-page:has(.sb-dashboard-header) {
+  max-width: 1040px;
+}
+
+body.sb-standalone .sb-space-settings {
+  .sb-settings-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+  .sb-settings-sidebar {
+    position: sticky;
+    top: 1rem;
+    display: grid;
+    gap: 0.25rem;
+    a {
+      display: flex;
+      align-items: center;
+      padding: 0.7rem 0.85rem;
+      border-radius: 6px;
+      color: inherit;
+      text-decoration: none;
+      &[aria-current="page"] { background: var(--ui-accent-color); color: var(--ui-accent-contrast-color); }
+      &:hover:not([aria-current]) { background: color-mix(in srgb, var(--ui-accent-color) 8%, transparent); }
+      &[data-dirty]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-left: auto; }
+    }
+  }
+  .sb-input, .sb-select { min-height: 36px; }
+  .sb-settings-mobile { display: none; }
+  .sb-settings-content { min-width: 0; h2:first-child { margin-top: 0; } }
+  .sb-git-page { border-top: 1px solid var(--modal-border-color); padding-top: 0.5rem; }
+}
+body.sb-standalone .sb-settings-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+
+@media (max-width: 640px) {
+  body.sb-standalone .sb-space-settings {
+    .sb-settings-layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+    .sb-input, .sb-select { min-height: 44px; }
+    .sb-settings-sidebar { display: none; }
+    .sb-settings-mobile { display: grid; gap: 0.5rem; }
+    .sb-settings-heading { align-items: start; flex-wrap: wrap; }
+    .sb-settings-content .row { flex-wrap: wrap; }
+    .sb-git-page dl { grid-template-columns: minmax(0, 1fr); }
+  }
+}
+
+.sb-standalone .sb-dashboard-profile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  &:hover { background: var(--subtle-background-color); }
+}

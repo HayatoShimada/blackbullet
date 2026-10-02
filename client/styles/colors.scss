@@ -1,0 +1,534 @@
+#sb-root {
+  font-family: var(--ui-font);
+  background-color: var(--root-background-color);
+  color: var(--root-color);
+}
+
+.cm-cursor,
+.cm-dropCursor {
+  border-left: 1.2px solid var(--editor-caret-color) !important;
+}
+
+#sb-top {
+  color: var(--top-color);
+  background-color: var(--top-background-color);
+  border-bottom: var(--top-border-color) 1px solid;
+}
+
+#sb-top.sb-sync-error {
+  --top-background-color: var(--top-sync-error-background-color);
+
+  color: var(--top-sync-error-color);
+  background-color: var(--top-background-color);
+}
+
+.sb-saved {
+  color: var(--top-saved-color);
+}
+
+.sb-unsaved {
+  color: var(--top-unsaved-color);
+}
+
+.sb-loading {
+  color: var(--top-loading-color);
+}
+
+#sb-main {
+
+  >.sb-panel:last-child {
+    border-left: 1px solid var(--panel-border-color);
+  }
+
+  >.sb-panel:first-child {
+    border-right: 1px solid var(--panel-border-color);
+  }
+
+  .sb-panel {
+    background-color: var(--panel-background-color);
+  }
+
+  // --panel-border-color is white in the light theme and cannot separate a dock
+  // from the editor.
+  .sb-nav-root-lhs {
+    border-right: 1px solid var(--ui-surface-border-color);
+  }
+
+  .sb-nav-root-rhs {
+    border-left: 1px solid var(--ui-surface-border-color);
+  }
+}
+
+.sb-bhs {
+  border-top: 1px solid var(--bhs-border-color);
+  background-color: var(--bhs-background-color);
+}
+
+.sb-notifications {
+  font-family: var(--editor-font);
+}
+
+.sb-notifications>div {
+  border: var(--notifications-border-color) 1px solid;
+}
+
+.sb-notification-info {
+  background-color: var(--notification-info-background-color);
+}
+
+.sb-notification-error {
+  background-color: var(--notification-error-background-color);
+}
+
+.sb-notification-warning {
+  background-color: var(--notification-warning-background-color);
+}
+
+.sb-actions button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  margin: 2px;
+  margin-top: 6px;
+  padding: 5px;
+  background-color: var(--action-button-background-color);
+  color: var(--action-button-color);
+  cursor: pointer;
+}
+
+.sb-actions button.sb-enabled {
+  background-color: var(--top-border-color);
+  border-radius: 5px;
+}
+
+.sb-actions button:hover {
+  color: var(--action-button-hover-color);
+}
+
+.sb-actions:not(.open) button.expander:hover {
+  color: var(--action-button-color);
+}
+
+.sb-modal-box {
+  color: var(--modal-color);
+  background-color: var(--modal-background-color);
+  border: var(--modal-border-color) 1px solid;
+  box-shadow: rgba(0, 0, 0, 0.35) 0px 20px 20px;
+
+  .sb-header {
+    border-bottom: 1px var(--modal-border-color) solid;
+
+    label {
+      color: var(--modal-header-label-color);
+    }
+
+    .sb-input {
+      font-family: var(--ui-font);
+    }
+  }
+
+  .sb-help-text {
+    background-color: var(--modal-help-background-color);
+    border-bottom: 1px var(--modal-border-color) solid;
+    color: var(--modal-help-color);
+  }
+
+  .sb-result-list {
+    .sb-hint:not(.sb-hint-inactive) {
+      color: var(--modal-hint-color);
+      background-color: var(--modal-hint-background-color);
+    }
+
+    .sb-hint.sb-hint-inactive {
+      color: var(--modal-hint-inactive-color);
+      background-color: var(--modal-hint-inactive-background-color);
+    }
+
+    .sb-description {
+      color: var(--modal-description-color);
+    }
+
+    .sb-selected-option {
+      background-color: var(--modal-selected-option-background-color);
+      color: var(--modal-selected-option-color);
+
+      .sb-description {
+        color: var(--modal-selected-option-description-color);
+      }
+    }
+  }
+}
+
+#sb-editor {
+  .cm-content {
+    font-family: var(--editor-font);
+  }
+
+  .cm-selectionBackground {
+    background-color: var(--editor-selection-background-color);
+  }
+
+  .cm-panels-bottom {
+    color: var(--editor-panels-bottom-color);
+    background-color: var(--editor-panels-bottom-background-color);
+    border-top: var(--editor-panels-bottom-border-color) 1px solid;
+
+    .cm-search {
+      .cm-textfield {
+        background-color: var(--editor-panels-bottom-input-background-color);
+      }
+
+      .cm-button {
+        background-image: var(--editor-panels-bottom-button-background-image);
+
+        &:active {
+          background-image: var(--editor-panels-bottom-button-active-background-image);
+        }
+      }
+    }
+  }
+
+  .cm-editor .cm-tooltip-autocomplete {
+    background-color: var(--root-background-color);
+    color: var(--modal-color);
+
+    li .cm-completionDetail {
+      color: var(--editor-completion-detail-color);
+    }
+
+    li[aria-selected] .cm-completionDetail,
+    li:hover .cm-completionDetail {
+      color: var(--editor-completion-detail-selected-color);
+    }
+
+    ul:hover li[aria-selected] {
+      background: transparent;
+      color: var(--modal-color);
+    }
+
+    ul li:hover,
+    ul li[aria-selected]:hover {
+      background: #17c;
+      color: white;
+    }
+  }
+
+  .cm-list-bullet {
+    color: var(--editor-list-bullet-color);
+  }
+
+  .sb-line-h1,
+  .sb-line-h2,
+  .sb-line-h3,
+  .sb-line-h4,
+  .sb-line-h5,
+  .sb-line-h6 {
+    color: var(--editor-heading-color);
+  }
+
+  .sb-line-h1 .sb-meta,
+  .sb-line-h2 .sb-meta,
+  .sb-line-h3 .sb-meta,
+  .sb-line-h4 .sb-meta,
+  .sb-line-h5 .sb-meta,
+  .sb-line-h6 .sb-meta {
+    color: var(--editor-heading-meta-color);
+  }
+}
+
+.sb-hashtag,
+.hashtag {
+  color: var(--editor-hashtag-color);
+  background-color: var(--editor-hashtag-background-color);
+  border: 1px solid var(--editor-hashtag-border-color);
+  cursor: pointer;
+}
+
+.sb-at-mention {
+  color: var(--editor-at-mention-color);
+  background-color: var(--editor-at-mention-background-color);
+  border: 1px solid var(--editor-at-mention-border-color);
+  cursor: pointer;
+}
+
+.sb-at-mention-mark {
+  opacity: 0.6;
+}
+
+.sb-at-mention-signature,
+.sb-at-mention-signature-mark {
+  color: var(--editor-at-mention-signature-color);
+  opacity: 0.6;
+}
+
+// Color anchor markers and names independently for themes.
+.sb-named-anchor {
+  color: var(--editor-link-color);
+}
+
+.sb-named-anchor-mark {
+  color: var(--editor-link-color);
+}
+
+.sb-line-hr {
+  border-top: var(--editor-ruler-color) solid 1px;
+}
+
+.sb-naked-url {
+  color: var(--editor-naked-url-color);
+}
+
+.sb-li-cursor .sb-meta {
+  color: var(--editor-line-meta-color);
+}
+
+thead tr {
+  background-color: var(--editor-table-head-background-color);
+  color: var(--editor-table-head-color);
+}
+
+tbody tr:nth-of-type(even) {
+  background-color: var(--editor-table-even-background-color);
+}
+
+.sb-line-blockquote {
+  background-color: var(--editor-blockquote-background-color);
+  color: var(--editor-blockquote-color);
+}
+
+.sb-comment-block {
+  border-left-color: var(--editor-comment-border-color);
+  border-right-color: var(--editor-comment-border-color);
+  border-top-color: var(--editor-comment-border-color);
+  border-bottom-color: var(--editor-comment-border-color);
+}
+
+.sb-line-code {
+  background-color: var(--editor-code-background-color);
+}
+
+.sb-struct {
+  color: var(--editor-struct-color);
+}
+
+.sb-code {
+  background-color: var(--editor-code-background-color);
+}
+
+.sb-line-fenced-code .sb-code {
+  color: var(--editor-code-color);
+}
+
+.sb-directive-mark {
+  color: var(--editor-directive-mark-color);
+  font-weight: bold;
+}
+
+.sb-directive {
+  color: var(--editor-directive-color);
+  font-weight: bold;
+}
+
+.sb-highlight {
+  background-color: var(--editor-highlight-background-color);
+}
+
+.sb-line-fenced-code {
+  background-color: var(--editor-code-background-color);
+}
+
+.sb-line-fenced-code .sb-comment {
+  color: var(--editor-code-comment-color);
+}
+
+.sb-variableName {
+  color: var(--editor-code-variable-color);
+}
+
+.sb-typeName {
+  color: var(--editor-code-typename-color);
+}
+
+.sb-string,
+.sb-string2 {
+  color: var(--editor-code-string-color);
+}
+
+.sb-number {
+  color: var(--editor-code-number-color);
+}
+
+.sb-operator {
+  color: var(--editor-code-operator-color);
+}
+
+.sb-meta {
+  color: var(--editor-meta-color);
+}
+
+// HTML comments (inline `Comment` + block `CommentMarkerBlock`, e.g.
+// baked-section `<!--#lua … -->` markers) render in a subtle gray, like code
+// comments. The fenced-code-scoped rule above keeps comments inside code blocks
+// code-sized.
+.sb-comment {
+  color: var(--editor-code-comment-color);
+}
+
+// The `<!--` / `-->` delimiters of a comment whose body is parsed as markdown:
+// the body styles itself, so only the markers get the comment colour.
+// An opaque surface, so the button reads as a control rather than dissolving
+// into the region's own tint.
+.sb-comment-resolve {
+  color: var(--subtle-color);
+  background-color: var(--root-background-color);
+  border-color: var(--subtle-color);
+}
+
+.sb-comment-resolve:hover {
+  background-color: var(--editor-widget-background-color);
+  color: var(--editor-text-color);
+}
+
+.sb-comment-label {
+  color: var(--editor-code-comment-color);
+}
+
+.sb-comment-marker {
+  color: var(--editor-code-comment-color);
+}
+
+.sb-conflict-marker {
+  color: var(--editor-code-comment-color);
+}
+
+.sb-deleted {
+  color: var(--editor-code-deleted-color, #dc2626);
+  background-color: var(--editor-code-deleted-bg, rgba(254, 202, 202, 0.25));
+}
+
+.sb-inserted {
+  color: var(--editor-code-inserted-color, #16a34a);
+  background-color: var(--editor-code-inserted-bg, rgba(187, 247, 208, 0.25));
+}
+
+.sb-admonition {
+  border-left-color: var(--admonition-color);
+}
+
+.sb-admonition-title {
+  background-color: color-mix(in srgb,
+      var(--admonition-color),
+      transparent 90%);
+}
+
+.sb-admonition-type::before {
+  background-color: var(--admonition-color);
+}
+
+.sb-frontmatter {
+  background-color: var(--editor-frontmatter-background-color);
+  color: var(--editor-frontmatter-color);
+}
+
+.sb-frontmatter-marker {
+  color: var(--editor-frontmatter-marker-color);
+}
+
+.sb-emphasis {
+  font-style: italic;
+}
+
+.sb-strong {
+  font-weight: 900;
+}
+
+.sb-sub {
+  vertical-align: sub;
+  font-size: smaller;
+}
+
+.sb-sup {
+  vertical-align: super;
+  font-size: smaller;
+}
+
+.sb-line-code-outside .sb-code-info {
+  color: var(--editor-code-info-color);
+}
+
+a,
+.sb-link:not(.sb-meta, .sb-url) {
+  color: var(--editor-link-color);
+}
+
+.sb-link.sb-url {
+  color: var(--editor-link-meta-color);
+}
+
+.sb-url:not(.sb-link) {
+  color: var(--editor-link-url-color);
+}
+
+.sb-atom,
+.sb-attribute-name {
+  color: var(--editor-code-atom-color);
+}
+
+.sb-wiki-link {
+  color: var(--editor-wiki-link-page-color);
+  background-color: var(--editor-wiki-link-page-background-color);
+}
+
+a.sb-wiki-link-missing,
+.sb-wiki-link-missing>.sb-wiki-link {
+  color: var(--editor-wiki-link-page-missing-color);
+}
+
+a.sb-wiki-link-invalid,
+.sb-wiki-link-invalid>.sb-wiki-link {
+  color: var(--editor-wiki-link-page-invalid-color);
+}
+
+a.sb-wiki-link-ambiguous,
+.sb-wiki-link-ambiguous>.sb-wiki-link {
+  color: var(--editor-wiki-link-page-invalid-color);
+}
+
+.sb-task-mark {
+  color: var(--editor-task-marker-color);
+}
+
+.sb-task-state {
+  color: var(--editor-task-state-color);
+}
+
+.sb-footnote-def-line {
+  font-size: 80%;
+}
+
+.sb-footnote-ref {
+  color: var(--meta-subtle-color);
+  border: 1px solid var(--meta-subtle-color);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-size: 0.75em;
+  background-color: #f3eeee;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.sb-footnote-ref-unresolved {
+  color: var(--editor-error-color, #d32f2f);
+  border-color: var(--editor-error-color, #d32f2f);
+  background-color: rgba(211, 47, 47, 0.1);
+}
+
+.sb-footnote-tooltip-error {
+  color: var(--editor-error-color, #d32f2f);
+}
+
+.sb-line-comment {
+  background-color: var(--editor-comment-background-color);
+}
