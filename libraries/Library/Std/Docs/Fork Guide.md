@@ -98,7 +98,12 @@ group: status
 * **表示を読んだあとにページが変わっていたら、書き込みません**(「ページが変わっています」と出て、表示を読み直します)。
 * タスクで書き換えられるのは、完了と期限だけです。ページの名前・タグ・タスク数は表では編集しません。
 * 設定(`columns` `where` `sort` `limit` `weekStart` など)の一覧は、ページ [[Library/Std/Editor/DB View]] にあります。
-* `database.define` でデータベース(列の型・既定値・置き場)を定義すると、ビューに「+ New」が出て行を追加できます(詳細は [[Library/Std/APIs/Database]])。
+* 行の「…」メニューで、名前の変更(被リンクも更新)・複製・アーカイブ/復元・ゴミ箱へ、ができます。**「ゴミ箱へ」は Trash/<名前> へ移します(trashedFrom を記録)。Database: Restore From Trash で戻せます**(ゴミ箱のページは db ビューにだけ出ません)。アーカイブした行は、ブロックに `archived: true` を書かない限り表示されません。
+* 作成日時・更新日時(`created` / `modified`)は読み取り専用の列で、`sort: -modified` のように並べ替えにも使えます。
+* `where` では `{due: {before: today}}` や `status: [{not: done}, {not: someday}]` のように、等しい以外の条件(`not lt lte gt gte before after contains empty`)も書けます。ヘッダの「ビューを保存」で、いまのタブ・並べ替え・絞り込みをブロックへ書き戻せます。
+* ボードの列やカレンダーの日の `+` で、その列の値・その日の日付が入った行をその場で作れます。スマホではカードを長押ししてドラッグします。
+* ${widgets.commandButton("Database: Insert View")}(`/database`): データベースとビューを選んで `db` ブロックを挿入します。${widgets.commandButton("Database: New Row")}: 行を作ります。${widgets.commandButton("Database: Define in CONFIG")}: [[CONFIG]] にデータベース定義の雛形を追記して開きます。${widgets.commandButton("Database: Restore From Trash")}: ゴミ箱に送った行を元の場所へ戻します。
+* `database.define` でデータベース(列の型・既定値・置き場・テンプレート)を定義すると、ビューに「+ New」が出て行を追加できます(詳細は [[Library/Std/APIs/Database]])。
 
 # `@` で人・日付・ページを呼ぶ
 本文で `@` を打つと、候補が出ます。選ぶと次のように入ります。
@@ -120,6 +125,11 @@ group: status
 * ${widgets.commandButton("Memo: Search")}(`Ctrl-Shift-f` / `Cmd-Shift-f`): 見出しごとの節を検索。`Enter` でその節へ移動します。
 * ${widgets.commandButton("Memo: Related Notes")}: ページ下部に、意味の近いページとリンク先を表示します。
 * ${widgets.commandButton("Memo: Ask")}: 質問を入力すると、ノートの関連する節を根拠に AI が答えます(出典は `[1]` のリンク)。設定は `memoAsk {apiKey, model}`(詳細は [[Library/Std/Editor/Memo Ask]])。その質問に関係する節だけを Anthropic API に送り、秘匿(`:confidential`)スペースのノートは `memoAsk.allowConfidential = true` にしない限り送りません。
+* ${widgets.commandButton("Memo: Set up Ask")}: API キーとモデルを入力すると、[[CONFIG]] に設定を書き込みます(キーは平文で保存されます)。
+* ${widgets.commandButton("Memo: Ask - Follow-up")}: 直前の答えの続きを質問します(前のやり取りの質問と答えだけを送り、前のノートは送り直しません。この質問に合う節は新たに送ります。検索語を作り直すため、直前の質問と答えの冒頭も API に送ります)。${widgets.commandButton("Memo: Ask - New Conversation")} で会話を忘れます。
+* ${widgets.commandButton("Memo: Ask - Save Answer")}: 答えを `Ask/<日付> <質問>` ページに出典つきで保存します。${widgets.commandButton("Memo: Ask - History")} で、このセッションの直近の答えを開き直せます。
+* 質問の頭に `#タグ` `folder:フォルダ/`(`in:` でも可)`kind:pdf` `area:` `status:` `since:2026-01-01` を書くと、検索範囲を絞れます。答えには、引用した出典と、送ったが引用されなかった節、入力サイズの目安が付きます。
+* PDF・Word・Excel・PowerPoint・OpenDocument・HTML の中身も検索できます(検索結果に `[PDF p.3]` のような位置が付きます)。`kind:pdf` や `in:フォルダ/` を検索語の先頭に書くと絞れます。読めなかったファイルは、AI 側の `doc_status` ツールで確認できます。
 * グラフ(`Ctrl-Shift-g`): 明示リンクに加えて、意味の近いページ同士を破線でつなぎます。
 
 # 設定
@@ -129,7 +139,8 @@ group: status
 | `actionButtons` | ヘッダーのボタン。このフォークでは「?」(ヘルプ)を足してあります。自前の `actionButtons` を書くと表全体が置き換わるので、`{icon = "help-circle", description = "Help", command = "Help: Fork Guide"}` も書いてください |
 | `view.defaults` | ビューごとの既定(ドック、開閉、幅)。このフォークでは `std.spaceTree` が起動時に開く既定です。自前の `view.defaults` を書くと表全体が置き換わるので、`["std.spaceTree"] = {open = true}` も書いてください |
 | `memoSidecar` | 検索サイドカーの接続(`url` / `token` / `space`) |
-| `memoAsk` | Memo: Ask の設定(`apiKey` / `model` / `maxTokens` / `k` / `allowConfidential`) |
+| `memoAsk` | Memo: Ask の設定(`apiKey` / `model` / `maxTokens` / `k` / `allowConfidential` / `defaultScope` / `maxInputTokens` / `maxTurns` / `expand` / `minScoreRatio` / `instructions`) |
+| `memoSidecar.pdfPages` | `true` にすると、PDF の検索結果を `ファイル.pdf#page=N` で開きます(既定は off) |
 
 # このフォークのコマンド一覧
 このフォークで追加したコマンドです(登録されているものだけを、キーの割り当てとともに表示します)。
@@ -152,6 +163,15 @@ local FORK_COMMANDS = {
   "Memo: Search",
   "Memo: Related Notes",
   "Memo: Ask",
+  "Memo: Ask - Follow-up",
+  "Memo: Ask - New Conversation",
+  "Memo: Ask - Save Answer",
+  "Memo: Ask - History",
+  "Memo: Set up Ask",
+  "Database: Insert View",
+  "Database: New Row",
+  "Database: Define in CONFIG",
+  "Database: Restore From Trash",
   "Help: Fork Guide",
 }
 
