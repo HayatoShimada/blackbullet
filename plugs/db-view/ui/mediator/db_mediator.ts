@@ -30,6 +30,8 @@ export type Mode =
   | { kind: "editing"; rowId: string; column: string }
   /** `over` is the column key (board) or ISO date / "" (calendar) the card is on. */
   | { kind: "dragging"; rowId: string; over: string | null }
+  /** The "+ New" input is open, waiting for a title. */
+  | { kind: "creating" }
   /** A write is in flight: one at a time, so a second edit is not started. */
   | { kind: "writing" };
 
@@ -68,6 +70,12 @@ export type DbEvent =
   | { type: "card.drop"; target: string }
   | { type: "card.cancel" }
   | { type: "row.open"; rowId: string }
+  /** A page a cell names (a `page` property). */
+  | { type: "link.open"; target: string }
+  /** "+ New": the input opens, is cancelled, or is submitted with a title. */
+  | { type: "create.open" }
+  | { type: "create.cancel" }
+  | { type: "row.create"; title: string }
   | { type: "reload" }
   | { type: "notice.dismiss" }
   /** The runner's answers. */
@@ -79,6 +87,8 @@ export type DbEvent =
       modified: string;
     }
   | { type: "write.failed"; reason: string; message: string }
+  | { type: "create.done"; page: string }
+  | { type: "create.failed"; message: string }
   | {
       type: "rows.loaded";
       rows: DbRow[];
@@ -96,7 +106,9 @@ export type DbEffect =
       value: string | boolean;
     }
   | { type: "reload" }
-  | { type: "navigate"; target: string };
+  | { type: "navigate"; target: string }
+  /** A new row of the spec's database, named `title`. */
+  | { type: "create"; title: string };
 
 export type Transition = { state: DbState; effects: DbEffect[] };
 
@@ -209,7 +221,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
             type: "write",
             row,
             column: event.column,
-            kind: columnKind(event.column, state.rows),
+            kind: columnKind(event.column, state.rows, state.spec.database),
             value: event.value,
           },
         ],
@@ -249,7 +261,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
             type: "write",
             row,
             column: write.column,
-            kind: columnKind(write.column, state.rows),
+            kind: columnKind(write.column, state.rows, state.spec.database),
             value: write.value,
           },
         ],
@@ -272,6 +284,45 @@ export function transition(state: DbState, event: DbEvent): Transition {
         ],
       };
     }
+    case "link.open": {
+      const target = event.target.trim();
+      if (!target) return stay(state);
+      return { state, effects: [{ type: "navigate", target }] };
+    }
+
+    case "create.open":
+      if (state.mode.kind !== "idle" || !state.spec.database) {
+        return stay(state);
+      }
+      return stay({ ...state, mode: { kind: "creating" } });
+    case "create.cancel":
+      return stay(
+        state.mode.kind === "creating"
+          ? { ...state, mode: { kind: "idle" } }
+          : state,
+      );
+    case "row.create": {
+      if (busy || !state.spec.database) return stay(state);
+      const title = event.title.trim();
+      // Nothing typed: the input stays open, waiting.
+      if (title === "") return stay(state);
+      return {
+        state: { ...state, mode: { kind: "writing" }, notice: null },
+        effects: [{ type: "create", title }],
+      };
+    }
+    case "create.done":
+      return {
+        state: { ...state, mode: { kind: "idle" }, reloading: true },
+        // Open the new page; and the rows here have one more, so read again.
+        effects: [{ type: "navigate", target: event.page }, { type: "reload" }],
+      };
+    case "create.failed":
+      return stay({
+        ...state,
+        mode: { kind: "idle" },
+        notice: { level: "error", text: event.message },
+      });
     case "reload":
       if (busy || state.reloading) return stay(state);
       return {

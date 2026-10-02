@@ -19,6 +19,7 @@ function widgetDeps(onState: (s: DbState) => void): DbRunnerDeps {
     updateTask: (page, pos, state, edit, modified) =>
       call("updateTask", page, pos, state, edit, modified),
     query: (spec) => call("query", spec),
+    createRow: (spec, title) => call("createRow", spec, title),
     indexedModified: (page) => call("indexedModified", page),
     navigate: (target) => syscall("editor.navigate", target),
     onState,

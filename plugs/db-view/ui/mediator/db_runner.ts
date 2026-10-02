@@ -1,5 +1,9 @@
-import type { ViewModel, WriteResult } from "../../src/functions.ts";
-import type { TaskEdit } from "../../src/functions.ts";
+import type {
+  CreateResult,
+  TaskEdit,
+  ViewModel,
+  WriteResult,
+} from "../../src/functions.ts";
 import type { CellKind, Spec } from "../../src/model.ts";
 import {
   type DbEffect,
@@ -30,6 +34,8 @@ export type DbRunnerDeps = {
     modified: string,
   ): Promise<WriteResult>;
   query(spec: Spec): Promise<ViewModel>;
+  /** A new row of the spec's database, named `title`. */
+  createRow(spec: Spec, title: string): Promise<CreateResult>;
   /** The modification time the index holds for a page (null: none). */
   indexedModified(page: string): Promise<string | null>;
   navigate(target: string): Promise<void>;
@@ -158,10 +164,28 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
     return true;
   }
 
+  async function create(title: string): Promise<void> {
+    let result: CreateResult;
+    try {
+      result = await deps.createRow(state.spec, title);
+    } catch (e) {
+      result = { ok: false, reason: "failed", message: errorMessage(e) };
+    }
+    if (!result.ok) {
+      emit({ type: "create.failed", message: result.message });
+      return;
+    }
+    // The read that follows waits for the index to show the new page.
+    written.set(result.page, result.modified);
+    emit({ type: "create.done", page: result.page });
+  }
+
   async function run(effect: DbEffect): Promise<void> {
     switch (effect.type) {
       case "write":
         return write(effect);
+      case "create":
+        return create(effect.title);
       case "reload":
         try {
           // Still behind after all that: keep what the write already showed.

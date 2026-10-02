@@ -5,9 +5,45 @@ export type SourceSpec =
   | { kind: "tasks" }
   | { kind: "tag"; tag: string };
 
+/** What a declared property holds; `page` is a link to another page. */
+export type PropertyType =
+  | "text"
+  | "select"
+  | "date"
+  | "number"
+  | "boolean"
+  | "page";
+
+export type DatabaseProperty = {
+  key: string;
+  type: PropertyType;
+  label?: string;
+  /** A select's choices. */
+  options?: string[];
+  /** What a new row starts with. */
+  default?: string | number | boolean;
+};
+
+/** A database as `database.define` declared it (Space Lua, via config). */
+export type DatabaseSpec = {
+  name: string;
+  /** The tag its rows carry. */
+  tag: string;
+  /** Where new rows are made (ends in `/`), or "" for anywhere. */
+  folder: string;
+  /** A page whose body seeds a new row. */
+  template?: string;
+  title?: string;
+  properties: DatabaseProperty[];
+  /** Board: the order of the columns. */
+  order?: string[];
+};
+
 /** What a ```db block asks for, after validation and defaults. */
 export type Spec = {
   source: SourceSpec;
+  /** The database the block is a view of, when it named one. */
+  database?: DatabaseSpec;
   view: ViewKind;
   title?: string;
   /** Board: the attribute whose values are the columns. */
@@ -59,6 +95,8 @@ export type Column = {
   editable: boolean;
   /** A select's choices. */
   options?: string[];
+  /** The value names a page: shown as a link to it. */
+  link?: boolean;
 };
 
 export const DEFAULT_LIMIT = 500;

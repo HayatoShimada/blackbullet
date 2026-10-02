@@ -59,6 +59,9 @@ function setup(
         today: "2026-10-03",
       };
     },
+    async createRow() {
+      throw new Error("createRow was not expected");
+    },
     async indexedModified() {
       // The index has caught up with the write ("m2") by the time it is asked.
       return "m2";
@@ -399,5 +402,93 @@ describe("reading after a write", () => {
     runner.emit({ type: "reload" });
     await settle();
     expect(log).toEqual(["query"]);
+  });
+});
+
+describe("+ New", () => {
+  const withDb: Spec = {
+    ...spec,
+    source: { kind: "tag", tag: "project" },
+    database: {
+      name: "projects",
+      tag: "project",
+      folder: "Projects/",
+      properties: [],
+    },
+  };
+
+  test("a row made is navigated to, and the rows are read again", async () => {
+    const asked: string[] = [];
+    const { runner, log } = setup(
+      [row("A")],
+      undefined,
+      {
+        async createRow(s, title) {
+          log.push(`create ${s.database?.name} ${title}`);
+          return { ok: true, page: `Projects/${title}`, modified: "m2" };
+        },
+        async indexedModified(page) {
+          asked.push(page);
+          return "m2";
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "create.open" });
+    runner.emit({ type: "row.create", title: "Launch" });
+    expect(runner.getState().mode).toEqual({ kind: "writing" });
+    await settle();
+    expect(log).toEqual([
+      "create projects Launch",
+      "navigate Projects/Launch",
+      "query",
+    ]);
+    // The read waited for the index to show the new page.
+    expect(asked).toEqual(["Projects/Launch"]);
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
+    expect(runner.getState().reloading).toBe(false);
+  });
+
+  test("a refused row is shown, nothing opens", async () => {
+    const { runner, log } = setup(
+      [row("A")],
+      undefined,
+      {
+        async createRow() {
+          return {
+            ok: false,
+            reason: "exists",
+            message: "Projects/Launch はもうあります",
+          };
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "create.open" });
+    runner.emit({ type: "row.create", title: "Launch" });
+    await settle();
+    expect(log).toEqual([]);
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
+    expect(runner.getState().notice?.text).toBe(
+      "Projects/Launch はもうあります",
+    );
+  });
+
+  test("a throwing create is a failure, not a crash", async () => {
+    const { runner } = setup(
+      [row("A")],
+      undefined,
+      {
+        async createRow() {
+          throw new Error("disk full");
+        },
+      },
+      withDb,
+    );
+    runner.emit({ type: "create.open" });
+    runner.emit({ type: "row.create", title: "Launch" });
+    await settle();
+    expect(runner.getState().notice?.text).toBe("disk full");
+    expect(runner.getState().mode).toEqual({ kind: "idle" });
   });
 });

@@ -1,3 +1,4 @@
+import { useRef } from "preact/hooks";
 import type { ViewKind } from "../../src/model.ts";
 import {
   type DbEvent,
@@ -7,6 +8,54 @@ import {
 import { BoardView } from "./board_view.tsx";
 import { CalendarView } from "./calendar_view.tsx";
 import { TableView } from "./table_view.tsx";
+
+type Emit = (event: DbEvent) => void;
+
+/** "+ New": a button, or while open the title input. Enter submits, Esc or
+ * leaving it cancels. It draws the Mediator's mode and only ever emits. */
+function NewRow({ state, emit }: { state: DbState; emit: Emit }) {
+  // After Enter or Esc the input still loses focus; that must not cancel
+  // what Enter just started.
+  const settled = useRef(false);
+  if (state.mode.kind !== "creating") {
+    return (
+      <button
+        type="button"
+        class="db-btn db-new"
+        disabled={state.mode.kind === "writing"}
+        title="新しい行をページとして作る"
+        onClick={() => emit({ type: "create.open" })}
+      >
+        + New
+      </button>
+    );
+  }
+  settled.current = false;
+  return (
+    <input
+      class="db-input db-new-title"
+      type="text"
+      autoFocus
+      placeholder="Title"
+      maxLength={100}
+      onKeyDown={(e) => {
+        // The Enter that confirms an IME conversion is not a submit.
+        if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) {
+          e.preventDefault();
+          const title = (e.currentTarget as HTMLInputElement).value;
+          // An empty title starts nothing: the input stays, so a blur later
+          // still cancels it.
+          settled.current = title.trim() !== "";
+          emit({ type: "row.create", title });
+        } else if (e.key === "Escape") {
+          settled.current = true;
+          emit({ type: "create.cancel" });
+        }
+      }}
+      onBlur={() => !settled.current && emit({ type: "create.cancel" })}
+    />
+  );
+}
 
 const TABS: { view: ViewKind; label: string }[] = [
   { view: "table", label: "表" },
@@ -74,6 +123,7 @@ export function App({
         >
           {state.reloading ? "…" : "↻"}
         </button>
+        {state.spec.database && <NewRow state={state} emit={emit} />}
       </header>
       {state.notice && (
         <div class={`db-notice db-notice-${state.notice.level}`} role="alert">

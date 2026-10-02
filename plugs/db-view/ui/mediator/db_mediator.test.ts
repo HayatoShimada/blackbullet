@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { DbRow, Spec } from "../../src/model.ts";
+import type { DatabaseSpec, DbRow, Spec } from "../../src/model.ts";
 import {
   type DbEvent,
   type DbState,
@@ -439,5 +439,116 @@ describe("selectView", () => {
     expect(view.byDay.get("2026-10-05")!.map((r) => r.id)).toEqual(["A"]);
     expect(view.undated.map((r) => r.id)).toEqual(["B"]);
     expect(view.weeks.flat().some((d) => d.iso === "2026-10-05")).toBe(true);
+  });
+});
+
+describe("+ New", () => {
+  const database: DatabaseSpec = {
+    name: "projects",
+    tag: "project",
+    folder: "Projects/",
+    properties: [{ key: "area", type: "page" }],
+  };
+  const withDb = () =>
+    start({ source: { kind: "tag", tag: "project" }, database });
+
+  test("opens only with a database, and only when idle", () => {
+    expect(run([{ type: "create.open" }], withDb()).state.mode).toEqual({
+      kind: "creating",
+    });
+    expect(run([{ type: "create.open" }]).state.mode).toEqual({ kind: "idle" });
+    const editing = run([{ type: "cell.edit", rowId: "A", column: "area" }], {
+      ...withDb(),
+      view: "table",
+    }).state;
+    expect(editing.mode.kind).toBe("editing");
+    expect(transition(editing, { type: "create.open" }).state).toBe(editing);
+  });
+
+  test("cancelling closes the input", () => {
+    const { state, effects } = run(
+      [{ type: "create.open" }, { type: "create.cancel" }],
+      withDb(),
+    );
+    expect(state.mode).toEqual({ kind: "idle" });
+    expect(effects).toEqual([]);
+    const idle = start();
+    expect(transition(idle, { type: "create.cancel" }).state).toBe(idle);
+  });
+
+  test("a title starts the create, and nothing else can start meanwhile", () => {
+    const { state, effects } = run(
+      [{ type: "create.open" }, { type: "row.create", title: " Launch " }],
+      withDb(),
+    );
+    expect(state.mode).toEqual({ kind: "writing" });
+    expect(effects).toEqual([{ type: "create", title: "Launch" }]);
+    expect(
+      transition(state, { type: "row.create", title: "Again" }).effects,
+    ).toEqual([]);
+    expect(
+      transition(state, { type: "cell.edit", rowId: "A", column: "status" })
+        .state,
+    ).toBe(state);
+  });
+
+  test("an empty title starts nothing, and the input stays open", () => {
+    const opened = run([{ type: "create.open" }], withDb()).state;
+    const next = transition(opened, { type: "row.create", title: "  " });
+    expect(next.state).toBe(opened);
+    expect(next.effects).toEqual([]);
+  });
+
+  test("without a database a title is ignored", () => {
+    expect(run([{ type: "row.create", title: "Launch" }]).effects).toEqual([]);
+  });
+
+  test("a row made opens its page and reads again", () => {
+    const writing = run(
+      [{ type: "create.open" }, { type: "row.create", title: "Launch" }],
+      withDb(),
+    ).state;
+    const { state, effects } = transition(writing, {
+      type: "create.done",
+      page: "Projects/Launch",
+    });
+    expect(state.mode).toEqual({ kind: "idle" });
+    expect(state.reloading).toBe(true);
+    expect(effects).toEqual([
+      { type: "navigate", target: "Projects/Launch" },
+      { type: "reload" },
+    ]);
+  });
+
+  test("a failure says so", () => {
+    const writing = run(
+      [{ type: "create.open" }, { type: "row.create", title: "Launch" }],
+      withDb(),
+    ).state;
+    const { state, effects } = transition(writing, {
+      type: "create.failed",
+      message: "Projects/Launch はもうあります",
+    });
+    expect(state.mode).toEqual({ kind: "idle" });
+    expect(state.notice).toEqual({
+      level: "error",
+      text: "Projects/Launch はもうあります",
+    });
+    expect(effects).toEqual([]);
+  });
+
+  test("a page a cell names opens", () => {
+    expect(
+      run([{ type: "link.open", target: " Areas/X " }], withDb()).effects,
+    ).toEqual([{ type: "navigate", target: "Areas/X" }]);
+    expect(run([{ type: "link.open", target: "  " }]).effects).toEqual([]);
+  });
+
+  test("a write uses the declared kind", () => {
+    const { effects } = run(
+      [{ type: "cell.commit", rowId: "A", column: "area", value: "Areas/X" }],
+      withDb(),
+    );
+    expect(effects[0]).toMatchObject({ column: "area", kind: "text" });
   });
 });

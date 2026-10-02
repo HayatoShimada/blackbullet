@@ -1,6 +1,8 @@
 import {
   type CellKind,
   type Column,
+  type DatabaseProperty,
+  type DatabaseSpec,
   DEFAULT_STATUS_ORDER,
   type DbRow,
   type Spec,
@@ -217,8 +219,25 @@ export function rowsByDate(
 
 const DATE_KEY = /(^|[A-Z_-])(date|due|start|deadline|completed)s?$/i;
 
-/** What kind of editor a column wants, from its name and what it holds. */
-export function cellKind(key: string, rows: readonly DbRow[]): CellKind {
+/** The property a database declares under `key`, if it declares one. */
+export function declaredProperty(
+  key: string,
+  database?: DatabaseSpec,
+): DatabaseProperty | undefined {
+  return database?.properties.find((p) => p.key === key);
+}
+
+/**
+ * What kind of editor a column wants: what the database declares, else a
+ * guess from its name and what it holds. A page link is edited as text.
+ */
+export function cellKind(
+  key: string,
+  rows: readonly DbRow[],
+  database?: DatabaseSpec,
+): CellKind {
+  const declared = declaredProperty(key, database);
+  if (declared) return declared.type === "page" ? "text" : declared.type;
   if (key === "status") return "select";
   if (DATE_KEY.test(key)) return "date";
   const values = rows.map((r) => valueOf(r, key)).filter((v) => !isEmpty(v));
@@ -230,8 +249,12 @@ export function cellKind(key: string, rows: readonly DbRow[]): CellKind {
 }
 
 /** The kind of cell an attribute is, `done` being the task's checkbox. */
-export function columnKind(key: string, rows: readonly DbRow[]): CellKind {
-  return key === "done" ? "boolean" : cellKind(key, rows);
+export function columnKind(
+  key: string,
+  rows: readonly DbRow[],
+  database?: DatabaseSpec,
+): CellKind {
+  return key === "done" ? "boolean" : cellKind(key, rows, database);
 }
 
 const DEFAULT_COLUMNS: Record<string, string[]> = {
@@ -252,10 +275,14 @@ const LABELS: Record<string, string> = {
   page: "ページ",
 };
 
-/** The columns of a table: the spec's, else the source's usual, else what the
- * rows have in common. */
+/** The columns of a table: the spec's, else the database's properties, else
+ * the source's usual, else what the rows have in common. */
 export function columnsFor(rows: readonly DbRow[], spec: Spec): Column[] {
+  const database = spec.database;
   let keys = spec.columns;
+  if (!keys && database) {
+    keys = ["title", ...database.properties.map((p) => p.key)];
+  }
   if (!keys) {
     keys = DEFAULT_COLUMNS[spec.source.kind];
   }
@@ -266,7 +293,8 @@ export function columnsFor(rows: readonly DbRow[], spec: Spec): Column[] {
     keys = ["title", ...seen];
   }
   return keys.map((key) => {
-    const kind = columnKind(key, rows);
+    const declared = declaredProperty(key, database);
+    const kind = columnKind(key, rows, database);
     const readOnly =
       key === "title" ||
       key === "name" ||
@@ -278,20 +306,26 @@ export function columnsFor(rows: readonly DbRow[], spec: Spec): Column[] {
       kind === "select" ? selectOptions(key, rows, spec) : undefined;
     return {
       key,
-      label: LABELS[key] ?? key,
+      label: declared?.label ?? LABELS[key] ?? key,
       kind,
       editable: !readOnly,
       ...(options ? { options } : {}),
+      ...(declared?.type === "page" ? { link: true } : {}),
     };
   });
 }
 
-/** The choices of a select: what the spec orders, the usual, and what is used. */
+/** The choices of a select: what the database declares; else what the spec
+ * orders, the usual, and what is used. */
 export function selectOptions(
   key: string,
   rows: readonly DbRow[],
-  spec: Pick<Spec, "order">,
+  spec: Pick<Spec, "order" | "database">,
 ): string[] {
+  const declared = declaredProperty(key, spec.database);
+  if (declared?.type === "select" && declared.options) {
+    return [...declared.options];
+  }
   const out: string[] = [];
   const add = (v: string) => {
     if (v && !out.includes(v)) out.push(v);

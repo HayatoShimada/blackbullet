@@ -13,7 +13,7 @@ import {
   shiftMonth,
   sortRows,
 } from "./derive.ts";
-import type { DbRow, Spec } from "./model.ts";
+import type { DatabaseSpec, DbRow, Spec } from "./model.ts";
 
 const row = (
   title: string,
@@ -299,5 +299,80 @@ describe("columns", () => {
       "waiting",
       "active",
     ]);
+  });
+});
+
+describe("a database's declared properties", () => {
+  const database: DatabaseSpec = {
+    name: "projects",
+    tag: "project",
+    folder: "Projects/",
+    properties: [
+      { key: "kind", type: "select", options: ["x", "y"], label: "種類" },
+      { key: "when", type: "date" },
+      { key: "area", type: "page" },
+      { key: "size", type: "number" },
+      { key: "flag", type: "boolean" },
+    ],
+  };
+  const rows = [
+    row("A", { kind: "z", when: "2026-10-01", size: "big", extra: 1 }),
+  ];
+
+  test("cellKind is what is declared, a page link being edited as text", () => {
+    expect(cellKind("kind", rows, database)).toBe("select");
+    expect(cellKind("when", rows, database)).toBe("date");
+    expect(cellKind("area", rows, database)).toBe("text");
+    expect(cellKind("size", rows, database)).toBe("number"); // not what the rows hold
+    expect(cellKind("flag", rows, database)).toBe("boolean");
+    // Undeclared keys are still guessed.
+    expect(cellKind("extra", rows, database)).toBe("number");
+    expect(cellKind("kind", rows)).toBe("text");
+  });
+
+  test("selectOptions are the declared ones, nothing else", () => {
+    expect(selectOptions("kind", rows, { database })).toEqual(["x", "y"]);
+    expect(selectOptions("kind", rows, { order: ["q"], database })).toEqual([
+      "x",
+      "y",
+    ]);
+    expect(selectOptions("kind", rows, {})).toEqual(["z"]);
+  });
+
+  test("the default columns are the title and the declared keys, labelled", () => {
+    const columns = columnsFor(
+      rows,
+      spec({ source: { kind: "tag", tag: "project" }, database }),
+    );
+    expect(columns.map((c) => c.key)).toEqual([
+      "title",
+      "kind",
+      "when",
+      "area",
+      "size",
+      "flag",
+    ]);
+    expect(columns[1]).toEqual({
+      key: "kind",
+      label: "種類",
+      kind: "select",
+      editable: true,
+      options: ["x", "y"],
+    });
+    expect(columns[2]).toMatchObject({ label: "when", kind: "date" });
+    expect(columns[3]).toMatchObject({
+      kind: "text",
+      editable: true,
+      link: true,
+    });
+    expect(columns[1].link).toBeUndefined();
+  });
+
+  test("the block's own columns still win", () => {
+    expect(
+      columnsFor(rows, spec({ database, columns: ["title", "extra"] })).map(
+        (c) => c.key,
+      ),
+    ).toEqual(["title", "extra"]);
   });
 });

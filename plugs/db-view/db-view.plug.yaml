@@ -18,3 +18,5 @@ functions:
     path: ./src/functions.ts:updatePageValue
   updateTask:
     path: ./src/functions.ts:updateTask
+  createRow:
+    path: ./src/functions.ts:createRow

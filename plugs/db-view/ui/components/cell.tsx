@@ -89,7 +89,26 @@ export function CellValue({
       </span>
     );
   }
+  if (column.link) {
+    const target = linkTarget(String(value));
+    return (
+      <a
+        class="db-link"
+        title={target}
+        onClick={() => emit({ type: "link.open", target })}
+      >
+        {String(value)}
+      </a>
+    );
+  }
   return <span>{String(value)}</span>;
+}
+
+/** The page a `page` property names: `[[Areas/X|alias]]`, `[[Areas/X]]` or
+ * plain `Areas/X` all open `Areas/X`. */
+export function linkTarget(value: string): string {
+  const m = /^\s*\[\[([^\]|]*)(?:\|[^\]]*)?\]\]\s*$/.exec(value);
+  return (m ? m[1] : value).trim();
 }
 
 /** An in-place editor: Enter or leaving the cell commits, Esc cancels. */

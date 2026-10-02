@@ -5,6 +5,7 @@
  */
 import {
   asset,
+  config,
   index,
   lua,
   space,
@@ -12,11 +13,12 @@ import {
 } from "@silverbulletmd/silverbullet/syscalls";
 import { syscall } from "@silverbulletmd/silverbullet/syscall";
 import { panelStyles } from "@silverbulletmd/silverbullet/lib/panel_styles";
+import { rowPageName, rowPatches } from "./create.ts";
 import { isoDate, matchesWhere } from "./derive.ts";
 import { isStale, parseCellInput, setTaskDone, setTaskDue } from "./edit.ts";
-import type { CellKind, DbRow, Spec } from "./model.ts";
+import type { CellKind, DatabaseSpec, DbRow, Spec } from "./model.ts";
 import { countTasks, pageRow, taskRow } from "./rows.ts";
-import { parseSpec } from "./spec.ts";
+import { databaseFrom, databaseName, parseSpec } from "./spec.ts";
 
 const PLUG_NAME = "db-view";
 
@@ -58,7 +60,10 @@ export async function loadRows(
     rows = (await tasksOf()).map(taskRow);
   } else {
     const tag = spec.source.kind === "projects" ? "project" : spec.source.tag;
-    const pages = await pagesTagged(tag);
+    const folder = spec.database?.folder;
+    const pages = (await pagesTagged(tag)).filter(
+      (p) => !folder || String(p.name).startsWith(folder),
+    );
     const counts =
       spec.source.kind === "projects" ? countTasks(await tasksOf()) : undefined;
     rows = pages.map((p) =>
@@ -118,7 +123,7 @@ export async function render(
       `YAML を読めません: ${e instanceof Error ? e.message : e}`,
     );
   }
-  const parsed = parseSpec(raw);
+  const parsed = parseSpec(raw, await databaseOf(databaseName(raw)));
   if (!parsed.ok) return errorWidget(parsed.error);
   try {
     return await widgetOf(await buildModel(parsed.spec));
@@ -126,6 +131,98 @@ export async function render(
     return errorWidget(
       `読み込みに失敗しました: ${e instanceof Error ? e.message : e}`,
     );
+  }
+}
+
+/** The database `database.define` stored under `name`, if there is one. */
+async function databaseOf(
+  name: string | undefined,
+): Promise<DatabaseSpec | undefined> {
+  if (!name) return undefined;
+  return databaseFrom(await config.get(["databases", name], null));
+}
+
+export type CreateResult =
+  | { ok: true; page: string; modified: string }
+  | {
+      ok: false;
+      reason: "exists" | "invalid" | "failed";
+      message: string;
+    };
+
+/** The body of the database's template page, its frontmatter stripped. */
+async function templateBody(template: string): Promise<string> {
+  const text = await space.readPage(template);
+  const stripped: { text: string } = await system.invokeFunction(
+    "index.extractFrontmatter",
+    text,
+    { removeFrontMatterSection: true },
+  );
+  return stripped.text;
+}
+
+/**
+ * Makes a new row of the spec's database: a page in its folder, tagged, with
+ * every property's default, and the template's body when it has one.
+ */
+export async function createRow(
+  spec: Spec,
+  title: string,
+): Promise<CreateResult> {
+  // The iframe sends the spec back; what is written is decided by the config.
+  const database = spec.database
+    ? await databaseOf(spec.database.name)
+    : undefined;
+  if (!database) {
+    return {
+      ok: false,
+      reason: "invalid",
+      message: "この表には database が設定されていません",
+    };
+  }
+  const page = rowPageName(database.folder, title);
+  if (!page) {
+    return { ok: false, reason: "invalid", message: "名前を入力してください" };
+  }
+  try {
+    if (await pageExists(page)) {
+      return {
+        ok: false,
+        reason: "exists",
+        message: `${page} はもうあります`,
+      };
+    }
+    const body = database.template
+      ? await templateBody(database.template)
+      : "\n";
+    const text: string = await system.invokeFunction(
+      "index.patchFrontmatter",
+      body,
+      rowPatches(database),
+    );
+    const meta = await space.writePage(page, text);
+    return { ok: true, page, modified: String(meta.lastModified ?? "") };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+/** Whether the page is there: its meta can be read. */
+async function pageExists(page: string): Promise<boolean> {
+  try {
+    await space.getPageMeta(page);
+    return true;
+  } catch (e) {
+    // Only "not found" means absent: anything else could be a page that is
+    // there, and the write after it would overwrite.
+    if (/not found/i.test(e instanceof Error ? e.message : String(e))) {
+      return false;
+    }
+    throw e;
   }
 }
 

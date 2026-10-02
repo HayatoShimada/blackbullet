@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { createMockSystem } from "../../../plug-api/system_mock.ts";
-import { patchFrontmatter } from "../../index/api.ts";
-import { loadRows, updatePageValue, updateTask } from "./functions.ts";
-import type { Spec } from "./model.ts";
+import { extractFrontmatter, patchFrontmatter } from "../../index/api.ts";
+import {
+  createRow,
+  loadRows,
+  updatePageValue,
+  updateTask,
+} from "./functions.ts";
+import type { DatabaseSpec, Spec } from "./model.ts";
 
 const call = (name: string, ...args: unknown[]) =>
   (globalThis as any).syscall(name, ...args);
 
 beforeEach(() => {
   const mock = createMockSystem();
-  // The index plug is not loaded here: stand in for the one function used.
+  // The index plug is not loaded here: stand in for the functions used.
   mock.system.registerSyscalls([], {
     "system.invokeFunction": async (
       _ctx: unknown,
@@ -18,6 +23,8 @@ beforeEach(() => {
     ) => {
       if (name === "index.patchFrontmatter")
         return patchFrontmatter(args[0], args[1]);
+      if (name === "index.extractFrontmatter")
+        return extractFrontmatter(args[0], args[1]);
       throw new Error(`unexpected ${name}`);
     },
   });
@@ -287,6 +294,153 @@ describe("loadRows", () => {
     );
     expect(rows.map((r) => r.id)).toEqual(["M/1"]);
     expect(rows[0].values.room).toBe("A");
+  });
+
+  test("a database keeps only the pages in its folder", async () => {
+    await index([
+      page("Projects/A", {}),
+      page("Projects/Sub/B", {}),
+      page("Archive/C", {}),
+    ]);
+    const { rows } = await loadRows(
+      spec({
+        source: { kind: "tag", tag: "project" },
+        database: projects({ folder: "Projects/" }),
+      }),
+    );
+    expect(rows.map((r) => r.id).sort()).toEqual([
+      "Projects/A",
+      "Projects/Sub/B",
+    ]);
+    const anywhere = await loadRows(
+      spec({
+        source: { kind: "tag", tag: "project" },
+        database: projects({ folder: "" }),
+      }),
+    );
+    expect(anywhere.rows).toHaveLength(3);
+  });
+});
+
+const projects = (over: Partial<DatabaseSpec> = {}): DatabaseSpec => ({
+  name: "projects",
+  tag: "project",
+  folder: "Projects/",
+  properties: [
+    {
+      key: "status",
+      type: "select",
+      options: ["active", "done"],
+      default: "active",
+    },
+    { key: "due", type: "date" },
+    { key: "count", type: "number", default: 0 },
+  ],
+  ...over,
+});
+
+describe("createRow", () => {
+  // createRow re-reads the database from the config, so the config holds it.
+  const withDb = async (over: Partial<DatabaseSpec> = {}) => {
+    const db = projects(over);
+    await call("config.set", ["databases", db.name], db);
+    return spec({ source: { kind: "tag", tag: "project" }, database: db });
+  };
+
+  test("makes the page in the folder, tagged, with the defaults", async () => {
+    const r = await createRow(await withDb(), " Launch ");
+    expect(r).toMatchObject({ ok: true, page: "Projects/Launch" });
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toBe(
+      "---\ntags:\n  - project\nstatus: active\ncount: 0\n---\n\n",
+    );
+    if (r.ok) {
+      expect(r.modified).toBe(
+        String(
+          (await call("space.getPageMeta", "Projects/Launch")).lastModified,
+        ),
+      );
+    }
+  });
+
+  test("the template's body follows, its own frontmatter dropped", async () => {
+    await writePage(
+      "Templates/Project",
+      "---\ntags: template\nstatus: ignored\n---\n# Goal\n\n- [ ] first step\n",
+    );
+    const r = await createRow(
+      await withDb({ template: "Templates/Project" }),
+      "Launch",
+    );
+    expect(r.ok).toBe(true);
+    const text = await call("space.readPage", "Projects/Launch");
+    expect(text).toContain("tags:\n  - project\nstatus: active\n");
+    expect(text).not.toContain("ignored");
+    expect(text).toContain("# Goal\n\n- [ ] first step\n");
+  });
+
+  test("a page that is there already is left alone", async () => {
+    await writePage("Projects/Launch", "mine");
+    const r = await createRow(await withDb(), "Launch");
+    expect(r).toMatchObject({ ok: false, reason: "exists" });
+    expect(await call("space.readPage", "Projects/Launch")).toBe("mine");
+  });
+
+  test("no usable title, or no database, is refused", async () => {
+    expect(await createRow(await withDb(), " / ")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+    expect(await createRow(spec(), "Launch")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+
+  test("a title with ref syntax makes a plain page name", async () => {
+    const r = await createRow(await withDb(), "a#b [[x]] v1.2");
+    expect(r).toMatchObject({ ok: true, page: "Projects/ab x v1" });
+  });
+
+  test("what is written follows the config, not the spec sent back", async () => {
+    const s = await withDb();
+    const forged = { ...s, database: { ...s.database!, folder: "Evil/" } };
+    const r = await createRow(forged, "Launch");
+    expect(r).toMatchObject({ ok: true, page: "Projects/Launch" });
+    const gone = spec({
+      database: { ...projects(), name: "nowhere", folder: "Evil/" },
+    });
+    expect(await createRow(gone, "Launch")).toMatchObject({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+
+  test("a failing existence check is a failure, not a go-ahead", async () => {
+    const s = await withDb();
+    const real = (globalThis as any).syscall;
+    (globalThis as any).syscall = (name: string, ...args: unknown[]) =>
+      name === "space.getPageMeta"
+        ? Promise.reject(new Error("disk on fire"))
+        : real(name, ...args);
+    try {
+      expect(await createRow(s, "Launch")).toMatchObject({
+        ok: false,
+        reason: "failed",
+      });
+    } finally {
+      (globalThis as any).syscall = real;
+    }
+    await expect(call("space.readPage", "Projects/Launch")).rejects.toThrow();
+  });
+
+  test("a missing template is a failure, and nothing is written", async () => {
+    const r = await createRow(
+      await withDb({ template: "Templates/None" }),
+      "Launch",
+    );
+    expect(r).toMatchObject({ ok: false, reason: "failed" });
+    await expect(call("space.readPage", "Projects/Launch")).rejects.toThrow();
   });
 });
 
