@@ -9,7 +9,7 @@ Put this in your `CONFIG` page (use `space-lua` instead of `lua` in your actual 
 config.set("memoSidecar", {
   url = "127.0.0.1:3010",   -- host:port of the sidecar; "/.proxy/127.0.0.1:3010" is accepted too
   token = "…",              -- the sidecar's bearer token
-  space = "85memo",         -- which space of the sidecar to query
+  space = "notes",         -- which space of the sidecar to query
 })
 ```
 All requests go through SilverBullet's own `/.proxy/` route (`net.proxyFetch`), so the browser never talks to the sidecar directly and the sidecar only has to be reachable from the SilverBullet server.
@@ -31,7 +31,7 @@ config.define("memoSidecar", {
   properties = {
     url = { type = "string", description = "host:port of the sidecar (the SilverBullet server proxies the calls)" },
     token = { type = "string", description = "Bearer token of the sidecar" },
-    space = { type = "string", description = "Sidecar space to query, e.g. 85memo" },
+    space = { type = "string", description = "Sidecar space to query, e.g. notes" },
   },
   additionalProperties = false,
 })
@@ -136,7 +136,7 @@ function memo.request(endpoint, params)
   return res.body, nil, cfg
 end
 
--- FTS snippets start with the section's context header, "[85memo / Page > Heading] ...".
+-- FTS snippets start with the section's context header, "[notes / Page > Heading] ...".
 -- When the sidecar's excerpt is cut inside that header (no closing bracket) there is no
 -- body text to show at all.
 function memo.cleanSnippet(snippet, maxLen)

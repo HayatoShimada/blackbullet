@@ -84,10 +84,10 @@ describe("Memo Search library", () => {
 
   test("buildUrl encodes the query and puts space first", async () => {
     await runLua(`
-      local url = memo.buildUrl({ base = "127.0.0.1:3010", space = "85memo" },
-        "search", { { "q", "スウェット & a=b" }, { "limit", 20 }, { "skip", nil } })
-      assert(url == "127.0.0.1:3010/api/search?space=85memo&q=" ..
-        "%E3%82%B9%E3%82%A6%E3%82%A7%E3%83%83%E3%83%88%20%26%20a%3Db&limit=20", url)
+      local url = memo.buildUrl({ base = "127.0.0.1:3010", space = "notes" },
+        "search", { { "q", "在庫 & a=b" }, { "limit", 20 }, { "skip", nil } })
+      assert(url == "127.0.0.1:3010/api/search?space=notes&q=" ..
+        "%E5%9C%A8%E5%BA%AB%20%26%20a%3Db&limit=20", url)
     `);
   });
 
@@ -98,26 +98,26 @@ describe("Memo Search library", () => {
       setConfig({ url = "127.0.0.1:3010", token = "t" })
       cfg, err = memo.sidecarConfig()
       assert(cfg == nil and string.find(err, "space", 1, true), err)
-      setConfig({ url = "/.proxy/127.0.0.1:3010", token = "t", space = "85memo" })
+      setConfig({ url = "/.proxy/127.0.0.1:3010", token = "t", space = "notes" })
       cfg = memo.sidecarConfig()
-      assert(cfg.base == "127.0.0.1:3010" and cfg.space == "85memo")
+      assert(cfg.base == "127.0.0.1:3010" and cfg.space == "notes")
     `);
   });
 
   test("request sends the bearer token and returns the body", async () => {
     await runLua(`
-      setConfig({ url = "127.0.0.1:3010", token = "secret", space = "85memo" })
+      setConfig({ url = "127.0.0.1:3010", token = "secret", space = "notes" })
       nextResponse = { ok = true, status = 200, headers = {}, body = { results = {} } }
       local body, err = memo.request("related", { { "page", "A/B" } })
       assert(body and not err, err)
-      assert(fetches[1].url == "127.0.0.1:3010/api/related?space=85memo&page=A%2FB", fetches[1].url)
+      assert(fetches[1].url == "127.0.0.1:3010/api/related?space=notes&page=A%2FB", fetches[1].url)
       assert(fetches[1].opts.headers.Authorization == "Bearer secret")
     `);
   });
 
   test("request turns proxy, HTTP and network failures into messages instead of errors", async () => {
     await runLua(`
-      setConfig({ url = "127.0.0.1:3010", token = "secret", space = "85memo" })
+      setConfig({ url = "127.0.0.1:3010", token = "secret", space = "notes" })
       -- the proxy answers 200 and carries the upstream status in 'status'
       nextResponse = { ok = true, status = 401, headers = {}, body = { error = "unauthorized" } }
       local body, err = memo.request("search", { { "q", "x" } })
@@ -141,7 +141,7 @@ describe("Memo Search library", () => {
         { page = "Archive/キャンペーン", heading_path = { "Archive/キャンペーン", "結果" },
           line_start = 12, line_end = 20, score = 0.032787,
           ranks = { lexical = 2, semantic = 1 },
-          snippet = "[85memo / Archive/キャンペーン > 結果] summary: x\\n本文  です" },
+          snippet = "[notes / Archive/キャンペーン > 結果] summary: x\\n本文  です" },
         { page = "Inbox/メモ", heading_path = {}, line_start = 3, line_end = 4, score = 0.01,
           ranks = { lexical = nil, semantic = 7 }, snippet = "plain" },
       } }
@@ -154,8 +154,8 @@ describe("Memo Search library", () => {
       assert(rows[2].title == "Inbox/メモ")
       assert(memo.headingLabel({ page = "A/B", heading_path = { "B", "x", "B" } }) == "A/B › x › B")
       -- cut inside the header: nothing but the header, so no excerpt
-      assert(memo.cleanSnippet("[85memo / Archive/スウェットキャン…") == "")
-      assert(memo.cleanSnippet("…e/スウェット|キャン…") == "…e/スウェット|キャン…")
+      assert(memo.cleanSnippet("[notes / Archive/在庫キャン…") == "")
+      assert(memo.cleanSnippet("…e/在庫|キャン…") == "…e/在庫|キャン…")
       rows = memo.searchRows(body, true)
       assert(rows[1].badge == "L2 S1 · 0.0328", rows[1].badge)
       assert(rows[2].badge == "L- S7 · 0.0100", rows[2].badge)
@@ -209,7 +209,7 @@ describe("Memo Search library", () => {
       -- unset
       local rows = src({ phrase = "abc" })
       assert(#rows == 1 and rows[1].kind == "message" and rows[1].isError)
-      setConfig({ url = "127.0.0.1:3010", token = "t", space = "85memo" })
+      setConfig({ url = "127.0.0.1:3010", token = "t", space = "notes" })
       -- empty phrase: hint, no request
       rows = src({ phrase = "  " })
       assert(rows[1].kind == "message" and not rows[1].isError and #fetches == 0)
@@ -236,7 +236,7 @@ describe("Memo Search library", () => {
 
   test("the related view asks for the current page", async () => {
     await runLua(`
-      setConfig({ url = "127.0.0.1:3010", token = "t", space = "85memo" })
+      setConfig({ url = "127.0.0.1:3010", token = "t", space = "notes" })
       nextResponse = { ok = true, status = 200, headers = {}, body = { results = {
         { page = "Other", score = 0.9, via = "semantic" } } } }
       local rows = views["memo.related"].source({ dock = "page-bottom" })

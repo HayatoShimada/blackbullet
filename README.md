@@ -14,8 +14,9 @@ BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silver
 | Search and related notes; a graph with semantic edges, filters and hops | `libraries/Library/Std/Editor/Memo Search.md`, `plugs/object-graph/` |
 | In-app help (`Help: Fork Guide`) | `libraries/Library/Std/Docs/Fork Guide.md` |
 | A tailnet-only HTTPS front door (Tailscale login, no password screen) | [`deploy/tailnet-proxy/`](deploy/tailnet-proxy/) |
+| MCP server + REST sidecar: hybrid search (FTS5 trigram + local embeddings + RRF), related notes, graph | [`packages/memo-mcp/`](packages/memo-mcp/) |
 
-Search and the graph's semantic edges talk to an external "sidecar" over REST (`/api/search|related|graph`, configured with `config.set("memoSidecar", {...})`). **The sidecar is not part of this repository**, so without it those two features stay empty; the editor, tree, block editor and database views work on their own.
+Search and the graph's semantic edges talk to a sidecar over REST (`/api/search|related|graph`, configured with `config.set("memoSidecar", {...})`). **The sidecar is [`packages/memo-mcp`](packages/memo-mcp/)** in this repository: it also serves the same notes to AI clients over MCP. Without it, search and the semantic graph stay empty; the editor, tree, block editor and database views work on their own.
 
 ## Build and run
 Follow upstream's instructions for the server and client (see `docs/Install/` and `CONTRIBUTING.md`):

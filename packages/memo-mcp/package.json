@@ -1,0 +1,25 @@
+{
+  "name": "memo-mcp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server and read-only REST API over Markdown spaces (SilverBullet / BlackBullet) with hybrid FTS5 + embedding search",
+  "license": "GPL-2.0-only",
+  "author": "HayatoShimada",
+  "bin": {
+    "memo-mcp": "./src/stdio.mjs"
+  },
+  "scripts": {
+    "start": "node src/stdio.mjs",
+    "start:http": "node src/http.mjs",
+    "test": "node --test test/*.mjs",
+    "reindex": "node src/reindex.mjs",
+    "reindex:embed": "node src/reindex.mjs --embed",
+    "eval": "node src/eval.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@sqlite.org/sqlite-wasm": "^3.53.4-build1"
+  }
+}

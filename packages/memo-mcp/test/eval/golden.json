@@ -1,0 +1,12 @@
+{
+  "space": "notes",
+  "note": "Golden set for the fixture space created by test/helpers/fixture.mjs. To evaluate your own space, copy this file, set \"space\" and write your own cases; expect lists acceptable page names.",
+  "cases": [
+    {"q": "demo launch campaign deadline", "expect": ["Projects/Demo"]},
+    {"q": "prepare the images", "expect": ["Projects/Demo"]},
+    {"q": "倉庫の在庫を集計する", "expect": ["Projects/在庫システム"]},
+    {"q": "バーコードで入出庫", "expect": ["Projects/在庫システム"]},
+    {"q": "weekly checklist", "expect": ["Areas/Operations"]},
+    {"q": "survey of retrieval techniques", "expect": ["Resources/Reading List"]}
+  ]
+}
