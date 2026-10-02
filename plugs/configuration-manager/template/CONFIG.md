@@ -1,6 +1,6 @@
 #meta
 
-This page holds configuration for your SilverBullet space. See [[^Library/Std/Config]] for all options and defaults.
+This page holds configuration for your BlackBullet space. See [[^Library/Std/Config]] for all options and defaults.
 
 Run ${widgets.commandButton "System: Reload"} to reload.
 

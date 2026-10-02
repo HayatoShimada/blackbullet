@@ -1,12 +1,15 @@
-Hello 👋!
+Welcome to BlackBullet 👋
 
-Welcome to the wondrous world of SilverBullet. A world that once you discover and appreciate, you’ll never want to leave.
+This is your space. Every page is a plain Markdown file in your notes folder, so nothing is locked in: edit the files with any tool, keep them in git, back them up like any other folder.
 
-_One of us!_
+A few things to try:
+* Type `/` on an empty line to insert a block (heading, task, table, database view, …).
+* Press `Ctrl-q q` (`Cmd-q q` on macOS) for a quick note; it lands in `Inbox/` and shows up below.
+* Press `Ctrl-q j` for today's journal page.
+* Press `Ctrl-Shift-f` to search everything (meaning-based as well as word-based), and open the ? button in the header for the guide.
+* Link pages with `[[Page name]]`; the graph and the related-notes panel use those links.
 
-If you’re confused and don’t know what to do, have a look at the [Manual](https://silverbullet.md/Manual), or perhaps more specifically, the [Getting Started](https://silverbullet.md/Getting%20Started) page. Got questions? Head over to [the community forums](https://community.silverbullet.md/).
-
-This page serves purely as a starting point to not start with a blank slate. Feel free to ditch it completely or adjust it to your needs. This space is fully yours. Own it.
+This page is only a starting point. Change it, or delete it entirely.
 
 # Recent quick notes
 ${widgets.commandButton("Create quick note", "Quick Note")}
@@ -42,5 +45,5 @@ ${query[[
   from p = index.contentPages()
   order by p.lastModified desc
   limit 10
-  select templates.fullPageItem(p) 
+  select templates.fullPageItem(p)
 ]]}

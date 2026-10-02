@@ -1,14 +1,14 @@
 ---
 tags: meta/library
 ---
-Welcome to SilverBullet’s standard library. This library (all pages under `Library/Std`) ship with SilverBullet itself. Therefore, you will not find these pages in your space folder, even though they _appear_ to be located there. These pages are all read-only, so you cannot (directly) modify them.
+Welcome to BlackBullet’s standard library. This library (all pages under `Library/Std`) ships with BlackBullet itself (most of it comes from SilverBullet, which BlackBullet is a fork of). Therefore, you will not find these pages in your space folder, even though they _appear_ to be located there. These pages are all read-only, so you cannot (directly) modify them.
 
 The goal of the standard library is provide a base-level of useful commands, slash commands, page templates and scripts.
 
 The remainder of this page documents what's included.
 
 # Config
-SilverBullet is configured via the [config APIs](https://docs.silverbullet.md/API/config). Built-in configuration options and their default values are defined in [[^Library/Std/Config]].
+BlackBullet is configured via the [config APIs](https://docs.silverbullet.md/API/config). Built-in configuration options and their default values are defined in [[^Library/Std/Config]].
 
 # Page templates
 Page templates can be triggered via the ${widgets.commandButton "Page: From Template"} command (some of them have command or keyboard shortcuts) and provide a convenient way to create pages of a certain type. You can create your own page templates using the [[^Library/Std/Page Templates/Page Template]] template.
@@ -33,7 +33,7 @@ ${template.each(query[[
 ]==])}
 
 # Meta pages 
-The SilverBullet ships with a few generally useful meta pages (pages tagged with `#meta`) you can use:
+BlackBullet ships with a few generally useful meta pages (pages tagged with `#meta`) you can use:
 
 ${template.each(query[[
   from index.tag "page"
@@ -50,7 +50,7 @@ ${template.each(query[[
 ]==])}
 
 # APIs
-Whereas a lot of APIs in SilverBullet are built in, some of them have been implemented Space Lua:
+Whereas a lot of APIs in BlackBullet are built in, some of them have been implemented Space Lua:
 ${template.each(query[[
   from index.tag "page"
   where name:startsWith("Library/Std/APIs/")

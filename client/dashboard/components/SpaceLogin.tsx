@@ -193,7 +193,9 @@ export function SpaceLogin({ config }: { config: AuthConfig }) {
             onSubmit={(values) => void submit(values)}
           />
           <footer>
-            <a href="https://silverbullet.md">What is SilverBullet?</a>
+            <a href="https://github.com/HayatoShimada/blackbullet">
+              What is BlackBullet?
+            </a>
           </footer>
         </div>
       </div>
