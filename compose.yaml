@@ -36,6 +36,8 @@ services:
       - MEMO_MCP_TOKEN=${MEMO_MCP_TOKEN:?run ./setup.sh to create .env}
       - MEMO_EMBED=${MEMO_EMBED:-on}
       - MEMO_EMBED_MODEL=${MEMO_EMBED_MODEL:-Xenova/multilingual-e5-small}
+      # Optional: the host[:port] MCP clients use through a reverse proxy / tailscale serve
+      - MEMO_MCP_PUBLIC_HOST=${MEMO_MCP_PUBLIC_HOST:-}
     volumes:
       - ${SPACE_DIR:-./space}:/data
       - ${MEMO_INDEX_DIR:-./.memo-index}:/cache
