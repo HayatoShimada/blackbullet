@@ -18,6 +18,7 @@ import json
 import os
 import socket
 import sys
+import urllib.parse
 from typing import Callable, Optional
 from urllib.parse import quote
 
@@ -97,10 +98,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     whois: Whois = staticmethod(tailscale_whois)  # type: ignore[assignment]
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/healthz":
+        # Caddy's forward_auth keeps the original query string (/auth?q=...), so compare the path only.
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/healthz":
             self._reply(200, {})
             return
-        if self.path != "/auth":
+        if path != "/auth":
             self._reply(404, {})
             return
         status, headers = decide(

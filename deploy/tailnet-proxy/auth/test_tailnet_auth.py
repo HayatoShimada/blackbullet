@@ -2,7 +2,11 @@
 # Copyright (C) 2026 HayatoShimada
 import unittest
 
-from tailnet_auth import address, decide, parse_allowed
+import http.client
+import threading
+from http.server import ThreadingHTTPServer
+
+from tailnet_auth import Handler, address, decide, parse_allowed
 
 ME = "alice@example.com"
 
@@ -66,6 +70,35 @@ class AddressTests(unittest.TestCase):
 
     def test_parse_allowed(self):
         self.assertEqual(parse_allowed(" A@x.com, b@y.com ,,"), frozenset({"a@x.com", "b@y.com"}))
+
+
+class HandlerPathTests(unittest.TestCase):
+    """Caddy's forward_auth sends /auth with the original request's query string."""
+
+    def setUp(self):
+        handler = type("H", (Handler,), {"allowed": parse_allowed(ME), "whois": staticmethod(whois_for(ME))})
+        handler.log_message = lambda *a: None
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def get(self, path):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1])
+        conn.request("GET", path, headers={"Remote-Addr": "100.64.0.7", "Remote-Port": "443"})
+        status = conn.getresponse().status
+        conn.close()
+        return status
+
+    def test_auth_with_a_query_string_is_still_answered(self):
+        self.assertEqual(self.get("/auth"), 200)
+        self.assertEqual(self.get("/auth?space=notes&q=x"), 200)
+
+    def test_other_paths_are_not_found(self):
+        self.assertEqual(self.get("/other?x=1"), 404)
+        self.assertEqual(self.get("/healthz?probe=1"), 200)
 
 
 if __name__ == "__main__":
