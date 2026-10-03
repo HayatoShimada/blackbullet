@@ -1,6 +1,6 @@
 #meta
 
-Adds commands and an action button (on mobile) for toggling read-only mode.
+Adds a command for toggling read-only mode (the header's mode chip shows it as Preview).
 
 ```space-lua
 -- priority: 10
@@ -24,11 +24,7 @@ if system.getMode() == "rw" then
     run = toggleReadOnlyMode
   }
 
-  actionButton.define {
-    icon = "lock",
-    description = "Toggle read-only mode",
-    mobile = true,
-    run = toggleReadOnlyMode
-  }
+  -- (BlackBullet) The header's mode chip toggles Preview on every device, so
+  -- the phone's lock button is gone.
 end
 ```

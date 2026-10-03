@@ -4,6 +4,7 @@ import {
   events,
   space,
 } from "@silverbulletmd/silverbullet/syscalls";
+import { emitToEditorMode } from "../editor_mode/mode_host.ts";
 import type { CommandHook } from "../plugos/hooks/command.ts";
 import { openCommand } from "./navigator.ts";
 import {
@@ -45,6 +46,13 @@ export function registerNavigatorCommands(
     requireMode: "rw",
     // The same list the tree's `+` draws, here as a small centred picker.
     run: newCommand,
+  });
+  hook.registerCommand({
+    name: "Editor: Toggle Preview",
+    key: "Ctrl-Alt-p",
+    mac: "Cmd-Alt-p",
+    // Not "rw"-only: in Preview the editor is read-only, and this leaves it.
+    run: async () => emitToEditorMode({ type: "toggle" }),
   });
   hook.registerCommand({
     name: "Trash: Restore",

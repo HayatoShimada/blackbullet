@@ -236,6 +236,14 @@ Each spec names the files (stream), selectors and tokens. "Touch" means
   `--sb-radius-2`, items 44 px; the `>_` and lock icons get labels ("Commands",
   "Read-only").
 - Progress ring: unchanged geometry; colours `--sb-accent` / `--sb-line`.
+- Mode chip `.sb-mode-chip` after the title (`client/components/mode_chip.tsx`, a
+  Passive View of `chipView()`): 24 px pill, `--sb-text-sm` 500, the word carries the
+  state. Tones: `quiet` (Preview, Read-only: `--sb-bg-2`, `--sb-ink-2`, eye / lock
+  icon), `outline` (Edit, NORMAL: `--sb-line-strong` border), `accent` (INSERT:
+  `--sb-accent-soft`, `--sb-accent`), `accent-outline` (VISUAL, REPLACE). Tooltip
+  names the next step and the key ("NORMAL · Esc for Preview · Ctrl-Alt-p"). Touch:
+  32 px tall with a 44 px hit area. Read-only is disabled. It replaces the phone's
+  lock button.
 
 ### 3.2 Dock and tree (`_navigator.scss`, `_dock_menu.scss`, `client/navigator/**`; navigator)
 

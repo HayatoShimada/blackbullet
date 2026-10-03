@@ -84,6 +84,7 @@ import type { Client } from "../../client.ts";
 import { copyToClipboard } from "../../clipboard.ts";
 import { refreshLintEffect } from "../../codemirror/lint.ts";
 import { resolveDocumentCapability } from "../../document_editor_resolver.ts";
+import { emitToEditorMode } from "../../editor_mode/mode_host.ts";
 import { isMobileDevice, isNarrowScreen } from "../../lib/mobile.ts";
 import { browserMediaCapabilities } from "../../media.ts";
 import { hide as hideNavigatorSlot } from "../../navigator/navigator.ts";
@@ -1202,6 +1203,13 @@ export function editorSyscalls(client: Client): SysCallMapping {
         Vim.mapCommand("o", "action", "newline-continue-markup", {}, {});
         Vim.mapCommand("O", "action", "back-newline-continue-markup", {}, {});
         Vim.unmap("<C-q>", undefined as any);
+        // Esc steps Normal → Preview; these name the two ends.
+        Vim.defineEx("preview", "pre", () =>
+          emitToEditorMode({ type: "set", surface: "preview" }),
+        );
+        Vim.defineEx("edit", "e", () =>
+          emitToEditorMode({ type: "set", surface: "edit" }),
+        );
         Vim.defineAction("newline-continue-markup", (cm) => {
           Vim.handleKey(cm, "A", "+input");
           insertNewlineContinueMarkup(client.editorView) ||

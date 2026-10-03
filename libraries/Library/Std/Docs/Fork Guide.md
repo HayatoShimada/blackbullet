@@ -3,7 +3,7 @@ tags: meta
 description: BlackBullet の使い方
 ---
 
-BlackBullet の使い方です。ヘッダー右端の「?」、または ${widgets.commandButton("Help: Fork Guide")} で、いつでもこのページを開けます。このページは読み取り専用で開き、ほかのページへ移ると元に戻ります(誤って書き換えないためです)。
+BlackBullet の使い方です。ヘッダー右端の「?」、または ${widgets.commandButton("Help: Fork Guide")} で、いつでもこのページを開けます。このページはプレビュー(ヘッダーに「Preview」)で開き、ほかのページへ移ると元に戻ります(誤って書き換えないためです)。
 
 # 用語
 画面・コマンド・このガイドは、同じ言葉を使います。「English」の列は、画面に出る表記そのままです。
@@ -29,6 +29,7 @@ BlackBullet の使い方です。ヘッダー右端の「?」、または ${widg
 | ゴミ箱 | Move to trash · Trash: Restore · Trash: Empty | 消す前の置き場 |
 | ホーム | Home | `index` ページ |
 | パネル | Panel | 端や下に開く部品 |
+| プレビュー | Preview | 書き換えずに読む表示(Edit で書ける) |
 
 * ページの名前は最後のパスの部分(「Spring Launch」)で、フォルダは薄い「Projects ›」で添えます。ページを移すと、リンクも追従します。
 * データベースは、1 つのフォルダに置かれ、テンプレートを持ちます。プロパティは選択・日付・ページ・数・文字のどれかで、Status・Due・Area のように使います。「+ New」は「Row in Projects…」を作ります。
@@ -54,11 +55,27 @@ Mac では、`Ctrl-k` のように `Ctrl` で始まるキーを `Cmd` に読み�
 | 関連ノートを開閉(Search: Related Notes) | `Ctrl-q r` |
 | グラフ | `Ctrl-Shift-g` |
 | 新規作成(New) | `Ctrl-Alt-n` |
+| 編集とプレビューを切り替える(Editor: Toggle Preview) | `Ctrl-Alt-p` |
 | テンプレートから作る | `Ctrl-q t` |
 | メニューや入力を閉じる・戻る | `Esc` |
 | エディタからヘッダーやパネルへ出る | `Esc` のあと `Tab` |
 
 コマンドパレットには、いまのキーがいつも表示されます。
+
+# 編集とプレビュー(Edit / Preview)
+ページ名の右のチップが、いまの状態です。
+
+| チップ | 状態 |
+| --- | --- |
+| `Edit` | 書ける |
+| `Preview` | 読むだけ(書き換えない) |
+| `Read-only` | このページは書けない(押せない) |
+
+* チップを押すか、${widgets.commandButton("Editor: Toggle Preview")}(`Ctrl-Alt-p`)で、Edit と Preview を切り替えます。スマホでもチップを押します。
+* Vim の操作(${widgets.commandButton("Editor: Toggle Vim Mode")})にすると、チップは `NORMAL`・`INSERT`・`VISUAL`(`V-LINE`・`V-BLOCK`)・`REPLACE` を出します。
+* Vim では、`Esc` を押すたびに 1 段ずつ外へ出ます。`INSERT` → `NORMAL` → `Preview`。入力の途中・選択中・検索の強調中の `Esc` は、まずそれを取り消します。
+* `Preview` では、`j`・`k`・`/` などで読めます。`i`・`a`・`o`(`I`・`A`・`O`)でそのまま書き始め、`Enter` で `NORMAL` に戻ります。もう一度 `Esc` のあと `Tab` で、エディタの外へ出ます。
+* `:preview` と `:edit` でも切り替えられます。
 
 # 書き留める
 * クイックノート(`Ctrl-q q`)は、空のページを開いて、すぐ書けます。打つたびに保存されます。`Esc` で、開く前のページへ戻ります。置き場所は受信箱(Inbox)です。
@@ -279,6 +296,7 @@ local FORK_COMMANDS = {
   "Database: Define in CONFIG",
   -- the planned name of the one above: listed once a library registers it
   "Database: New Database",
+  "Editor: Toggle Preview",
   "Help: Fork Guide",
 }
 

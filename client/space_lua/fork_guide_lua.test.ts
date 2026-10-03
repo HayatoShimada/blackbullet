@@ -215,6 +215,8 @@ async function registeredCommands(): Promise<Set<string>> {
   const files = [
     ...(await walk("libraries/Library/Std")).filter((f) => f.endsWith(".md")),
     ...(await walk("plugs/object-graph")).filter((f) => f.endsWith(".yaml")),
+    // upstream's editor commands the guide points at (Editor: Toggle Vim Mode)
+    "plugs/editor/editor.plug.yaml",
     "client/navigator/commands.ts",
   ];
   for (const file of files) {

@@ -41,6 +41,7 @@ words and no synonyms. The guide stays Japanese but translates these same concep
 | **Trash** | `Trash/`. Everything deleted from the UI goes here first and can be restored. Permanent deletion happens only *inside* Trash. | "Move to trash", "Trash: Restore", "Trash: Empty" | "Delete" as a one-click permanent action, `trashedFrom` | ゴミ箱 |
 | **Home** | The `index` page. | "Home" | "index" as a title | ホーム |
 | **Panel** | A dockable chrome surface: Tree, Related notes, Ask, Search. (Not a "view": that word belongs to databases.) | by its title | `view.define`, "dock" | パネル |
+| **Preview** | The page shown for reading, not writing. **Edit** is the other side. A page that cannot be written at all is **Read-only**. | Header mode chip `Edit` / `Preview` / `Read-only`; with vim `NORMAL` / `INSERT` / `VISUAL` / `V-LINE` / `V-BLOCK` / `REPLACE`; `Editor: Toggle Preview` | `forcedROMode`, "read-only mode" for Preview | プレビュー |
 
 ### What the user should never have to know
 - that a database is a tag plus frontmatter in a folder; they declare it once via
@@ -223,10 +224,14 @@ exact match → results, recent first. Pages tab hides `Library/`, `Templates/`,
    - `Ctrl-Shift-<letter>`: open a surface (h Home, k meta, g Graph; f Search *after* §10.1).
    - `Ctrl-q <letter>` ("quick"): q quick note, j journal, p/n day, t template,
      **s Search, a Ask, r Related notes** (new).
-   - `Ctrl-Alt-<letter>`: tools (t tags, i mentions, r reload, c comment, m marker, l centre, **n New**).
+   - `Ctrl-Alt-<letter>`: tools (t tags, i mentions, r reload, c comment, m marker, l centre, **n New**, **p Preview**).
    - `Mod-.` chords: outline. Nothing else binds `Ctrl-Shift-f` until the editor yields it.
    - `Esc` always means "leave": close the menu/panel, cancel the edit, cancel the
-     drag, and (then) let `Tab` leave the editor.
+     drag, and (then) let `Tab` leave the editor. With vim, one level per press:
+     Insert → Normal → Preview → (`Tab` leaves); a pending command, a selection or a
+     search highlight is cancelled first. In Preview `i a o I A O` start typing and
+     `Enter` returns to Normal. Decided by the editor-mode Mediator
+     (`client/editor_mode/`).
 10. **Touch.** Every control a thumb needs is ≥ 44 × 44 CSS px under `(pointer:coarse)`;
     inputs are 16 px; hover-only affordances have a tap equivalent (`⋯`, long-press).
 11. **Loading.** A section that waits shows a skeleton in its own box, never a spinner

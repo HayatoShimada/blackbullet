@@ -6,7 +6,7 @@ BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silver
 
 ## Features
 
-- **Write**: block editor with drag handles and folding, page tree with drag-and-drop, page cover and icon, quick notes (`Ctrl-q q`) and a daily journal (`Ctrl-q j`).
+- **Write**: block editor with drag handles and folding, page tree with drag-and-drop, page cover and icon, quick notes (`Ctrl-q q`) and a daily journal (`Ctrl-q j`); a mode chip in the header shows Edit or Preview (`Ctrl-Alt-p`, `Editor: Toggle Preview`), and with vim keys NORMAL / INSERT / VISUAL, where `Esc` steps Insert → Normal → Preview.
 - **Find**: one search over every section by words and meaning (`Ctrl-q s`), related notes for the page you are on (`Ctrl-q r`), and a graph of links and similar pages (`Ctrl-Shift-g`).
 - **Organise**: databases declared once (typed properties, folder, template) and shown as table, board or calendar views you edit in place; one **New** for pages, rows, quick notes and journal entries (`Ctrl-Alt-n`); a trash you can restore from.
 - **Ask**: answers from your own notes with citations, follow-up questions, and answers saved as pages (`Ctrl-q a`, needs an Anthropic API key).

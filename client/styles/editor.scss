@@ -124,6 +124,15 @@ $comment-border: 1px;
     }
   }
 
+  // (BlackBullet) In Preview the header chip says "Preview"; vim's own status
+  // line would still say NORMAL, so it stays out of sight unless it is taking
+  // an ex command (`:edit`).
+  &:has(.cm-content[aria-readonly="true"])
+    .cm-panels-bottom
+    .cm-vim-panel:not(:has(input)) {
+    visibility: hidden;
+  }
+
   .cm-panels-bottom .cm-vim-panel {
     padding: 0 24px;
     max-width: var(--editor-width);

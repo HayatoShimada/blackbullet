@@ -30,6 +30,12 @@ import {
 import { Panel } from "./components/panel.tsx";
 import { TopBar } from "./components/top_bar.tsx";
 import {
+  editorModeRendered,
+  emitToEditorMode,
+  installEditorMode,
+} from "./editor_mode/mode_host.ts";
+import { chipView } from "./editor_mode/mode_mediator.ts";
+import {
   KeyboardBar,
   type KeyboardBarButton,
 } from "./components/keyboard_bar.tsx";
@@ -55,6 +61,7 @@ export class MainUI {
   viewState: AppViewState = initialViewState;
 
   constructor(private client: Client) {
+    installEditorMode(client);
     // Safari treats Cmd-O as its own "Open File..." shortcut and wins before
     // any bubble-phase listener -- including CodeMirror's own keymap and the
     // bubble-phase fallback right below -- ever sees the keydown. Caught here
@@ -356,6 +363,24 @@ export class MainUI {
       void this.client.dispatchAppEvent("editor:modeswitch");
     }, [viewState.uiOptions.vimMode]);
 
+    // The editor mode follows these options, whoever set them; a Preview
+    // switch it asked for is finished here, once the option has landed.
+    const modeLocked = !!(
+      this.client.bootConfig.readOnly ||
+      this.client.currentPageMeta()?.perm === "ro"
+    );
+    useEffect(() => {
+      editorModeRendered(this.client, {
+        vim: viewState.uiOptions.vimMode,
+        preview: viewState.uiOptions.forcedROMode,
+        locked: modeLocked,
+      });
+    }, [
+      viewState.uiOptions.vimMode,
+      viewState.uiOptions.forcedROMode,
+      modeLocked,
+    ]);
+
     useEffect(() => {
       const updateTheme = () => {
         const darkMode =
@@ -647,6 +672,17 @@ export class MainUI {
           readOnly={
             viewState.uiOptions.forcedROMode || client.bootConfig.readOnly
           }
+          modeChip={
+            viewState.current
+              ? chipView(
+                  viewState.editorMode,
+                  keyboardHint(
+                    viewState.commands.get("Editor: Toggle Preview") ?? {},
+                  ),
+                )
+              : undefined
+          }
+          onModeChip={() => emitToEditorMode({ type: "toggle" })}
         />
         {menuTrigger && (
           <AnchoredMenu

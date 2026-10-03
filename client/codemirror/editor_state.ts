@@ -77,6 +77,8 @@ import { quickNoteEscape } from "./quick_note_escape.ts";
 import { createSmartQuoteKeyBindings } from "./smart_quotes.ts";
 import { postScriptPrefacePlugin } from "./top_bottom_panels.ts";
 import { readOnlyCursorActive } from "./util.ts";
+import { emitToEditorMode } from "../editor_mode/mode_host.ts";
+import { editorModeKeys, vimModeWatcher } from "../editor_mode/mode_keys.ts";
 
 export type EditorMode =
   | { kind: "page"; pageName: string }
@@ -152,16 +154,19 @@ export function buildSharedEditorExtensions(
     void enableVimMode(client);
   }
 
-  const readOnlyExtensions: Extension[] =
+  const anyReadOnly =
     readOnly ||
     client.ui.viewState.uiOptions.forcedROMode ||
-    client.bootConfig.readOnly
-      ? [
-          EditorView.editable.of(false),
-          EditorState.readOnly.of(true),
-          readOnlyCursorActive,
-        ]
-      : [];
+    client.bootConfig.readOnly;
+  const readOnlyExtensions: Extension[] = anyReadOnly
+    ? [
+        EditorView.editable.of(false),
+        EditorState.readOnly.of(true),
+        readOnlyCursorActive,
+        // Preview is read with vim's keys, so it must take focus.
+        vimMode ? EditorView.contentAttributes.of({ tabindex: "0" }) : [],
+      ]
+    : [];
 
   return [
     client.themeCompartment.of(
@@ -183,8 +188,9 @@ export function buildSharedEditorExtensions(
     commandKeyBindings,
     // Esc then Tab leaves the editor (keyboard users reach the chrome); Esc
     // in a quick note returns to the page it was opened from.
+    // With vim, Esc steps Insert → Normal → Preview instead.
     vimMode
-      ? []
+      ? editorModeKeys(emitToEditorMode, !!anyReadOnly)
       : [
           mode.kind === "page"
             ? quickNoteEscape({
@@ -634,6 +640,7 @@ async function enableVimMode(client: Client) {
     client.editorView.dispatch({
       effects: client.vimCompartment.reconfigure([
         vim({ status: true }),
+        vimModeWatcher(emitToEditorMode),
         EditorState.allowMultipleSelections.of(true),
       ]),
     });

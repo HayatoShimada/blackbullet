@@ -198,6 +198,8 @@ export default function reducer(
           [action.key]: action.value,
         },
       };
+    case "set-editor-mode":
+      return { ...state, editorMode: action.state };
     case "set-progress":
       return {
         ...state,

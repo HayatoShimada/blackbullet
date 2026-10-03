@@ -4,6 +4,7 @@ import type { ComponentChildren, FunctionalComponent } from "preact";
 import { createPortal } from "preact/compat";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Sidebar } from "preact-feather";
+import type { ModeChipView } from "../editor_mode/mode_mediator.ts";
 import { resolveIconNode } from "../lib/icon.ts";
 import { installEscapeThenTab } from "../navigator/ui/chrome_focus.ts";
 import {
@@ -12,6 +13,7 @@ import {
   splitPageName,
   titleCommit,
 } from "../navigator/page_title.ts";
+import { ModeChip } from "./mode_chip.tsx";
 
 export type ActionButton = {
   icon: FunctionalComponent<any>;
@@ -330,6 +332,8 @@ export function TopBar({
   readOnly,
   leftDock,
   rightDock,
+  modeChip,
+  onModeChip,
 }: {
   pageName?: string;
   unsavedChanges: boolean;
@@ -351,6 +355,8 @@ export function TopBar({
   readOnly: boolean;
   leftDock?: MobileDockButton;
   rightDock?: MobileDockButton;
+  modeChip?: ModeChipView;
+  onModeChip?: () => void;
 }) {
   const pageIconNode = resolveIconNode(pageIcon);
   const [editingName, setEditingName] = useState(false);
@@ -391,6 +397,9 @@ export function TopBar({
                 onEditingChange={setEditingName}
               />
             </span>
+            {modeChip && onModeChip && (
+              <ModeChip view={modeChip} onActivate={onModeChip} />
+            )}
             <NotificationPanel
               notifications={notifications}
               onDismiss={onDismissNotification}

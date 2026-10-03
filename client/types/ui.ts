@@ -10,6 +10,10 @@ import type {
   PageMeta,
 } from "@silverbulletmd/silverbullet/type/index";
 import type { SyncStatus } from "../spaces/sync.ts";
+import {
+  type EditorModeState,
+  initialState as initialEditorMode,
+} from "../editor_mode/mode_mediator.ts";
 import type { Command } from "./command.ts";
 
 export type ConfirmOptions = {
@@ -59,6 +63,9 @@ export type AppViewState = {
     customStyles?: string;
   };
 
+  /** Edit or Preview, and the vim mode: drawn by the header's mode chip. */
+  editorMode: EditorModeState;
+
   showFilterBox: boolean;
   filterBoxLabel: string;
   filterBoxPlaceHolder: string;
@@ -90,6 +97,7 @@ export const initialViewState: AppViewState = {
     keyboardBar: true,
     forcedROMode: false,
   },
+  editorMode: initialEditorMode,
   isMobile: false,
   isStandalone: false,
   panels: {
@@ -161,6 +169,7 @@ export type Action =
     }
   | { type: "hide-confirm" }
   | { type: "set-ui-option"; key: string; value: any }
+  | { type: "set-editor-mode"; state: EditorModeState }
   | {
       type: "set-progress";
       progressPercentage?: number;

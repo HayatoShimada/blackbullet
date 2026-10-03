@@ -403,3 +403,79 @@
     transform: translateY(0);
   }
 }
+
+// (BlackBullet) The editor-mode chip after the title: Edit / Preview, or vim's
+// NORMAL / INSERT / VISUAL. The word carries the state; colour only helps.
+#sb-top .sb-mode-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin: 0 8px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--sb-radius-pill);
+  font-family: var(--ui-font);
+  font-size: var(--sb-text-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color var(--sb-dur-1) ease,
+    color var(--sb-dur-1) ease;
+
+  &.sb-mode-quiet {
+    background: var(--sb-bg-2);
+    color: var(--sb-ink-2);
+  }
+
+  &.sb-mode-outline {
+    background: transparent;
+    border-color: var(--sb-line-strong);
+    color: var(--sb-ink-2);
+  }
+
+  &.sb-mode-accent {
+    background: var(--sb-accent-soft);
+    color: var(--sb-accent);
+  }
+
+  &.sb-mode-accent-outline {
+    background: transparent;
+    border-color: var(--sb-accent);
+    color: var(--sb-accent);
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--sb-ink);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--sb-focus);
+    outline-offset: 2px;
+  }
+
+  @media (pointer: coarse) {
+    // A 44 px target around a chip that still looks like a chip.
+    height: 32px;
+    min-width: 44px;
+    margin: 0 4px;
+    justify-content: center;
+    position: relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: -6px 0;
+    }
+  }
+}
