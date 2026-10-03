@@ -82,6 +82,7 @@ const SCHEMA = `
 create table pages (
   page text primary key, path text, kind text not null default 'md', mtime real, modified text, title text,
   tags text, area text, status text, due text, goal text, summary text,
+  project text, completed text,
   chars integer, is_journal integer, date text
 );
 create table sections (
@@ -171,6 +172,14 @@ export function splitSections(body, bodyStartLine, { pageTitle }) {
   return out.map((s) => ({ ...s, heading_path: s.heading_path || pageTitle }));
 }
 
+/** frontmatter の "[[Projects/X]]" / "[[Projects/X|表示名]]" を ページ名 "Projects/X" にする。リンクでなければそのまま。 */
+export function linkTarget(v) {
+  if (!v) return v;
+  const m = /\[\[([^\]|#]+)/.exec(v);
+  if (!m && /^\s*$/.test(v)) return null;
+  return (m ? m[1] : v).trim().replace(/\.md$/, "");
+}
+
 const LINK_RE = /\[\[([^\]|#]+?)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g;
 
 export function parsePage({ space, page, raw, mtime }) {
@@ -179,9 +188,11 @@ export function parsePage({ space, page, raw, mtime }) {
   const title = page.split("/").pop();
   const tags = tagList(meta);
   // frontmatter の値は入れ子（マップ・配列）にもなる。索引と文脈行には 1 行の文字列だけを入れる
-  const area = metaText(meta.area) || null;
+  const area = linkTarget(typeof meta.area === "string" ? meta.area : metaText(meta.area)) || null;
   const due = metaText(meta.due) || null;
   const goal = metaText(meta.goal) || null;
+  const project = linkTarget(typeof meta.project === "string" ? meta.project : metaText(meta.project)) || null;
+  const completed = metaText(meta.completed) || null;
   const status = normalizeStatus(metaText(meta.status));
   const isJournal = page.startsWith("Journal/");
   const date = isJournal ? page.replace("Journal/", "") : metaText(meta.date) || null;
@@ -225,6 +236,8 @@ export function parsePage({ space, page, raw, mtime }) {
       status,
       due,
       goal,
+      project,
+      completed,
       summary,
       chars: body.length,
       is_journal: isJournal ? 1 : 0,
@@ -301,6 +314,8 @@ export function parseDocument({ space, page, kind, units, mtime }) {
       status: null,
       due: null,
       goal: null,
+      project: null,
+      completed: null,
       summary: null,
       chars: units.reduce((a, u) => a + u.text.length, 0),
       is_journal: 0,
@@ -522,9 +537,9 @@ export class SpaceIndex {
       this.remove(parsed.row.page);
       const r = parsed.row;
       db.exec({
-        sql: `insert into pages (page, path, kind, mtime, modified, title, tags, area, status, due, goal, summary, chars, is_journal, date)
-              values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        bind: [r.page, fullPath, r.kind ?? "md", r.mtime, r.modified, r.title, r.tags, r.area, r.status, r.due, r.goal, r.summary, r.chars, r.is_journal, r.date],
+        sql: `insert into pages (page, path, kind, mtime, modified, title, tags, area, status, due, goal, project, completed, summary, chars, is_journal, date)
+              values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        bind: [r.page, fullPath, r.kind ?? "md", r.mtime, r.modified, r.title, r.tags, r.area, r.status, r.due, r.goal, r.project, r.completed, r.summary, r.chars, r.is_journal, r.date],
       });
       for (const s of parsed.sections) {
         db.exec({

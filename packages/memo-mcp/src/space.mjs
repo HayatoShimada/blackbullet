@@ -456,3 +456,66 @@ async function completeUnlocked(full, space, page, lineNumber, completedDate, { 
   const stat = await fs.stat(full);
   return { space, page, line: lineNumber, text: next.trim(), modified: stat.mtime.toISOString() };
 }
+
+/** frontmatter 内の `key: value` 行を差し替える（無ければ閉じ --- の直前に足す）。本文は触らない。 */
+function setFrontmatterKey(text, key, value) {
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(text);
+  if (!m) throw new Error("frontmatter がありません");
+  const re = new RegExp(`^${key}:.*$`, "m");
+  const block = re.test(m[2]) ? m[2].replace(re, `${key}: ${value}`) : `${m[2]}\n${key}: ${value}`;
+  return m[1] + block + text.slice(m[1].length + m[2].length);
+}
+
+/** todo ページ（tags に todo を含むページ）を status: done・completed: 日付にする。 */
+export async function completeTodoPage(spaces, space, page, completedDate, opts = {}) {
+  const full = resolvePage(spaces, space, page);
+  return withFileLock(full, async () => {
+    const current = await fs.readFile(full, "utf-8").catch((e) => {
+      if (e.code === "ENOENT") throw new Error(`ページが見つかりません: ${space}/${page}`);
+      throw e;
+    });
+    await assertUnchanged(full, opts.expectedModified);
+    const { meta } = splitFrontmatter(current);
+    if (!tagList(meta).includes("todo")) throw new Error(`todo ページではありません（tags に todo がありません）: ${page}`);
+    if (normalizeStatus(metaText(meta.status)) === "done") throw new Error(`既に完了しています: ${page}`);
+    const next = setFrontmatterKey(setFrontmatterKey(current, "status", "done"), "completed", completedDate);
+    await writeAtomic(full, next);
+    const stat = await fs.stat(full);
+    return { space, page, kind: "page", status: "done", completed: completedDate, modified: stat.mtime.toISOString() };
+  });
+}
+
+/** 本文テキストから Tasks/ のページ名にする題名を作る。 */
+export function todoTitle(text) {
+  let t = text
+    .replace(/\[\[([^\]]*)\]\]/g, (_, inner) => inner.split("|").pop().split("/").pop())
+    .replace(/\[[A-Za-z_]+:[^\]]*\]/g, "")
+    .replace(/(^|\s)#[^\s#]+/g, "$1")
+    .replace(/[\/#@|<>$`\[\]\\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  t = Array.from(t).slice(0, 40).join("").trim();
+  return t || "Task";
+}
+
+/** Tasks/<title> に todo ページを新規作成する。既存と衝突したら " 2", " 3"… を付ける。 */
+export async function createTodoPage(spaces, space, title, content) {
+  for (let n = 1; n < 1000; n++) {
+    const page = `Tasks/${n === 1 ? title : `${title} ${n}`}`;
+    const full = resolvePage(spaces, space, page);
+    const made = await withFileLock(full, async () => {
+      try {
+        await fs.access(full);
+        return null;
+      } catch {
+        /* 無ければ作る */
+      }
+      await fs.mkdir(path.dirname(full), { recursive: true });
+      await writeAtomic(full, content(page.slice("Tasks/".length)));
+      const stat = await fs.stat(full);
+      return { space, page, bytes: stat.size, modified: stat.mtime.toISOString() };
+    });
+    if (made) return made;
+  }
+  throw new Error("同名の todo ページが多すぎます");
+}

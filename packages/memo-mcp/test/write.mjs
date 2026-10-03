@@ -167,15 +167,74 @@ test("doc_status と reindex_docs は MCP から呼べる", async () => {
   assert.equal(ls.spaces[0].index.docs_pending, 0);
 });
 
-test("add_inbox は既定でアプリのクイックメモと同じ Inbox/<日付>/<時刻> ページを作る", async () => {
-  const r = JSON.parse((await call("add_inbox", { space: "notes", text: "buy milk", tag: "next", due: "2026-10-05" })).text);
-  assert.match(r.page, /^Inbox\/\d{4}-\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/);
+test("add_inbox は既定で Tasks/<題名> の todo ページを作る", async () => {
+  const r = JSON.parse((await call("add_inbox", { space: "notes", text: "buy milk for [[Projects/Sample]] #next #home [due: 2026-10-05]" })).text);
+  assert.equal(r.page, "Tasks/buy milk for Sample");
   const body = await fs.readFile(`${TMP}/${r.page}.md`, "utf8");
-  assert.match(body, /\* \[ \] buy milk #next \[due: 2026-10-05\]\n$/);
+  assert.equal(
+    body,
+    "---\ntags: [todo, home]\nstatus: next\ndue: 2026-10-05\nproject:\narea:\ncompleted:\n---\n# buy milk for Sample\nbuy milk for [[Projects/Sample]] #next #home [due: 2026-10-05]\n"
+  );
   await assert.rejects(fs.access(`${TMP}/Inbox.md`));
+  // 索引から todo ページとして見える
+  const t = JSON.parse((await call("list_tasks", { space: "notes", status: "next" })).text).tasks;
+  assert.ok(t.some((x) => x.page === r.page && x.kind === "page" && x.due === "2026-10-05"));
 });
 
-test("add_inbox のページ名は MEMO_TZ の時刻で作られる", async () => {
+test("add_inbox: 衝突は ' 2' ' 3'、記号は除かれ 40 文字に切る、due 引数と tag 引数", async () => {
+  const a = JSON.parse((await call("add_inbox", { space: "notes", text: "same title" })).text);
+  const b = JSON.parse((await call("add_inbox", { space: "notes", text: "same title", due: "2026-11-01", tag: "someday" })).text);
+  const c = JSON.parse((await call("add_inbox", { space: "notes", text: "same title" })).text);
+  assert.deepEqual([a.page, b.page, c.page], ["Tasks/same title", "Tasks/same title 2", "Tasks/same title 3"]);
+  const bb = await fs.readFile(`${TMP}/${b.page}.md`, "utf8");
+  assert.match(bb, /^---\ntags: \[todo\]\nstatus: someday\ndue: 2026-11-01\n/);
+  assert.match(bb, /\n# same title 2\n/);
+  const aa = await fs.readFile(`${TMP}/${a.page}.md`, "utf8");
+  assert.match(aa, /status: inbox\ndue:\n/);
+  const sym = JSON.parse((await call("add_inbox", { space: "notes", text: "a/b #x @y | <z> $ ` [q] " + "あ".repeat(60) })).text);
+  assert.equal(sym.page, `Tasks/ab y z q ${"あ".repeat(40 - 9)}`.slice(0, "Tasks/".length + 40));
+  assert.doesNotMatch(sym.page.slice("Tasks/".length), /[\/#@|<>$`\[\]]/);
+  assert.ok(Array.from(sym.page.slice("Tasks/".length)).length <= 40);
+});
+
+test("complete_task: todo ページは page だけで status: done と completed を書く", async () => {
+  const r = JSON.parse((await call("add_inbox", { space: "notes", text: "finish report #next [due: 2026-10-09]" })).text);
+  const note = JSON.parse((await call("read_note", { space: "notes", page: r.page })).text);
+  // 古い modified は競合
+  const stale = await call("complete_task", { space: "notes", page: r.page, expected_modified: "2020-01-01T00:00:00.000Z" });
+  assert.equal(stale.isError, true);
+  assert.match(await fs.readFile(`${TMP}/${r.page}.md`, "utf8"), /status: next/);
+  const done = await call("complete_task", { space: "notes", page: r.page, expected_modified: note.modified, date: "2026-10-03" });
+  assert.equal(done.isError, false, done.text);
+  const text = await fs.readFile(`${TMP}/${r.page}.md`, "utf8");
+  assert.match(text, /\nstatus: done\n/);
+  assert.match(text, /\ncompleted: 2026-10-03\n/);
+  assert.match(text, /\ndue: 2026-10-09\n/, "他の項目は触らない");
+  assert.match(text, /\n# finish report\nfinish report #next/, "本文は触らない");
+  assert.deepEqual(await tmpFiles(TMP), []);
+  // 再完了は拒否
+  assert.match((await call("complete_task", { space: "notes", page: r.page })).text, /既に完了/);
+  // list_tasks で完了済みとして見える
+  const dt = JSON.parse((await call("list_tasks", { space: "notes", done: true })).text).tasks;
+  assert.ok(dt.some((x) => x.page === r.page && x.done && x.completed === "2026-10-03"));
+});
+
+test("complete_task: todo でないページ・無いページは拒否、date 省略は今日", async () => {
+  const before = await fs.readFile(`${TMP}/${PAGE}.md`, "utf8");
+  const r = await call("complete_task", { space: "notes", page: PAGE });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /todo ページではありません/);
+  assert.equal(await fs.readFile(`${TMP}/${PAGE}.md`, "utf8"), before);
+  assert.equal((await call("complete_task", { space: "notes", page: "Tasks/NoSuch" })).isError, true);
+  const t = JSON.parse((await call("add_inbox", { space: "notes", text: "today check" })).text);
+  await call("complete_task", { space: "notes", page: t.page });
+  const today = new Date().toLocaleDateString("sv-SE");
+  const utc = new Date().toISOString().slice(0, 10);
+  const m = /completed: (\S+)/.exec(await fs.readFile(`${TMP}/${t.page}.md`, "utf8"));
+  assert.ok([today, utc].includes(m[1]), m[1]);
+});
+
+test("complete_task の完了日は MEMO_TZ の日付になる", async () => {
   // サーバーは別プロセスなので、MEMO_TZ を付けた専用のサーバーを起動する（テスト側の process.env は届かない）
   const TZ = "Pacific/Kiritimati"; // UTC+14。どの時刻でも UTC と日付か時刻がずれる
   const tzTransport = new StdioClientTransport({
@@ -192,9 +251,12 @@ test("add_inbox のページ名は MEMO_TZ の時刻で作られる", async () =
     const after = new Date().toLocaleDateString("sv-SE", { timeZone: TZ });
     const r = JSON.parse(res.content?.[0]?.text ?? "{}");
     // 日付の境目をまたいだ場合も通るよう、呼び出し前後どちらかの日付と一致すればよい
-    assert.ok(r.page?.startsWith(`Inbox/${before}/`) || r.page?.startsWith(`Inbox/${after}/`), r.page);
+    const mark = await tzClient.callTool({ name: "complete_task", arguments: { space: "notes", page: r.page } });
+    assert.notEqual(mark.isError, true);
+    const done = /completed: (\S+)/.exec(await fs.readFile(`${TMP}/${r.page}.md`, "utf8"))[1];
+    assert.ok(done === before || done === after, done);
     const utc = new Date().toISOString().slice(0, 10);
-    if (utc !== before && utc !== after) assert.ok(!r.page.startsWith(`Inbox/${utc}/`), "UTC の日付で作られている");
+    if (utc !== before && utc !== after) assert.notEqual(done, utc, "UTC の日付で書かれている");
   } finally {
     await tzClient.close();
   }

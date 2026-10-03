@@ -25,7 +25,7 @@ test("task line numbers match the files", async () => {
     let checked = 0;
     for (const done of [false, true]) {
       const { tasks } = await call("list_tasks", { done, limit: 200 });
-      for (const t of tasks) {
+      for (const t of tasks.filter((x) => x.kind === "line")) {
         const lines = (await fs.readFile(`${roots[t.space]}/${t.page}.md`, "utf-8")).split(/\r?\n/);
         assert.match(lines[t.line - 1] ?? "", /^\s*\*\s\[[ xX]\]/, `${t.space}/${t.page}:${t.line}`);
         checked++;

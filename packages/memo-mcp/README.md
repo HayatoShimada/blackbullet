@@ -4,7 +4,7 @@ An MCP server plus a read-only REST API (`/api/ask` is a POST that only reads) o
 [SilverBullet](https://silverbullet.md) / BlackBullet. It provides hybrid search
 (SQLite FTS5 trigram + local multilingual embeddings, merged with Reciprocal Rank Fusion),
 section-level reading, related notes, task / project / journal tools and a few safe write tools.
-Everything runs locally. The sidecar never sends note text to an external service (it only downloads the embedding model once). `/api/ask` returns matching sections to the caller; BlackBullet's `Memo: Ask` sends them to the Anthropic API from the app, see `libraries/Library/Std/Editor/Memo Ask.md`.
+Everything runs locally. The sidecar never sends note text to an external service (it only downloads the embedding model once). `/api/ask` returns matching sections to the caller; BlackBullet's `Ask: Notes` sends them to the Anthropic API from the app, see `libraries/Library/Std/Editor/Memo Ask.md`.
 
 (日本語: SilverBullet 系の Markdown スペースを MCP と読み取り専用 REST で公開するサーバー。FTS5 trigram とローカル埋め込みのハイブリッド検索を持ちます。)
 
@@ -48,7 +48,7 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `MEMO_OCR_PAGES` | Maximum pages OCR'd per PDF; later pages are not indexed. Default `20`. |
 | `MEMO_OCR_BUDGET` | Total OCR time per PDF in ms (default `120000`); pages finished before the deadline are kept. Images larger than `MEMO_EXTRACT_MAX_BYTES` are `too_large`. Only PDFs with almost no text layer are OCR'd (mixed text/scan PDFs are not). |
 | `MEMO_TESSERACT` | Path of the `tesseract` binary. Default `tesseract`. |
-| `MEMO_TZ` | IANA time zone (e.g. `Asia/Tokyo`) used for `add_inbox` page names (`Inbox/<date>/<time>`) and dates. Default: the process time zone, which is UTC in Docker. Pass it through compose to the sidecar so names match the app. |
+| `MEMO_TZ` | IANA time zone (e.g. `Asia/Tokyo`) used for the dates `add_inbox` / `complete_task` write (`completed:`). Default: the process time zone, which is UTC in Docker. Pass it through compose to the sidecar so names match the app. |
 | `MEMO_EXTRACT_KINDS` | Optional comma-separated list restricting which kinds are indexed (`pdf,docx,xlsx,pptx,odf,html,legacy,text,image`; `legacy` reports old `.doc`/`.xls`/`.ppt` as `unsupported`; `.html`/`.htm` are indexed by default, decoded per their `<meta charset>`, or extensions; `image` covers OCR'd pictures). Default: all. Use `pdf,docx,xlsx,pptx` to keep `.txt` / `.csv` out. |
 | `MEMO_DOC_EXCLUDE` | Optional regular expression; document pages whose name matches are not indexed (e.g. `^Private/`). |
 
@@ -211,7 +211,12 @@ The document-indexing tests (`test/extract.mjs`) are skipped when `pdftotext` or
 Extraction results are persisted in `MEMO_INDEX_DIR/extract/<space>/` (keyed by path, mtime, size and the extractor/settings signature),
 so a restart does not re-extract unchanged documents. `reindex_docs` bypasses the saved results. Transient failures (timeout, missing tool) are never saved.
 
-`add_inbox` creates an `Inbox/<YYYY-MM-DD>/<HH-MM-SS>` page, like the app's Quick Note (`Ctrl-q q`); pass `mode: "append"` for the old behaviour (append a task to `Inbox.md`).
+**Tasks are one page per task.** A todo page lives in `Tasks/<title>` with frontmatter `tags: [todo]`, `status: inbox | next | waiting | someday | done`, `due`, `project: "[[Projects/X]]"`, `area`, `completed`. Projects are `Projects/` pages with `tags: project` and `status: active | someday | done`.
+
+- `list_tasks` returns todo pages (`kind: "page"`: `page, title, status, done, due, project, area, completed`) and checkbox lines in other pages (`kind: "line"`, as before). Filters: `done`, `tag`, `status`, `project`, `due_before`, `limit`, `space`. Sorted by due date, undated last. Todo pages come from the index (`pages` table), not from re-reading files.
+- `complete_task` with only `page` sets `status: done` and `completed: <today, MEMO_TZ>` on a todo page (refused if the page has no `todo` tag); with `line` it ticks a checkbox line. Both use the atomic write, per-file lock and `expected_modified` check.
+- `add_inbox` creates `Tasks/<title>` (title derived from the text: `[[a/b]]` becomes `b`, `[key: value]`, `#tags` and `/ # @ | < > $ \` [ ]` removed, about 40 characters, ` 2`, ` 3` on collision) with `status: inbox` (or `next` / `someday` / `waiting` from a `#tag`), other `#tags` in `tags`, `due` from `[due: ...]` or the argument, and the full text as the body. `mode: "append"` appends a checkbox line to `Inbox.md` instead.
+- `list_projects` excludes `status: done` by default (`status: "all"` lists everything); `open_tasks` counts todo pages whose `project` points at the project plus open checkbox lines inside it.
 
 The image ships without tesseract to stay lean. Build with OCR support:
 `docker build --build-arg WITH_OCR=1 packages/memo-mcp` (adds `tesseract-ocr` with Japanese and English data), then set

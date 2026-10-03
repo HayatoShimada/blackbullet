@@ -12,6 +12,9 @@ import {
   appendToPage,
   insertUnderHeading,
   completeTask,
+  completeTodoPage,
+  createTodoPage,
+  todoTitle,
 } from "./space.mjs";
 import { Indexes } from "./index.mjs";
 import { searchSpace, neighbors } from "./search.mjs";
@@ -157,9 +160,9 @@ export function registerTools(server) {
       inputSchema: {
         query: z.string().describe("検索語または自然文。空にするとフィルタ条件だけで絞り込み（更新順）"),
         space: spaceEnum.optional().describe("省略すると全スペース"),
-        tag: z.string().optional().describe("frontmatter の tags で絞る（project / journal / area / archive / goal / inbox など）"),
+        tag: z.string().optional().describe("frontmatter の tags で絞る（project / todo / journal / area / goal など）"),
         area: z.string().optional().describe("frontmatter の area で絞る"),
-        status: z.string().optional().describe("frontmatter の status で絞る（active / done / someday）"),
+        status: z.string().optional().describe("frontmatter の status で絞る（プロジェクト: active / someday / done、todo: inbox / next / waiting / someday / done）"),
         since: z.string().optional().describe("YYYY-MM-DD。この日以降に更新されたページだけ"),
         mode: z.enum(["hybrid", "lexical", "semantic"]).default("hybrid").describe("hybrid が既定。lexical は語の一致だけ、semantic は意味だけ"),
         limit: z.number().int().min(1).max(50).default(10),
@@ -327,30 +330,63 @@ export function registerTools(server) {
     {
       title: "タスク一覧",
       description:
-        "タスクを横断で集める。既定は未完了のみ、期限の早い順。期限なしは後ろに回る。",
+        "タスクを横断で集める。タスクは 2 種類ある。kind:\"page\" は Tasks/ の todo ページ（1 タスク 1 ページ。tags に todo、" +
+        "status は inbox / next / waiting / someday / done、project・area はページ名）、kind:\"line\" は日報などのチェックボックス行" +
+        "（line を complete_task に渡す）。既定は未完了のみ、期限の早い順で、期限なしは後ろに回る。" +
+        "status / project で todo ページを絞れる（status か project を渡すとチェックボックス行は project のページ内のものだけになる）。",
       inputSchema: {
         space: spaceEnum.optional(),
-        done: z.boolean().default(false).describe("true にすると完了済みを返す"),
-        tag: z.string().optional().describe("タスク行のハッシュタグで絞る（next / waiting など）"),
+        done: z.boolean().default(false).describe("true にすると完了済み（status: done / [x]）を返す"),
+        tag: z.string().optional().describe("ハッシュタグ / tags で絞る（next / waiting など。todo ページは status も一致とみなす）"),
+        status: z.enum(["inbox", "next", "waiting", "someday", "done"]).optional().describe("todo ページの status で絞る。done を渡すと done の指定に関わらず完了済みを返す"),
+        project: z.string().optional().describe('プロジェクトのページ名で絞る。例 "Projects/Demo"（[[ ]] は不要）'),
         due_before: z.string().optional().describe("YYYY-MM-DD。この日以前が期限のものだけ"),
         limit: z.number().int().min(1).max(200).default(50),
       },
     },
-    async ({ space, done = false, tag, due_before, limit = 50 }) => {
+    async ({ space, done = false, tag, status, project, due_before, limit = 50 }) => {
       try {
+        const wantDone = done || status === "done";
         const rows = [];
         for (const idx of await indexes.all(space)) {
+          // todo ページ（索引の pages 表の frontmatter 列から）
+          const pw = ["(',' || tags || ',') like '%,todo,%'"];
+          const pb = [];
+          if (wantDone) pw.push("status = 'done'");
+          else pw.push("(status is null or status <> 'done')");
+          if (status && status !== "done") { pw.push("status = ?"); pb.push(status); }
+          if (project) { pw.push("project = ?"); pb.push(project.replace(/^\[\[|\]\]$/g, "")); }
+          if (tag) { pw.push("((',' || tags || ',') like ? or status = ?)"); pb.push(`%,${tag},%`, tag); }
+          if (due_before) { pw.push("due is not null and due <= ?"); pb.push(due_before); }
+          rows.push(
+            ...idx.rows(`select page, title, tags, status, due, project, area, completed from pages where ${pw.join(" and ")}`, pb).map((t) => ({
+              space: idx.space,
+              kind: "page",
+              page: t.page,
+              title: t.title,
+              status: t.status ?? null,
+              done: t.status === "done",
+              due: t.due ?? null,
+              project: t.project ?? null,
+              area: t.area ?? null,
+              completed: t.completed ?? null,
+              tags: t.tags ? t.tags.split(",") : [],
+            }))
+          );
+          // チェックボックス行。status 指定は todo ページ専用なので、その場合は行タスクを返さない
+          if (status && status !== "done") continue;
           const where = ["done = ?"];
-          const bind = [done ? 1 : 0];
+          const bind = [wantDone ? 1 : 0];
+          if (project) { where.push("page = ?"); bind.push(project.replace(/^\[\[|\]\]$/g, "")); }
           if (tag) { where.push("(',' || tags || ',') like ?"); bind.push(`%,${tag},%`); }
           if (due_before) { where.push("due is not null and due <= ?"); bind.push(due_before); }
           rows.push(
-            ...idx.rows(`select page, line, text, due, start, completed, tags from tasks where ${where.join(" and ")}`, bind)
-              .map((t) => ({ space: idx.space, page: t.page, line: t.line, text: t.text, due: t.due ?? null, start: t.start ?? null, completed: t.completed ?? null, tags: t.tags ? t.tags.split(",") : [] }))
+            ...idx.rows(`select page, line, text, done, due, start, completed, tags from tasks where ${where.join(" and ")}`, bind)
+              .map((t) => ({ space: idx.space, kind: "line", page: t.page, line: t.line, text: t.text, done: Boolean(t.done), due: t.due ?? null, start: t.start ?? null, completed: t.completed ?? null, tags: t.tags ? t.tags.split(",") : [] }))
           );
         }
         rows.sort((a, b) => {
-          if (a.due && b.due) return a.due < b.due ? -1 : 1;
+          if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
           if (a.due) return -1;
           if (b.due) return 1;
           return 0;
@@ -367,13 +403,14 @@ export function registerTools(server) {
     {
       title: "プロジェクト一覧",
       description:
-        "tags: project のページを、期限と未完了タスク数つきで返す。既定は status: active のみ。",
+        "tags: project のページ（Projects/）を、期限と未完了タスク数つきで返す。status は active / someday / done で、既定は active のみ（done は含まれない）。" +
+        "open_tasks は frontmatter の project でこのプロジェクトに結びついた todo ページ（未完了）と、プロジェクトページ内の未完了チェックボックス行の合計。",
       inputSchema: {
         space: spaceEnum.optional(),
         status: z
           .string()
           .optional()
-          .describe('省略すると active のみ。"all" で全件。done / someday も指定できる'),
+          .describe('省略すると active のみ（done は出ない）。"all" で全件。done / someday も指定できる'),
       },
     },
     async ({ space, status }) => {
@@ -383,8 +420,10 @@ export function registerTools(server) {
         for (const idx of await indexes.all(space)) {
           const bind = [];
           let sql = `select p.page, p.status, p.due, p.area, p.goal, p.summary, p.modified,
-                       (select count(*) from tasks t where t.page = p.page and t.done = 0) open_tasks,
-                       (select count(*) from tasks t where t.page = p.page and t.done = 1) done_tasks
+                       ((select count(*) from tasks t where t.page = p.page and t.done = 0)
+                        + (select count(*) from pages q where q.project = p.page and (',' || q.tags || ',') like '%,todo,%' and (q.status is null or q.status <> 'done'))) open_tasks,
+                       ((select count(*) from tasks t where t.page = p.page and t.done = 1)
+                        + (select count(*) from pages q where q.project = p.page and (',' || q.tags || ',') like '%,todo,%' and q.status = 'done')) done_tasks
                      from pages p where (',' || p.tags || ',') like '%,project,%'`;
           if (want !== "all") { sql += " and p.status = ?"; bind.push(want); }
           rows.push(...idx.rows(sql, bind).map((r) => ({ space: idx.space, ...r })));
@@ -491,39 +530,42 @@ export function registerTools(server) {
     {
       title: "Inbox に追加",
       description:
-        "未振り分けのメモをタスクとして追加する。既定ではアプリのクイックメモと同じ Inbox/<日付>/<時刻> ページを新規に作る" +
-        "（ホームの Recent quick notes に出る）。mode=\"append\" なら従来どおり Inbox.md の末尾に追記する。",
+        "未振り分けのメモをタスクとして追加する。既定では todo ページ Tasks/<題名> を新規に作る" +
+        "（frontmatter: tags: [todo]、status: inbox、due、project / area は空、completed は空。本文は # <題名> の下に text を丸ごと）。" +
+        "題名は text から作る（[[リンク]] は最後の区間、[key: value]・#タグ・記号を除き約 40 文字、同名なら \" 2\" \" 3\" を付ける）。" +
+        "text に #next / #someday / #waiting があれば status がそれになり、他の #タグ と tag 引数は tags に加わる。[due: 日付] か due 引数で期限。" +
+        "mode=\"append\" なら従来どおり Inbox.md の末尾にチェックボックス行を追記する（expected_modified が使える）。",
       inputSchema: {
         space: spaceEnum,
-        mode: z.enum(["page", "append"]).default("page").describe('"page"（既定）: Inbox/<日付>/<時刻> を作る。"append": Inbox.md に追記'),
-        text: z.string().describe("追加する内容（チェックボックスは自動で付く）"),
+        mode: z.enum(["page", "append"]).default("page").describe('"page"（既定）: Tasks/<題名> の todo ページを作る。"append": Inbox.md に追記'),
+        text: z.string().describe("追加する内容。#next などのタグと [due: YYYY-MM-DD] を含めてよい"),
         due: z.string().optional().describe("YYYY-MM-DD"),
-        tag: z.string().optional().describe("付けるハッシュタグ。例 next"),
-        expected_modified: z.string().optional(),
+        tag: z.string().optional().describe("付けるハッシュタグ。例 next（next / someday / waiting なら status になる）"),
+        expected_modified: z.string().optional().describe("mode=append のときだけ有効"),
       },
     },
     async ({ space, mode = "page", text, due, tag, expected_modified }) => {
       try {
+        if (mode === "page") {
+          const hashTags = [...text.matchAll(/(?:^|\s)#([^\s#]+)/g)].map((m) => m[1]);
+          if (tag) hashTags.push(tag.replace(/^#/, ""));
+          const STATUS_TAGS = ["next", "someday", "waiting"];
+          const status = STATUS_TAGS.find((t) => hashTags.includes(t)) ?? "inbox";
+          const extra = [...new Set(hashTags.filter((t) => !STATUS_TAGS.includes(t) && t !== "todo"))];
+          const dueInText = /\[due:\s*([^\]]*?)\s*\]/.exec(text)?.[1];
+          const dueValue = dueInText || due || "";
+          const title = todoTitle(text);
+          return json(
+            await createTodoPage(spaces, space, title, (name) =>
+              `---\ntags: [${["todo", ...extra].join(", ")}]\nstatus: ${status}\ndue:${dueValue ? ` ${dueValue}` : ""}\nproject:\narea:\ncompleted:\n---\n# ${name}\n${text.trim()}\n`
+            )
+          );
+        }
         let line = `* [ ] ${text}`;
         if (tag) line += ` #${tag}`;
         if (due) line += ` [due: ${due}]`;
-        if (mode === "page") {
-          // Library/Std/Page Templates/Quick Note.md の suggestedName と同じ形（ローカル時刻）
-          const now = new Date();
-          const time = now.toLocaleTimeString("en-GB", { hour12: false, ...tzOpt() }).replaceAll(":", "-");
-          return json(await appendToPage(spaces, space, `Inbox/${today()}/${time}`, line, { initial: "---\ntags: inbox\n---\n\n" }));
-        }
         const initial = `---\ntags: inbox\n---\n\n# Inbox\n\n未振り分けのキャプチャ。処理したら Projects か Areas へ移す。\n\n`;
-        try {
-          return json(
-            await appendToPage(spaces, space, "Inbox", line, {
-              expectedModified: expected_modified,
-              initial,
-            })
-          );
-        } catch (e) {
-          throw e;
-        }
+        return json(await appendToPage(spaces, space, "Inbox", line, { expectedModified: expected_modified, initial }));
       } catch (e) {
         return fail(e);
       }
@@ -535,23 +577,22 @@ export function registerTools(server) {
     {
       title: "タスクを完了にする",
       description:
-        "指定行のタスクを [x] にし、[completed: 日付] を付ける。" +
-        "行番号は list_tasks / read_note が返す line をそのまま使う。",
+        "タスクを完了にする。todo ページ（list_tasks の kind:\"page\"）は page だけ渡すと frontmatter が status: done、completed: 日付になる" +
+        "（tags に todo が無いページは拒否）。チェックボックス行（kind:\"line\"）は line も渡すと [x] にして [completed: 日付] を付ける。" +
+        "line は list_tasks / read_note が返す値をそのまま使う。",
       inputSchema: {
         space: spaceEnum,
         page: z.string(),
-        line: z.number().int().min(1).describe("list_tasks が返した行番号"),
-        date: z.string().optional().describe("完了日 YYYY-MM-DD。省略すると今日"),
+        line: z.number().int().min(1).optional().describe("チェックボックス行のときだけ。list_tasks が返した行番号。省略すると page を todo ページとして扱う"),
+        date: z.string().optional().describe("完了日 YYYY-MM-DD。省略すると今日（MEMO_TZ）"),
         expected_modified: z.string().optional(),
       },
     },
     async ({ space, page, line, date, expected_modified }) => {
       try {
-        return json(
-          await completeTask(spaces, space, page, line, date ?? today(), {
-            expectedModified: expected_modified,
-          })
-        );
+        const opts = { expectedModified: expected_modified };
+        if (line === undefined) return json(await completeTodoPage(spaces, space, page, date ?? today(), opts));
+        return json(await completeTask(spaces, space, page, line, date ?? today(), opts));
       } catch (e) {
         return fail(e);
       }

@@ -27,6 +27,9 @@ export const FILES = {
     "# Reading List\n\n## Papers\n\nA survey of retrieval techniques. Related to [[Areas/Operations]]."
   ),
   "Journal/2026-09-20.md": page("journal", "# 2026-09-20\n\n## Done\n\nWrote the newsletter for the demo launch."),
+  "Tasks/Buy stamps.md": "---\ntags: [todo]\nstatus: inbox\ndue:\nproject:\narea:\ncompleted:\n---\n# Buy stamps\nbuy stamps at the post office\n",
+  "Tasks/Book venue.md": '---\ntags: [todo, event]\nstatus: next\ndue: 2026-09-18\nproject: "[[Projects/Demo]]"\narea: "[[Areas/Operations]]"\ncompleted:\n---\n# Book venue\nbook the venue for the demo\n',
+  "Tasks/Send invoice.md": '---\ntags: [todo]\nstatus: done\ndue: 2026-09-10\nproject: "[[Projects/Demo]]"\narea:\ncompleted: 2026-09-09\n---\n# Send invoice\ninvoice sent\n',
   "CONFIG.md": '# Config\n\n```space-lua\nconfig.set("memoSidecar", {token="SECRET-TOKEN-XYZ"})\n```\n',
   // DB ビューで「削除」されたページ（Trash/ へ移動）。検索・Ask に出てはいけない
   "Trash/Old Plan.md": "---\ntrashedFrom: Projects/Old Plan\n---\n# Old Plan\n\n## Notes\nTRASHED-MARKER discarded idea\n",

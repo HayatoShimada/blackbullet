@@ -309,7 +309,7 @@ test("MEMO_EMBED=off: graph は edges 空 + warning、nodes は日報を除い�
   assert.deepEqual(body.edges, []);
   assert.ok(body.warning);
   const ids = body.nodes.map((n) => n.id).sort();
-  assert.deepEqual(ids, ["Areas/Operations", "Projects/Demo", "Projects/在庫システム", "Resources/Reading List"]);
+  assert.deepEqual(ids, ["Areas/Operations", "Projects/Demo", "Projects/在庫システム", "Resources/Reading List", "Tasks/Book venue", "Tasks/Buy stamps", "Tasks/Send invoice"]);
   const sw = body.nodes.find((n) => n.id === "Projects/Demo");
   assert.equal(sw.title, "Demo");
   assert.deepEqual(sw.tags, ["project"]);
