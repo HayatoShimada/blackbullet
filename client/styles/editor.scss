@@ -1349,3 +1349,61 @@ $comment-border: 1px;
 div:not(.cm-focused).cm-fat-cursor {
   outline: none !important;
 }
+
+// Phones (same 600px breakpoint as MOBILE_MEDIA_QUERY in client/lib/mobile.ts).
+// The desktop reading scale (17px, 1.6, 24px gutters) is too large for a
+// 320–412px screen: about 30 characters per line and only ~20 lines visible.
+// 16px keeps iOS from zooming into editable text; headings step down with it.
+@media only screen and (max-width: 600px) {
+  #sb-main .cm-editor {
+    --sb-text-editor: 16px;
+    line-height: 1.5;
+
+    .cm-scroller {
+      line-height: 1.5;
+    }
+
+    .cm-content {
+      padding: 4px 16px 0;
+    }
+
+    .sb-line-h1,
+    h1 {
+      font-size: 1.4em;
+    }
+
+    .sb-line-h2,
+    h2 {
+      font-size: 1.2em;
+    }
+
+    .sb-line-h3,
+    h3 {
+      font-size: 1.08em;
+    }
+
+    .cm-line {
+      &.sb-line-h1,
+      &.sb-line-h2 {
+        --sb-line-pad-y: 4px;
+      }
+    }
+
+    // The touch ⋯ of a widget straddles the frame's top edge and covered the
+    // end of the first row on narrow screens; lift it above the frame, into
+    // the right end of the heading line, where text rarely reaches.
+    @media (hover: none) and (pointer: coarse) {
+      :is(.sb-markdown-widget, .sb-lua-directive-block, .sb-lua-directive-inline, .sb-markdown-top-widget, .sb-markdown-bottom-widget) .button-bar {
+        top: -46px;
+        right: 0;
+      }
+    }
+
+    // Task boxes stay small to the eye but get a thumb-sized hit area.
+    input[type="checkbox"]::before {
+      content: "";
+      position: absolute;
+      inset: -12px;
+    }
+  }
+}
