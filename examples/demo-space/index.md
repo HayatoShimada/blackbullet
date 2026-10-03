@@ -6,6 +6,8 @@ ${widgets.commandButton("Quick note", "Quick Note")} ${widgets.commandButton("To
 end)}
 
 ${(function()
+  -- Phones have no keyboard shortcuts to learn; the buttons above are the way in.
+  if editor.isMobile() then return "" end
   local commands = system.listCommands()
   local search = commands["Search: Notes"] or commands["Memo: Search"]
   local key = search and search.key

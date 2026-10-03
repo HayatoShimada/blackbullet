@@ -1399,6 +1399,32 @@ div:not(.cm-focused).cm-fat-cursor {
       }
     }
 
+    // Folded frontmatter: the "frontmatter" toggle sat on its own floated
+    // row above the tag chips, doubling the band's height. Put it at the
+    // right end of the chip row instead.
+    .sb-line-frontmatter-outside {
+      position: relative;
+    }
+
+    .sb-line-frontmatter-outside .sb-frontmatter-marker {
+      float: none;
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+
+    .sb-line-frontmatter-outside .cm-frontmatterFoldPlaceholder {
+      width: calc(100% - 7.5em);
+    }
+
+    // Inline attributes such as [due: 2026-10-14] wrap as one unit, slightly
+    // smaller, instead of breaking inside the date.
+    .sb-attribute {
+      white-space: nowrap;
+      font-size: 0.9em;
+    }
+
     // Task boxes stay small to the eye but get a thumb-sized hit area.
     input[type="checkbox"]::before {
       content: "";

@@ -421,6 +421,15 @@ body { margin: 0; }
   .db-filter-wrap + .db-more { margin-left: auto; }
   .db-tabs { order: 3; margin-left: 0; width: 100%; display: flex; .db-tab { flex: 1; justify-content: center; } }
   .db-filter-wrap { order: 4; width: 100%; }
+  // On a narrow view a filled + New outweighed the view's own title; keep the
+  // 44px target but draw it as a quiet text button.
+  .db-new.sb-button-primary {
+    background: transparent;
+    color: var(--sb-accent, #2f5fb3);
+    border: 1px solid var(--sb-line, #e4e7eb);
+    padding: 0 10px;
+    font-weight: 500;
+  }
 }
 
 // Under 600px: the board snaps, the calendar is a list.
