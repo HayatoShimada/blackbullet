@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<title>BlackBullet</title>
+<meta name="description" content="ローカルで動く、Markdown のノートアプリ。意味検索、データベース表示、MCP による AI 連携つき。">
+<meta property="og:title" content="BlackBullet">
+<meta property="og:description" content="ローカルで動く、Markdown のノートアプリ。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://hayatoshimada.github.io/blackbullet/">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a single reading column (~1080px) that opens on a split "file on disk ↔ what you see" hero, then alternates prose and working panels. Palette is the app's own design-system roles. */
+:root {
+  --bg: #ffffff;
+  --panel: #f6f7f8;
+  --bg2: #eef1f4;
+  --ink: #1c2128;
+  --ink2: #5b6572;
+  --ink3: #667180;
+  --line: #e4e7eb;
+  --line-strong: #8e97a1;
+  --accent: #2f5fb3;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  --meta: #7a2630;
+  --ok: #1e7a4b;
+  --warn: #8a5a00;
+  --tag-bg: #e3ecfb;
+  --tag-fg: #1d4a94;
+  --fm-bg: #fbf8ea;
+  --code-bg: #15181c;
+  --code-fg: #dfe4ea;
+  --code-dim: #8b939e;
+  --code-key: #8fb3ff;
+  --shadow: 0 16px 48px rgb(0 0 0 / .12), 0 2px 6px rgb(0 0 0 / .06);
+
+  --f-display: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+  --f-body: ui-sans-serif, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+
+  --t-xs: .78rem; --t-sm: .88rem; --t-md: 1rem; --t-lg: 1.2rem; --t-xl: 1.6rem; --t-2xl: clamp(1.9rem, 4.6vw, 3.1rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131518; --panel: #191b1f; --bg2: #202329; --ink: #e6e9ee; --ink2: #a3abb6; --ink3: #8b939e;
+    --line: #2b3037; --line-strong: #5c6670; --accent: #79a9f2; --on-accent: #0c1a30;
+    --meta: #ef9aa0; --ok: #5fd39a; --warn: #f3b74d; --tag-bg: #223b66; --tag-fg: #cfe0ff; --fm-bg: #1d1d1a;
+    --code-bg: #0d0f12; --code-fg: #dfe4ea; --code-dim: #7f8894; --code-key: #8fb3ff;
+    --shadow: 0 16px 48px rgb(0 0 0 / .4), 0 2px 6px rgb(0 0 0 / .24);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131518; --panel: #191b1f; --bg2: #202329; --ink: #e6e9ee; --ink2: #a3abb6; --ink3: #8b939e;
+  --line: #2b3037; --line-strong: #5c6670; --accent: #79a9f2; --on-accent: #0c1a30;
+  --meta: #ef9aa0; --ok: #5fd39a; --warn: #f3b74d; --tag-bg: #223b66; --tag-fg: #cfe0ff; --fm-bg: #1d1d1a;
+  --code-bg: #0d0f12; --code-fg: #dfe4ea; --code-dim: #7f8894; --code-key: #8fb3ff;
+  --shadow: 0 16px 48px rgb(0 0 0 / .4), 0 2px 6px rgb(0 0 0 / .24);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; }
+img { max-width: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 16px; line-height: 1.75; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; line-height: 1.3; margin: 0; }
+p { margin: 0; }
+code, kbd, .mono { font-family: var(--f-mono); }
+kbd { font-size: .82em; background: var(--bg2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: .05em .4em; white-space: nowrap; color: var(--ink); }
+
+/* top bar */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 20px; height: 56px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--f-display); font-weight: 900; font-size: 1.05rem; color: var(--ink); text-decoration: none; letter-spacing: .01em; }
+.bullet { width: 14px; height: 14px; border-radius: 50%; background: var(--ink); box-shadow: inset -3px -3px 0 color-mix(in srgb, var(--accent) 70%, transparent); flex: none; }
+.top nav { display: flex; gap: 18px; margin-left: auto; font-size: var(--t-sm); }
+.top nav a { color: var(--ink2); text-decoration: none; }
+.top nav a:hover { color: var(--ink); }
+.ver { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+@media (max-width: 640px) { .top nav a.opt { display: none; } }
+
+/* hero */
+.hero { padding-block: 64px 56px; display: grid; gap: 40px; }
+.hero-copy { display: grid; gap: 20px; max-width: 46rem; }
+.eyebrow { font-size: var(--t-xs); letter-spacing: .12em; text-transform: uppercase; color: var(--ink2); font-family: var(--f-mono); }
+.hero h1 { font-size: var(--t-2xl); font-weight: 900; letter-spacing: -.01em; }
+.hero h1 em { font-style: normal; color: var(--accent); }
+.lede { font-size: var(--t-lg); color: var(--ink2); max-width: 40rem; line-height: 1.7; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding-inline: 18px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: var(--t-md); border: 1px solid transparent; cursor: pointer; font-family: var(--f-body); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
+.btn.ghost { color: var(--ink); border-color: var(--line-strong); background: transparent; }
+.btn.ghost:hover { background: var(--bg2); }
+
+/* split: file on disk ↔ rendered */
+.split { display: grid; grid-template-columns: 1fr 1.25fr; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background: var(--bg); }
+.split > * { min-width: 0; }
+.pane-h { display: flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: var(--t-xs); padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--ink2); }
+.pane-h .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
+.raw { background: var(--code-bg); color: var(--code-fg); }
+.raw .pane-h { color: var(--code-dim); border-color: color-mix(in srgb, var(--code-fg) 12%, transparent); }
+.raw pre { margin: 0; padding: 16px; font-size: .8rem; line-height: 1.7; overflow-x: auto; }
+.raw .k { color: var(--code-key); } .raw .d { color: var(--code-dim); } .raw .h { color: #fff; font-weight: 600; }
+.view { background: var(--bg); }
+.view .pane-h { justify-content: space-between; }
+.view-body { padding: 22px 26px 26px; display: grid; gap: 14px; }
+.cover { height: 54px; border-radius: 8px; background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 40%, var(--bg2)), var(--bg2) 70%); }
+.view-title { font-family: var(--f-display); font-weight: 700; font-size: 1.45rem; display: flex; gap: 10px; align-items: center; }
+.fm { background: var(--fm-bg); border-radius: 8px; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--t-sm); }
+.fm b { color: var(--meta); font-weight: 600; font-family: var(--f-mono); font-size: .78rem; margin-right: 4px; }
+.chip { display: inline-block; font-size: .74rem; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+.chip.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.chip.warn { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.tag { background: var(--tag-bg); color: var(--tag-fg); border-radius: 4px; padding: 0 5px; font-size: .9em; }
+.wl { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.view h3 { font-size: 1.05rem; }
+.task { display: flex; gap: 8px; align-items: baseline; font-size: .95rem; }
+.box { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 3px; flex: none; transform: translateY(2px); }
+.box.on { background: var(--accent); border-color: var(--accent); }
+.task.done span { color: var(--ink3); text-decoration: line-through; }
+.related { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 6px; font-size: var(--t-sm); }
+.related .lbl { font-size: var(--t-xs); color: var(--ink2); letter-spacing: .08em; text-transform: uppercase; }
+.related a { text-decoration: none; display: flex; justify-content: space-between; gap: 12px; color: var(--ink); }
+.related a span:last-child { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--ink3); }
+.caption { font-size: var(--t-sm); color: var(--ink2); text-align: center; }
+@media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+
+/* sections */
+section.block { padding-block: 72px; border-top: 1px solid var(--line); }
+.sec-head { display: grid; gap: 10px; margin-bottom: 36px; max-width: 44rem; }
+.sec-head h2 { font-size: var(--t-xl); font-weight: 700; }
+.sec-head p { color: var(--ink2); }
+
+/* features */
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--line); }
+.feat { padding: 24px 24px 28px 0; border-bottom: 1px solid var(--line); display: grid; gap: 10px; align-content: start; }
+.feat + .feat { padding-left: 24px; }
+.features .feat:nth-child(3n+1) { padding-left: 0; }
+.features .feat:not(:nth-child(3n)) { border-right: 1px solid var(--line); }
+.feat .verb { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--accent); letter-spacing: .1em; text-transform: uppercase; }
+.feat h3 { font-size: 1.12rem; font-weight: 700; }
+.feat p { color: var(--ink2); font-size: .95rem; }
+.feat .keys { display: flex; flex-wrap: wrap; gap: 6px; font-size: var(--t-sm); }
+@media (max-width: 880px) {
+  .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .features .feat { padding: 22px 20px 24px 0 !important; border-right: none !important; }
+  .features .feat:nth-child(2n) { padding-left: 20px !important; border-left: 1px solid var(--line); }
+}
+@media (max-width: 560px) {
+  .features { grid-template-columns: 1fr; }
+  .features .feat:nth-child(2n) { padding-left: 0 !important; border-left: none; }
+}
+
+/* principles */
+.princ { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.princ div { display: grid; gap: 8px; align-content: start; }
+.princ h3 { font-size: 1.05rem; }
+.princ p { color: var(--ink2); font-size: .95rem; }
+@media (max-width: 760px) { .princ { grid-template-columns: 1fr; } }
+
+/* install */
+.steps { display: grid; gap: 28px; counter-reset: s; }
+.step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; }
+.step::before { counter-increment: s; content: counter(s); width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); display: grid; place-items: center; font-family: var(--f-mono); font-weight: 600; font-size: .95rem; }
+.step-body { display: grid; gap: 10px; min-width: 0; }
+.step-body h3 { font-size: 1.08rem; padding-top: 4px; }
+.step-body p, .step-body li { color: var(--ink2); font-size: .95rem; }
+.step-body ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.term { position: relative; background: var(--code-bg); color: var(--code-fg); border-radius: 10px; min-width: 0; }
+.term pre { margin: 0; padding: 14px 92px 14px 16px; overflow-x: auto; font-family: var(--f-mono); font-size: .84rem; line-height: 1.7; }
+.term .p { color: var(--code-dim); user-select: none; }
+.term .c { color: var(--code-dim); }
+.copy { position: absolute; top: 8px; right: 8px; height: 30px; padding-inline: 10px; border-radius: 6px; font-size: var(--t-xs); font-family: var(--f-body); background: color-mix(in srgb, var(--code-fg) 10%, transparent); color: var(--code-fg); border: 1px solid color-mix(in srgb, var(--code-fg) 18%, transparent); cursor: pointer; }
+.copy:hover { background: color-mix(in srgb, var(--code-fg) 18%, transparent); }
+.note { font-size: var(--t-sm); color: var(--ink2); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+.note strong { color: var(--ink); }
+
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+th { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--ink2); background: var(--panel); font-weight: 600; }
+td code { white-space: nowrap; font-size: .85rem; }
+
+.sub-h { font-family: var(--f-display); font-size: 1.15rem; margin: 48px 0 16px; }
+
+/* releases */
+.rel { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 32px; }
+.rel-meta { display: grid; gap: 6px; align-content: start; position: sticky; top: 72px; }
+.rel-tag { font-family: var(--f-mono); font-size: 1.6rem; font-weight: 600; }
+.rel-date { font-family: var(--f-mono); color: var(--ink2); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.latest { justify-self: start; }
+.rel-body { display: grid; gap: 18px; min-width: 0; }
+.rel-body > p { color: var(--ink2); }
+.rel-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.rel-list li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; font-size: .95rem; }
+.rel-list li b { font-family: var(--f-mono); font-size: var(--t-xs); color: var(--accent); font-weight: 600; padding-top: 3px; text-transform: uppercase; letter-spacing: .06em; }
+.log { border-left: 2px solid var(--line); margin-left: 6px; display: grid; gap: 22px; padding-left: 22px; }
+.day { display: grid; gap: 8px; position: relative; }
+.day::before { content: ""; position: absolute; left: -29px; top: 7px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+.day h4 { margin: 0; font-family: var(--f-mono); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.day h4 span { color: var(--ink2); font-weight: 400; margin-left: 8px; }
+.day ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.day li { font-size: .9rem; color: var(--ink2); display: grid; grid-template-columns: 9ch minmax(0, 1fr); gap: 10px; }
+.day li code { color: var(--ink3); font-size: .78rem; padding-top: 2px; }
+.day li.tagged { color: var(--ink); }
+details.more summary { cursor: pointer; color: var(--accent); font-size: var(--t-sm); margin-top: 4px; }
+details.more[open] summary { margin-bottom: 10px; }
+@media (max-width: 760px) { .rel { grid-template-columns: 1fr; gap: 16px; } .rel-meta { position: static; } .rel-list li { grid-template-columns: 1fr; gap: 2px; } }
+@media (max-width: 480px) { .day li { grid-template-columns: 1fr; gap: 0; } }
+
+/* footer */
+footer { border-top: 1px solid var(--line); padding-block: 40px 56px; color: var(--ink2); font-size: var(--t-sm); }
+footer .wrap { display: grid; gap: 10px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .split { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes rise { from { transform: translateY(10px); } to { transform: none; } }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="bullet" aria-hidden="true"></span>BlackBullet</a>
+    <span class="ver">v1.0.0</span>
+    <nav aria-label="ページ内">
+      <a class="opt" href="#features">機能</a>
+      <a href="#install">インストール</a>
+      <a href="#releases">リリース</a>
+      <a class="opt" href="https://github.com/HayatoShimada/blackbullet">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Local-first · AI-native · Markdown</span>
+        <h1>ローカルで動く、Markdown のノートアプリ</h1>
+        <p class="lede">ノートは自分のフォルダの <code>.md</code> ファイルとして保存されます。意味検索、データベース表示、MCP による AI 連携つき。</p>
+        <div class="cta">
+          <a class="btn primary" href="#install">インストールする</a>
+          <a class="btn ghost" href="https://github.com/HayatoShimada/blackbullet">GitHub で見る</a>
+        </div>
+      </div>
+
+      <figure style="margin:0; display:grid; gap:12px;">
+        <div class="split">
+          <div class="raw">
+            <div class="pane-h"><span class="dot"></span>space/Projects/Website.md</div>
+<pre><span class="d">---</span>
+<span class="k">status</span>: active
+<span class="k">due</span>: 2026-10-20
+<span class="k">icon</span>: 🛠
+<span class="d">---</span>
+<span class="h"># Website renewal</span>
+
+Kickoff notes are in [[Journal/2026-10-01]].
+Owner: me #work
+
+<span class="h">## Tasks</span>
+* [x] Pick a theme
+* [ ] Write the about page [due: 2026-10-12]
+* [ ] Move old posts</pre>
+          </div>
+          <div class="view">
+            <div class="pane-h"><span>Projects / Website</span><span><kbd>Ctrl-q r</kbd></span></div>
+            <div class="view-body">
+              <div class="cover" aria-hidden="true"></div>
+              <div class="view-title"><span aria-hidden="true">🛠</span>Website renewal</div>
+              <div class="fm"><span><b>status</b><span class="chip ok">active</span></span><span><b>due</b><span class="mono" style="font-size:.85rem">2026-10-20</span></span></div>
+              <p style="font-size:.95rem">Kickoff notes are in <span class="wl">Journal/2026-10-01</span>.<br>Owner: me <span class="tag">#work</span></p>
+              <h3>Tasks</h3>
+              <div style="display:grid; gap:6px;">
+                <div class="task done"><span class="box on" aria-hidden="true"></span><span>Pick a theme</span></div>
+                <div class="task"><span class="box" aria-hidden="true"></span><span>Write the about page <span class="chip warn">10-12</span></span></div>
+                <div class="task"><span class="box" aria-hidden="true"></span><span>Move old posts</span></div>
+              </div>
+              <div class="related">
+                <span class="lbl">Related</span>
+                <a href="#features"><span>Projects / Blog migration</span><span>meaning · 0.82</span></a>
+                <a href="#features"><span>Journal / 2026-10-01</span><span>link</span></a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="caption">左: ファイル / 右: アプリでの表示</figcaption>
+      </figure>
+    </section>
+  </div>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Features</span>
+        <h2>機能</h2>
+        <p>ショートカットはコマンドパレット <kbd>Ctrl-/</kbd> からいつでも確認できます。</p>
+      </div>
+      <div class="features">
+        <div class="feat">
+          <span class="verb">Write</span>
+          <h3>ブロックエディタ</h3>
+          <p>ドラッグハンドルと折りたたみつきのブロック編集、ドラッグ&ドロップで並べ替えるページツリー、カバー画像とアイコン。すべての変更は Undo できます。</p>
+          <div class="keys"><span><kbd>Ctrl-q q</kbd> クイックノート</span><span><kbd>Ctrl-q j</kbd> 日誌</span></div>
+        </div>
+        <div class="feat">
+          <span class="verb">Find</span>
+          <h3>言葉と意味で探す</h3>
+          <p>全ノートの見出し単位で、文字一致とローカル埋め込みモデルによる意味検索を一度に。開いているページの関連ノートと、リンクと類似度のグラフも。</p>
+          <div class="keys"><span><kbd>Ctrl-q s</kbd> 検索</span><span><kbd>Ctrl-q r</kbd> 関連</span><span><kbd>Ctrl-Shift-g</kbd> グラフ</span></div>
+        </div>
+        <div class="feat">
+          <span class="verb">Organise</span>
+          <h3>データベース</h3>
+          <p>型つきプロパティ・フォルダ・テンプレートを一度宣言すれば、表・ボード・カレンダーで表示してその場で編集。復元できるゴミ箱つき。</p>
+          <div class="keys"><span><kbd>Ctrl-Alt-n</kbd> New</span></div>
+        </div>
+        <div class="feat">
+          <span class="verb">Ask</span>
+          <h3>ノートに質問する</h3>
+          <p>自分のノートから引用つきで回答。追加質問や、回答をページとして保存することもできます。Anthropic の API キーが必要です。</p>
+          <div class="keys"><span><kbd>Ctrl-q a</kbd> Ask</span></div>
+        </div>
+        <div class="feat">
+          <span class="verb">Documents</span>
+          <h3>PDF や Office も検索対象</h3>
+          <p>フォルダに置いた PDF、Word、Excel、PowerPoint、OpenDocument、HTML も検索できます。OCR はオプションです。</p>
+        </div>
+        <div class="feat">
+          <span class="verb">MCP</span>
+          <h3>AI アシスタントと共有</h3>
+          <p>同じノートを Claude Code や Claude Desktop などの MCP クライアントから検索・追記できます。トークンや鍵を置く CONFIG は読めません。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Principles</span>
+        <h2>データの扱い</h2>
+      </div>
+      <div class="princ">
+        <div><h3>ファイルが唯一の正本</h3><p>ノートはフォルダの中の Markdown です。検索インデックスや埋め込みは消しても作り直せます。既存のノートフォルダをそのまま使えます。</p></div>
+        <div><h3>手元で動く</h3><p>アプリも検索も自分のマシンで動きます。ノート本文が外に出るのは、自分で Ask を実行したときだけ。<code>:confidential</code> を付けたスペースは許可しない限り送りません。</p></div>
+        <div><h3>スマホからも</h3><p>スマホ幅のレイアウトに対応。オプションの Tailscale 専用 HTTPS 入口を使えば、許可したログインだけがパスワード画面なしで開けます。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="install">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Install</span>
+        <h2>インストール</h2>
+        <p>必要なのは Docker と Compose v2 だけです。Rust や Node をホストに入れる必要はありません。</p>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-body">
+            <h3>取得してセットアップを実行</h3>
+            <div class="term"><button class="copy" type="button" data-copy="git clone https://github.com/HayatoShimada/blackbullet.git
+cd blackbullet
+./setup.sh">コピー</button><pre><span class="p">$ </span>git clone https://github.com/HayatoShimada/blackbullet.git
+<span class="p">$ </span>cd blackbullet
+<span class="p">$ </span>./setup.sh</pre></div>
+            <p>初回はイメージのビルドに 10〜20 分かかります(Raspberry Pi クラスのマシンの目安)。2 回目以降は起動するだけです。</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-body">
+            <h3>ブラウザで開く</h3>
+            <div class="term"><button class="copy" type="button" data-copy="http://127.0.0.1:3000">コピー</button><pre>http://127.0.0.1:3000</pre></div>
+            <ul>
+              <li>ノートは <code>./space</code> に保存されます。既存の Markdown フォルダを使うなら、<code>setup.sh</code> の前に <code>.env</code> へ <code>SPACE_DIR=/path/to/notes</code> を書きます。</li>
+              <li>検索サイドカーも同時に起動・接続されます。最初の索引作成で約 120 MB の埋め込みモデルを一度だけ取得し、CPU で動かします。</li>
+              <li>ダウンロードしたくない場合は <code>.env</code> に <code>MEMO_EMBED=off</code>。検索は文字一致のみになります。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-body">
+            <h3>AI アシスタントをつなぐ(任意)</h3>
+            <p>サイドカーは <code>http://127.0.0.1:3010/mcp</code> で MCP を話します。<code>setup.sh</code> がトークン入りのコマンドを表示するので、それを実行するだけです。</p>
+            <div class="term"><button class="copy" type="button" data-copy='claude mcp add --scope user --transport http memo http://127.0.0.1:3010/mcp \
+  --header "Authorization: Bearer <MEMO_MCP_TOKEN>"'>コピー</button><pre><span class="p">$ </span>claude mcp add --scope user --transport http memo http://127.0.0.1:3010/mcp \
+    --header "Authorization: Bearer &lt;MEMO_MCP_TOKEN&gt;"</pre></div>
+            <p>使えるツール: <code>search_notes</code> <code>read_note</code> <code>read_section</code> <code>related_notes</code> <code>list_tasks</code> <code>list_projects</code> <code>list_journal</code> <code>recent_changes</code> <code>append_journal</code> <code>add_inbox</code> <code>complete_task</code> <code>doc_status</code> <code>reindex_docs</code></p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-body">
+            <h3>Ask を使う(任意)</h3>
+            <p>コマンドパレットで <code>Ask: Set up</code> を一度実行し、Anthropic の API キーをスペースの CONFIG に保存します。以後 <kbd>Ctrl-q a</kbd> で質問できます。<code>#tag</code>、<code>in:Folder/</code>、<code>kind:pdf</code>、<code>since:2026-01-01</code> で範囲を絞れます。</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="sub-h">日々の運用</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>コマンド</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td><code>./setup.sh --status</code></td><td>アプリとサイドカーの状態、索引とモデルの状況、ディスク使用量</td></tr>
+            <tr><td><code>./setup.sh --backup [dir] [--with-secrets]</code></td><td>ノートの <code>.tar.gz</code> を日時つきで作成(<code>--with-secrets</code> がなければ秘密情報は空にする)</td></tr>
+            <tr><td><code>./setup.sh --restore &lt;file&gt;</code></td><td>安全のためのコピーを取ってから、バックアップをノートフォルダに統合</td></tr>
+            <tr><td><code>./setup.sh --upgrade</code></td><td><code>git pull</code> してビルドし直し、再起動</td></tr>
+            <tr><td><code>./setup.sh --tailnet</code></td><td>Tailscale ネットワーク内だけから届く HTTPS の入口を追加</td></tr>
+            <tr><td><code>./setup.sh --stop</code></td><td>すべて停止。ノートはそのまま残ります</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" style="margin-top:16px"><strong>設定はすべて <code>.env</code></strong> にあり、各項目の説明は <code>.env.example</code> にあります。アプリ内の使い方はヘッダーの <strong>?</strong> ボタン(日本語ガイド)から。</p>
+    </div>
+  </section>
+
+  <section class="block" id="releases">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Releases</span>
+        <h2>リリース履歴</h2>
+        <p>タグとコミット履歴は <a href="https://github.com/HayatoShimada/blackbullet/releases">GitHub Releases</a> にあります。</p>
+      </div>
+
+      <div class="rel">
+        <div class="rel-meta">
+          <span class="rel-tag">v1.0.0</span>
+          <span class="rel-date">2026-10-03</span>
+          <span class="chip ok latest">Latest</span>
+        </div>
+        <div class="rel-body">
+          <p>BlackBullet 最初の本番リリース。SilverBullet 2.11 からフォークした、個人用・ローカルファースト・AI ネイティブのノートアプリです。</p>
+          <ul class="rel-list">
+            <li><b>Setup</b><span><code>./setup.sh</code> 一発で検索 / MCP サイドカーごと起動。<code>--status</code>・<code>--backup</code>・<code>--restore</code>・<code>--upgrade</code>。</span></li>
+            <li><b>Database</b><span><code>database.define</code> によるデータベース。表・ボード・カレンダー表示、+ New、フィルタ、保存ビュー、行メニュー、復元できるゴミ箱。</span></li>
+            <li><b>Search</b><span>言葉と意味による検索、関連ノート、類似ページのグラフ、引用つきで答える Ask。</span></li>
+            <li><b>Docs</b><span>PDF / Office / OpenDocument / HTML 文書も検索対象に。</span></li>
+            <li><b>MCP</b><span>AI アシスタント向け MCP サーバー。tailnet 専用 HTTPS 入口からも利用可能。</span></li>
+            <li><b>Design</b><span>インターフェースを再設計。統一された用語、ひとつの New、すべての変更に Undo、一貫したキーボード操作、ライト / ダーク、スマホレイアウト。</span></li>
+            <li><b>License</b><span>GPL-2.0-only。SilverBullet の MIT 表記は NOTICE.md に収録。</span></li>
+          </ul>
+
+          <details class="more">
+            <summary>v1.0.0 までの開発の流れ(31 コミット)</summary>
+            <div class="log">
+              <div class="day">
+                <h4>2026-10-03<span>デザインと仕上げ</span></h4>
+                <ul>
+                  <li class="tagged"><code>5e7b7a4</code><span>License: carry the MIT notice in NOTICE.md, declare GPL-2.0-only, new README</span></li>
+                  <li><code>517a82f</code><span>Phones: no shortcut hint, compact frontmatter band, unbroken attributes, quiet + New</span></li>
+                  <li><code>415f0f7</code><span>Phones: smaller reading scale, tighter gutters, widget ⋯ off the text</span></li>
+                  <li><code>b0e3083</code><span>Search, Ask, Related, page header, block editor: product vocabulary and keys</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">…</span><span>Graph: themed canvas, legend, phone bottom sheet · db-view: undoable actions, click-to-edit, touch · Navigator: unified New, trash with restore · Theme tokens, top bar, dialogs · Design system, demo space, screenshot tooling</span></li>
+                </ul>
+              </div>
+              <div class="day">
+                <h4>2026-10-02<span>機能と運用</span></h4>
+                <ul>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">ops</span><span>backup / restore / status / upgrade、tailnet 入口経由の MCP</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">memo</span><span>Ask(引用つき回答)、保存回答・スコープ・追加質問、文書検索</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">db</span><span>database.define と「+ New」、行操作・ゴミ箱・保存ビュー・フィルタ</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">mcp</span><span>PDF / Office の索引化、OCR、埋め込みモデル取得失敗時も動き続ける</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">start</span><span>compose.yaml・setup.sh・.env.example による一発起動</span></li>
+                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">init</span><span>tailnet 専用の入口(Tailscale + Caddy + whois 認証)、BlackBullet 本体、memo-mcp を追加</span></li>
+                </ul>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>BlackBullet は <a href="https://github.com/silverbulletmd/silverbullet">SilverBullet</a> のフォークで、同プロジェクトとは関係ありません。SilverBullet のプラグやライブラリはそのまま動きます。</p>
+    <p>GPL-2.0-only · Copyright (C) 2026 HayatoShimada · <a href="https://github.com/HayatoShimada/blackbullet">github.com/HayatoShimada/blackbullet</a></p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll(".copy").forEach((b) => {
+  b.addEventListener("click", () => {
+    const text = b.dataset.copy;
+    const done = (ok) => { b.textContent = ok ? "コピーしました" : "選択しました"; setTimeout(() => (b.textContent = "コピー"), 1600); };
+    const select = () => { const r = document.createRange(); r.selectNodeContents(b.nextElementSibling); const s = getSelection(); s.removeAllRanges(); s.addRange(r); done(false); };
+    try { navigator.clipboard.writeText(text).then(() => done(true), select); } catch { select(); }
+  });
+});
+</script>
+</body>
+</html>
