@@ -35,10 +35,7 @@ body { margin: 0; }
 // Container: the layout answers to the width of the view, not of the screen.
 .db-app {
   container-type: inline-size;
-  // The widget frame pulls the iframe 2ch under its own bottom edge
-  // (`margin-bottom: -2ch`), so the last pixels are never seen: leave them
-  // empty rather than clip the last row.
-  padding: 0 12px 24px;
+  padding: 0 12px 12px;
 }
 
 // The host's Reload/Edit bar is hidden for this widget (it carries the

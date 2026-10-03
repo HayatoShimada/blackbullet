@@ -1180,6 +1180,11 @@ $comment-border: 1px;
     .sb-db-widget iframe {
       border: 0;
       border-radius: 0;
+      // The -2ch pull above made the frame's scrolling .content 2ch taller
+      // than itself, so every view showed a scrollbar whatever its height.
+      // The view sizes the frame exactly; no pull, no inline baseline gap.
+      display: block;
+      margin: 0;
     }
   }
 
