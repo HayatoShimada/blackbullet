@@ -8,7 +8,7 @@ default-members = ["bin/silverbullet"]
 
 [workspace.package]
 edition = "2021"
-license = "MIT"
+license = "GPL-2.0-only"
 
 # Lint policy shared by every crate (each member opts in with
 # `[lints] workspace = true`). Configured here so the whole workspace lints

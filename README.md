@@ -1,12 +1,22 @@
 # BlackBullet
 
-A personal, local-first, AI-native notes app. Your notes are plain Markdown files in a folder you own; on top of them you get a Notion-like editor (page tree, blocks, database views), search that understands meaning as well as words, a graph of related notes, and an MCP server so AI assistants can read and write the same notes. Everything runs on your machine; no note text leaves it unless you decide so.
+A personal, local-first, AI-native notes app. Your notes stay plain Markdown files in a folder you own. On top of them you get a Notion-like editor, search that understands meaning as well as words, a graph of related notes, database views, and an MCP server so AI assistants can read and write the same notes. Everything runs on your own machine; note text leaves it only when you ask a question with **Ask**.
 
-BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silverbullet) (v2.11 line; Rust server + TypeScript / CodeMirror 6 client). It is **not affiliated with** the SilverBullet project. It keeps SilverBullet's internal names (crates, `SB_*` environment variables, plug API) so that SilverBullet plugs and libraries keep working and upstream changes stay mergeable. The upstream README is in [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) and its manual is in `docs/`.
+BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silverbullet) (v2.11 line; Rust server, TypeScript / CodeMirror 6 client) and is not affiliated with that project. It keeps SilverBullet's internal names (crates, `SB_*` environment variables, plug API), so SilverBullet plugs and libraries keep working. Upstream's manual is in [`docs/`](docs/).
+
+## Features
+
+- **Write**: block editor with drag handles and folding, page tree with drag-and-drop, page cover and icon, quick notes (`Ctrl-q q`) and a daily journal (`Ctrl-q j`).
+- **Find**: one search over every section by words and meaning (`Ctrl-q s`), related notes for the page you are on (`Ctrl-q r`), and a graph of links and similar pages (`Ctrl-Shift-g`).
+- **Organise**: databases declared once (typed properties, folder, template) and shown as table, board or calendar views you edit in place; one **New** for pages, rows, quick notes and journal entries (`Ctrl-Alt-n`); a trash you can restore from.
+- **Ask**: answers from your own notes with citations, follow-up questions, and answers saved as pages (`Ctrl-q a`, needs an Anthropic API key).
+- **Documents**: PDF, Word, Excel, PowerPoint, OpenDocument and HTML files in the folder are searchable too, with optional OCR.
+- **AI assistants**: an MCP server over the same notes for Claude Code, Claude Desktop and other MCP clients.
+- **Phone and other devices**: works at phone width, and an optional tailnet-only HTTPS front door (Tailscale) with no password screen.
 
 ## Quick start
 
-You need Docker (with Compose v2). Nothing else is installed on your machine.
+You need Docker with Compose v2.
 
 ```bash
 git clone https://github.com/HayatoShimada/blackbullet.git
@@ -14,104 +24,80 @@ cd blackbullet
 ./setup.sh
 ```
 
-The first run builds the images (10–20 minutes; afterwards `./setup.sh` just starts things). When it finishes, open **http://127.0.0.1:3000**.
+The first run builds the images (10 to 20 minutes); later runs just start them. Then open **http://127.0.0.1:3000**.
 
-- Your notes live in `./space` (plain Markdown). To use an existing folder, set `SPACE_DIR=/path/to/notes` in `.env` before running `setup.sh`.
-- Search, related notes and the graph's "similar" links are served by the `memo-mcp` sidecar that `setup.sh` starts and wires up for you (it writes the connection into your space's `CONFIG` page). `setup.sh` starts indexing in the background, which downloads a ~120 MB embedding model once and runs it on the CPU (progress: `./setup.sh --status`). Set `MEMO_EMBED=off` in `.env` for word-based search only, with no download.
-- `./setup.sh --stop` stops everything; `./setup.sh --rebuild` rebuilds after a `git pull`. All settings are in `.env` (`.env.example` explains each one).
-
-### Look after it
+- Your notes live in `./space`. To use an existing folder of Markdown files, set `SPACE_DIR=/path/to/notes` in `.env` before running `setup.sh`.
+- `setup.sh` also starts the search sidecar and connects it. The first indexing downloads a ~120 MB embedding model once and runs it on the CPU. `MEMO_EMBED=off` in `.env` keeps search word-based with no download.
+- All settings are in `.env`; [`.env.example`](.env.example) explains each one.
 
 | Command | What it does |
 | --- | --- |
-| `./setup.sh --status` | Shows the containers, the app, the sidecar's health, whether the token works (a lexical search probe), the page count, whether the embedding model is present, and disk use. Exits 1 if the app or sidecar is down. |
-| `./setup.sh --backup [dir] [--with-secrets]` | Writes `<dir>/blackbullet-notes-<timestamp>.tar.gz` (default `./backups`, mode 0600). `CONFIG.md` is included with its token/key/secret/password values blanked; `--with-secrets` stores it as is, plus `.silverbullet.auth.json` and `.env`. The search index is not backed up (it is rebuilt). The tailnet `ts-state` and `caddy-data` volumes are not backed up either. |
-| `./setup.sh --restore <file>` | Checks the archive (no absolute or `..` paths or links), saves the current notes as `<space>.pre-restore-<timestamp>.tar.gz`, then merges the archive over the notes folder; nothing is deleted. An existing `CONFIG.md` is kept. An archived `.env` is written to `.env.from-backup` for you to merge by hand. |
-| `./setup.sh --upgrade` | `git pull --ff-only`, shows the old to new commit, then rebuilds and restarts like `--rebuild`; when there is nothing new it only starts the containers. |
+| `./setup.sh --status` | Health of the app and the sidecar, index and model state, disk use |
+| `./setup.sh --backup [dir] [--with-secrets]` | A timestamped `.tar.gz` of the notes (secrets blanked unless `--with-secrets`) |
+| `./setup.sh --restore <file>` | Merges a backup into the notes folder after saving a safety copy |
+| `./setup.sh --upgrade` | `git pull`, rebuild and restart |
+| `./setup.sh --stop` | Stops everything; the notes stay where they are |
 
-Starting runs (`./setup.sh`, `--tailnet`, `--rebuild`, `--upgrade`) also keep the `memoSidecar` block in `CONFIG.md` in step with `.env` (port, token, space name), unless its url points at another host. Indexing runs in the background; `--status` shows how it is going. The backup and status code is tested with `bash scripts/ops.test.sh`.
+## Use it from an AI assistant
 
-### Use it from an AI assistant
-
-`setup.sh` prints a ready-made command. In short, the sidecar speaks [MCP](https://modelcontextprotocol.io) at `http://127.0.0.1:3010/mcp`, protected by the bearer token in `.env` (`MEMO_MCP_TOKEN`):
+The sidecar speaks [MCP](https://modelcontextprotocol.io) at `http://127.0.0.1:3010/mcp`, protected by `MEMO_MCP_TOKEN` from `.env` (`setup.sh` prints this command with the token filled in):
 
 ```bash
-claude mcp add --transport http memo http://127.0.0.1:3010/mcp \
+claude mcp add --scope user --transport http memo http://127.0.0.1:3010/mcp \
   --header "Authorization: Bearer <MEMO_MCP_TOKEN>"
 ```
 
-Any MCP client works the same way (Claude Desktop, Cursor, …; JSON examples in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md)). Tools include `search_notes`, `read_note`, `related_notes`, `list_tasks`, `list_journal`, `append_journal` and `add_inbox`. Further tools: `read_section`, `recent_changes`, `list_projects`, `list_spaces`, `complete_task`, `doc_status` (per-document extraction status) and `reindex_docs`. `add_inbox` creates a page `Inbox/<date>/<time>` (or appends to `Inbox.md` with `mode: "append"`); set `MEMO_TZ` on the sidecar for the time zone (add `MEMO_TZ=${MEMO_TZ:-}` to the memo-mcp environment in `compose.yaml`; it stays UTC otherwise). Writes to a page are serialised per file.
+Tools include `search_notes`, `read_note`, `read_section`, `related_notes`, `list_tasks`, `list_projects`, `list_journal`, `recent_changes`, `append_journal`, `add_inbox`, `complete_task`, `doc_status` and `reindex_docs`. `CONFIG` (where tokens and keys live) is never readable through MCP. Other clients and the options are described in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md).
 
-The sidecar listens on localhost only. With `./setup.sh --tailnet`, the same front door also serves it, so a remote machine on your tailnet can run:
+## Ask your notes
 
-```bash
-claude mcp add --transport http memo https://<SITE_DOMAIN>/mcp \
-  --header "Authorization: Bearer <MEMO_MCP_TOKEN>"
+`Ask: Notes` sends the sections that match your question to the Anthropic API and shows the answer with `[n]` links back to each section. Run `Ask: Set up` once to store an API key in the space's `CONFIG` page. Nothing is sent unless you run the command, and a space marked `:confidential` is never sent unless you allow it. Scopes (`#tag`, `in:Folder/`, `kind:pdf`, `since:2026-01-01`), follow-ups, saved answers and limits are described in [`Memo Ask.md`](libraries/Library/Std/Editor/Memo%20Ask.md).
+
+## Databases
+
+Declare a database once in `CONFIG`:
+
+```lua
+database.define {
+  name = "projects",
+  folder = "Projects/",
+  template = "Templates/Project",
+  properties = {
+    { key = "status", type = "select", options = {"active", "someday", "done"}, default = "active" },
+    { key = "due", type = "date" },
+  },
+}
 ```
 
-Caddy sends `/mcp` and `/api/*` to the sidecar after the Tailscale login check, and the sidecar still requires its bearer token. Hosted connectors (such as claude.ai) cannot reach a tailnet-only name. A page named `mcp`, or any page under `api/`, is not reachable through the front door. Details in [`deploy/tailnet-proxy/README.md`](deploy/tailnet-proxy/README.md).
+Then a ```` ```db ```` block with `database: projects` shows it as a table, board or calendar with **+ New**, filters, a row menu (rename, duplicate, archive, move to trash) and **Save view**. `Database: Insert View` (or `/database`) writes the block for you. See [`DB View.md`](libraries/Library/Std/Editor/DB%20View.md) and [`Database.md`](libraries/Library/Std/APIs/Database.md).
 
-### Document search
+## Phone and other devices
 
-Besides Markdown, the sidecar indexes PDF, docx, xlsx, pptx, OpenDocument (odt/ods/odp), HTML and plain text/csv files in the notes folder. Hits show where they are (`[PDF p.3]`, `[PPTX slide.2]`); spreadsheets are indexed row by row with their header, pptx speaker notes and docx headings/footnotes/comments are included, and extraction results are cached across restarts. Scanned PDFs and images can be read by OCR, which is opt-in: add `MEMO_OCR: "on"` to the memo-mcp service environment and `build: {args: {WITH_OCR: "1"}}` in `compose.yaml`. Legacy `.doc` / `.xls` / `.ppt` are reported as unsupported. The `doc_status` tool lists what could not be read and why; `reindex_docs` re-extracts. Narrow a search with `kind:pdf` (or `kind:doc`) and `in:Folder/` at the start of the query. Settings are in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md).
+The layout adapts to phones: 44 px touch targets, cards instead of wide tables, and a drawer with Search, New and Journal.
 
-### Ask your notes
+`./setup.sh --tailnet` adds a front door reachable only from your [Tailscale](https://tailscale.com) network and only by the logins you allow, with a real domain and certificate and no password screen. The same address serves the MCP endpoint (`https://<SITE_DOMAIN>/mcp`) to other machines on the tailnet. Setup steps are in [`deploy/tailnet-proxy/README.md`](deploy/tailnet-proxy/README.md).
 
-`Ask: Notes` answers a question from your notes with citations: the sidecar picks the matching sections, the Anthropic API writes the answer, and each `[n]` links back to the section. It needs an API key in the space's `CONFIG` page, `config.set("memoAsk", {apiKey = "sk-ant-…"})` (optionally `model`, default `claude-opus-5-5`). Only the sections that match that one question are sent, only when you run the command, and not from a space marked `:confidential` in `MEMO_SPACES` unless you set `memoAsk.allowConfidential = true`. With the bundled `compose.yaml` the space is not confidential; to mark it, change `MEMO_SPACES` there to `${MEMO_SPACE_NAME:-notes}=/data:confidential`. The browser sends the key to your SilverBullet server, which forwards it; it never goes to the sidecar and is never indexed. Run `Ask: Set up` to enter the key and model once (it writes a block into `CONFIG`).
+## Help
 
-You can narrow a question with leading words: `#tag`, `folder:Dir/` (or `in:Dir/`), `kind:pdf`, `area:`, `status:`, `since:2026-01-01`; `memoAsk.defaultScope` sets them for every question. `Ask: Follow-up` continues the conversation. Each follow-up makes two API calls: a short one that rewrites it into a search query (it sends the last question and the start of the last answer), then the answer call (earlier questions and answers without their notes, plus the sections that match the new question), `Ask: New Conversation` starts over. `Ask: Save Answer` writes the answer to a page `Ask/<date> <question>` with its sources, and `Ask: History` reopens recent answers of the session. The answer lists the sources cited and those sent but not cited, and a size estimate; a prompt above `memoAsk.maxInputTokens` (default 50000) is refused. `memoAsk.instructions` adds your own guidance. Details in `libraries/Library/Std/Editor/Memo Ask.md`.
-
-### Databases
-
-A ```` ```db ```` block shows pages or tasks as a table, board or calendar and edits them in place. Beyond the basics:
-
-- Define a database in `CONFIG` with `database.define` (column types, defaults, folder, template); the view then has **+ New**, which expands the template (`${title}`, `${page}`, `${database}`). Board columns and calendar days have a `+` that creates a row with that column's value or date.
-- Filters go beyond equality: `where: {due: {before: today}, status: [{not: done}]}` (`not lt lte gt gte before after contains empty`). The header's **Save view** button (under **⋯**) writes the current tab, sort and filter back into the block.
-- Each page row has a `...` menu: rename (backlinks are updated), duplicate, archive/restore, and move to trash. Trash moves the page to `Trash/<name>` with `trashedFrom` and `trashedAt` in its frontmatter, and `Trash: Restore` brings it back. `created` and `modified` work as read-only columns and sort keys.
-- Writes are checked against the declared types and options. Dragging works with touch (press and hold), and the layout adapts to phones.
-- Commands: `Database: Insert View` (also `/database`), `Database: New Row`, `Database: Define in CONFIG`.
-
-See `libraries/Library/Std/Editor/DB View.md` and `libraries/Library/Std/APIs/Database.md`.
-
-### Reach it from your other devices (optional)
-
-`./setup.sh --tailnet` adds a tailnet-only HTTPS front door: a real domain and certificate, but only people on your [Tailscale](https://tailscale.com) network *and* on your allowlist can open it, and the app itself needs no login screen. Fill in the `TS_AUTHKEY` … `SITE_DOMAIN` keys in `.env` first; the Tailscale ACL, Cloudflare token and DNS steps are in [`deploy/tailnet-proxy/README.md`](deploy/tailnet-proxy/README.md).
-
-## What's inside
-
-| Part | Where |
-| --- | --- |
-| Page tree with drag-and-drop move, *Move to…*, undo, pinning | `client/navigator/ui/mediator/`, [`dev-docs/phase2-sidebar-design.md`](dev-docs/phase2-sidebar-design.md) |
-| Page header: cover + large icon | `libraries/Library/Std/Editor/Page Header.md` |
-| Block editor: drag handles, fold toggles, reorder blocks | `client/codemirror/block_editor/`, [`dev-docs/phase3-block-editor-design.md`](dev-docs/phase3-block-editor-design.md) |
-| Database views from a ```` ```db ```` block: table / board / calendar, with in-place edits | `plugs/db-view/`, [`dev-docs/phase4-db-views-design.md`](dev-docs/phase4-db-views-design.md) |
-| Search and related notes; a graph with similar-page edges, filters and hops | `libraries/Library/Std/Editor/Memo Search.md`, `plugs/object-graph/` |
-| Ask your notes: answers with citations, follow-ups, scope, saved answers | `libraries/Library/Std/Editor/Memo Ask.md` |
-| In-app guide (the **?** button; Japanese) | `libraries/Library/Std/Docs/Fork Guide.md` |
-| MCP server + REST sidecar: hybrid search (FTS5 trigram + local embeddings, RRF), related notes, graph, PDF/Office document search | [`packages/memo-mcp/`](packages/memo-mcp/) |
-| Tailnet-only HTTPS front door (Tailscale login, no password screen; also `/mcp`) | [`deploy/tailnet-proxy/`](deploy/tailnet-proxy/) |
-| Backup, restore, status, upgrade | `setup.sh`, `scripts/ops.sh` |
-
-Commands added by BlackBullet (open the command palette with `Ctrl-/` or `Cmd-/`): `Navigate: Tree`, `Tree: Undo Move`, `New` (`Ctrl-Alt-n` / `Cmd-Alt-n`: a page here, a row in a database, a quick note or today's journal), `Trash: Restore`, `Trash: Empty`, `Page: Set Icon`, `Page: Set Cover`, `Page: Remove Cover`, `Search: Notes` (`Ctrl-q s`; the command palette always shows the current shortcut), `Search: Related Notes` (`Ctrl-q r`), `Graph: Explore` (`Ctrl-Shift-g`), `Graph: Global Page Map`, `Ask: Notes` (`Ctrl-q a`), `Ask: Follow-up`, `Ask: New Conversation`, `Ask: Save Answer`, `Ask: History`, `Ask: Set up`, `Database: Insert View`, `Database: New Row`, `Database: Define in CONFIG`, `Help: Fork Guide`. Everything from SilverBullet (quick notes `Ctrl-q q`, journal `Ctrl-q j`, templates, Space Lua, …) is still there. Pressing `Esc` and then `Tab` leaves the editor, so the keyboard reaches the header and the panels.
-
-The app talks to the sidecar over its own `/.proxy/` route, configured in the space's `CONFIG` page with `config.set("memoSidecar", {url=…, token=…, space=…})` (`setup.sh` writes this). Without the sidecar, search and the semantic graph stay empty; the editor, tree, block editor and database views work on their own.
+The **?** button in the header opens the in-app guide (Japanese). The command palette (`Ctrl-/`) lists every command with its shortcut. `Esc` then `Tab` moves the keyboard from the editor to the header.
 
 ## Develop
 
-Without a local Rust toolchain or Node 24, use Docker (`docker compose build` for the release images, `scripts/fork-dev.sh` for a fast client-bundle loop). With them:
+Without a local Rust toolchain or Node 24, use Docker: `docker compose build` for release images, `scripts/fork-dev.sh` for a fast client loop, and `scripts/ui-tour.mjs` for a fixed set of screenshots on the demo space in [`examples/demo-space`](examples/demo-space). With the toolchains installed:
 
 ```bash
-npm run build:client                                  # client bundle
+npm run build:client
 SB_DISABLE_SERVICE_WORKER=1 cargo run -p silverbullet -- <space-dir>
-npm test                                              # vitest
-cd packages/memo-mcp && npm test                      # sidecar tests
+npm test
+cd packages/memo-mcp && npm test
 ```
 
-See `CONTRIBUTING.md`, `STYLE.md` and `docs/Development.md`.
+Design references: [`dev-docs/product-design.md`](dev-docs/product-design.md) (what the interface means), [`dev-docs/design-system.md`](dev-docs/design-system.md) (how it looks), and a Japanese summary in [`dev-docs/design.ja.md`](dev-docs/design.ja.md). See also [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`STYLE.md`](STYLE.md).
 
 ## License
-- Code from SilverBullet is under the **MIT license** (Copyright 2022, Zef Hemel): see [`LICENSE.md`](LICENSE.md). Unmodified upstream files stay MIT.
-- Additions and modifications by HayatoShimada are **GPL-2.0-only**: see [`LICENSE-GPL-2.0`](LICENSE-GPL-2.0) and [`NOTICE.md`](NOTICE.md).
-- As a whole, the combined work is distributed under the terms of the GPL-2.0, which MIT-licensed code is compatible with. Keep both notices when you redistribute.
 
-Copyright (C) 2026 HayatoShimada (additions and modifications).
+BlackBullet is licensed under the [GNU General Public License v2.0 only](LICENSE) (GPL-2.0-only).
+
+It is based on SilverBullet, which is MIT-licensed; the MIT license lets that code be redistributed under the GPL as long as its copyright and permission notice stay with it, which [`NOTICE.md`](NOTICE.md) reproduces.
+
+Copyright (C) 2026 HayatoShimada.

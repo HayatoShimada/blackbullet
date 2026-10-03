@@ -3,6 +3,7 @@
   "version": "2.11.1",
   "type": "module",
   "description": "A self-hosted, web-based note taking app",
+  "license": "GPL-2.0-only",
   "publishConfig": {
     "access": "public"
   },

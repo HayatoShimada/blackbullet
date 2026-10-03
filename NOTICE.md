@@ -1,17 +1,32 @@
 # Notice
 
-BlackBullet is a derivative of **SilverBullet**, Copyright 2022, Zef Hemel, MIT license (`LICENSE.md`). That notice must stay with every copy of the upstream code.
+BlackBullet is distributed under the **GNU General Public License, version 2 only** (GPL-2.0-only); the full text is in [`LICENSE`](LICENSE). Copyright (C) 2026 HayatoShimada (additions and modifications).
 
-Additions and modifications by HayatoShimada, Copyright (C) 2026, are licensed under **GPL-2.0-only** (`LICENSE-GPL-2.0`). They include, at least:
-
-- `plugs/db-view/`
-- `client/codemirror/block_editor/`
-- `client/navigator/ui/mediator/` and the drag/move changes around it
-- `plugs/object-graph/` (semantic edges, filters, hops, Mediator), `libraries/Library/Std/Editor/Memo Search.md` and `libraries/Library/Std/Editor/Memo Ask.md`
-- `libraries/Library/Std/Editor/Page Header.md`, `libraries/Library/Std/Editor/DB View.md`, `libraries/Library/Std/APIs/Database.md`, `libraries/Library/Std/Docs/Fork Guide.md`
-- `packages/memo-mcp/` (MCP server and REST sidecar; its dependencies keep their own licenses)
-- `scripts/ops.sh`, `scripts/ops.test.sh`, `deploy/`, `dev-docs/` (except where a file says otherwise), `scripts/fork-dev.sh`, `Dockerfile.fork*`
-
-Files marked with `SPDX-License-Identifier` carry their own license. Where a file is upstream's, modified, the upstream MIT terms still apply to the upstream part.
+BlackBullet is a derivative of **SilverBullet** (https://github.com/silverbulletmd/silverbullet), which was released under the MIT license. The MIT license allows the code to be redistributed under the GPL, provided its copyright and permission notice stay with it. That notice is reproduced below and applies to the parts of BlackBullet that come from SilverBullet.
 
 "SilverBullet" is the name of the upstream project. BlackBullet is not affiliated with it or endorsed by it.
+
+Third-party dependencies (npm packages, Rust crates, fonts) keep their own licenses.
+
+## SilverBullet license (MIT)
+
+```
+Copyright 2022, Zef Hemel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```

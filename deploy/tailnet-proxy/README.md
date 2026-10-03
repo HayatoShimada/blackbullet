@@ -62,4 +62,4 @@ cd auth && python3 -m unittest -v
 ```
 
 ## License
-Copyright (C) 2026 HayatoShimada. Licensed under GPL-2.0-only; see `LICENSE-GPL-2.0` at the repository root.
+Copyright (C) 2026 HayatoShimada. Licensed under GPL-2.0-only; see `LICENSE` at the repository root.
