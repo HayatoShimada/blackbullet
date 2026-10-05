@@ -196,6 +196,17 @@ td code { white-space: nowrap; font-size: .85rem; }
 .sub-h { font-family: var(--f-display); font-size: 1.15rem; margin: 48px 0 16px; }
 
 /* releases */
+.rel-stack { display: grid; gap: 56px; }
+.rel-tag { color: var(--ink); text-decoration: none; }
+.rel-tag:hover { color: var(--accent); }
+.rel-name { margin: 0; font-family: var(--f-display); font-size: 1.15rem; }
+.rel-notes { color: var(--ink2); display: grid; gap: 10px; }
+.rel-notes > * { margin: 0; }
+.rel-notes ul { padding-left: 1.2em; display: grid; gap: 6px; }
+.rel-notes code { font-family: var(--f-mono); font-size: .85em; }
+.rel-notes a { color: var(--accent); }
+.rel-source { margin-top: 32px; color: var(--ink2); font-size: var(--t-sm); }
+.rel-empty { color: var(--ink2); }
 .rel { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 32px; }
 .rel-meta { display: grid; gap: 6px; align-content: start; position: sticky; top: 72px; }
 .rel-tag { font-family: var(--f-mono); font-size: 1.6rem; font-weight: 600; }
@@ -235,7 +246,7 @@ footer .wrap { display: grid; gap: 10px; }
 <header class="top">
   <div class="wrap">
     <a class="brand" href="#top"><span class="bullet" aria-hidden="true"></span>BlackBullet</a>
-    <span class="ver">v1.0.0</span>
+    <span class="ver">v1.2.1</span>
     <nav aria-label="ページ内">
       <a class="opt" href="#features">機能</a>
       <a href="#install">インストール</a>
@@ -438,55 +449,82 @@ cd blackbullet
       <div class="sec-head">
         <span class="eyebrow">Releases</span>
         <h2>リリース履歴</h2>
-        <p>タグとコミット履歴は <a href="https://github.com/HayatoShimada/blackbullet/releases">GitHub Releases</a> にあります。</p>
+        <p>新しいものから順に。各リリースの詳細とダウンロードは GitHub にあります。</p>
       </div>
 
-      <div class="rel">
+      <!-- releases:start -->
+      <div class="rel-stack">
+      <article class="rel" id="v1.2.1">
         <div class="rel-meta">
-          <span class="rel-tag">v1.0.0</span>
+          <a class="rel-tag" href="https://github.com/HayatoShimada/blackbullet/releases/tag/v1.2.1">v1.2.1</a>
           <span class="rel-date">2026-10-03</span>
           <span class="chip ok latest">Latest</span>
         </div>
         <div class="rel-body">
-          <p>BlackBullet 最初の本番リリース。SilverBullet 2.11 からフォークした、個人用・ローカルファースト・AI ネイティブのノートアプリです。</p>
-          <ul class="rel-list">
-            <li><b>Setup</b><span><code>./setup.sh</code> 一発で検索 / MCP サイドカーごと起動。<code>--status</code>・<code>--backup</code>・<code>--restore</code>・<code>--upgrade</code>。</span></li>
-            <li><b>Database</b><span><code>database.define</code> によるデータベース。表・ボード・カレンダー表示、+ New、フィルタ、保存ビュー、行メニュー、復元できるゴミ箱。</span></li>
-            <li><b>Search</b><span>言葉と意味による検索、関連ノート、類似ページのグラフ、引用つきで答える Ask。</span></li>
-            <li><b>Docs</b><span>PDF / Office / OpenDocument / HTML 文書も検索対象に。</span></li>
-            <li><b>MCP</b><span>AI アシスタント向け MCP サーバー。tailnet 専用 HTTPS 入口からも利用可能。</span></li>
-            <li><b>Design</b><span>インターフェースを再設計。統一された用語、ひとつの New、すべての変更に Undo、一貫したキーボード操作、ライト / ダーク、スマホレイアウト。</span></li>
-            <li><b>License</b><span>GPL-2.0-only。SilverBullet の MIT 表記は NOTICE.md に収録。</span></li>
-          </ul>
-
-          <details class="more">
-            <summary>v1.0.0 までの開発の流れ(31 コミット)</summary>
-            <div class="log">
-              <div class="day">
-                <h4>2026-10-03<span>デザインと仕上げ</span></h4>
-                <ul>
-                  <li class="tagged"><code>5e7b7a4</code><span>License: carry the MIT notice in NOTICE.md, declare GPL-2.0-only, new README</span></li>
-                  <li><code>517a82f</code><span>Phones: no shortcut hint, compact frontmatter band, unbroken attributes, quiet + New</span></li>
-                  <li><code>415f0f7</code><span>Phones: smaller reading scale, tighter gutters, widget ⋯ off the text</span></li>
-                  <li><code>b0e3083</code><span>Search, Ask, Related, page header, block editor: product vocabulary and keys</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">…</span><span>Graph: themed canvas, legend, phone bottom sheet · db-view: undoable actions, click-to-edit, touch · Navigator: unified New, trash with restore · Theme tokens, top bar, dialogs · Design system, demo space, screenshot tooling</span></li>
-                </ul>
-              </div>
-              <div class="day">
-                <h4>2026-10-02<span>機能と運用</span></h4>
-                <ul>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">ops</span><span>backup / restore / status / upgrade、tailnet 入口経由の MCP</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">memo</span><span>Ask(引用つき回答)、保存回答・スコープ・追加質問、文書検索</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">db</span><span>database.define と「+ New」、行操作・ゴミ箱・保存ビュー・フィルタ</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">mcp</span><span>PDF / Office の索引化、OCR、埋め込みモデル取得失敗時も動き続ける</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">start</span><span>compose.yaml・setup.sh・.env.example による一発起動</span></li>
-                  <li><span class="mono" style="font-size:.78rem;color:var(--ink3)">init</span><span>tailnet 専用の入口(Tailscale + Caddy + whois 認証)、BlackBullet 本体、memo-mcp を追加</span></li>
-                </ul>
-              </div>
-            </div>
-          </details>
+          <h3 class="rel-name">BlackBullet v1.2.1</h3>
+          <div class="rel-notes"><ul>
+<li>Database views no longer show a vertical scrollbar at every height (the widget frame's negative iframe margin made its scrolling box 18px too short).</li>
+</ul></div>
         </div>
+      </article>
+      <article class="rel" id="v1.2.0">
+        <div class="rel-meta">
+          <a class="rel-tag" href="https://github.com/HayatoShimada/blackbullet/releases/tag/v1.2.0">v1.2.0</a>
+          <span class="rel-date">2026-10-03</span>
+          
+        </div>
+        <div class="rel-body">
+          <h3 class="rel-name">BlackBullet v1.2.0</h3>
+          <div class="rel-notes"><ul>
+<li>memo-mcp: tasks as todo pages. list_tasks returns Tasks/ pages (status, due, project, area, completed) alongside checkbox lines, with status and project filters; complete_task completes a todo page; add_inbox creates Tasks/&lt;title&gt; with status inbox; list_projects counts todo pages linked by project.</li>
+</ul></div>
+        </div>
+      </article>
+      <article class="rel" id="v1.1.0">
+        <div class="rel-meta">
+          <a class="rel-tag" href="https://github.com/HayatoShimada/blackbullet/releases/tag/v1.1.0">v1.1.0</a>
+          <span class="rel-date">2026-10-03</span>
+          
+        </div>
+        <div class="rel-body">
+          <h3 class="rel-name">BlackBullet v1.1.0</h3>
+          <div class="rel-notes"><p>Editor modes in the header.</p>
+<ul>
+<li>A mode chip next to the page name shows Edit or Preview, and Read-only for pages that cannot be written. Click it, or press Ctrl-Alt-p (Editor: Toggle Preview), to switch. On phones it replaces the lock button.</li>
+<li>With vim keys on, the chip shows NORMAL / INSERT / VISUAL / V-LINE / V-BLOCK / REPLACE. Esc steps out one level per press: Insert → Normal → Preview (then Tab leaves the editor).</li>
+<li>In Preview, read with j / k / / and the other motions; i a o I A O start typing where the cursor is, Enter returns to Normal. :preview and :edit switch too.</li>
+<li>The Fork Guide has a new section, 編集とプレビュー.</li>
+</ul>
+<p>🤖 Generated with <a href="https://claude.com/claude-code" rel="nofollow">Claude Code</a></p></div>
+        </div>
+      </article>
+      <article class="rel" id="v1.0.0">
+        <div class="rel-meta">
+          <a class="rel-tag" href="https://github.com/HayatoShimada/blackbullet/releases/tag/v1.0.0">v1.0.0</a>
+          <span class="rel-date">2026-10-03</span>
+          
+        </div>
+        <div class="rel-body">
+          <h3 class="rel-name">BlackBullet v1.0.0</h3>
+          <div class="rel-notes"><p>First production release of BlackBullet, a personal, local-first, AI-native notes app forked from SilverBullet 2.11.</p>
+<ul>
+<li>One-command start (./setup.sh) with the search/MCP sidecar, and --status, --backup, --restore, --upgrade.</li>
+<li>Databases (database.define) with table, board and calendar views,
+<ul>
+<li>New, filters, saved views, row menu and a restorable trash.</li>
+</ul>
+</li>
+<li>Search by words and meaning, related notes, a graph of similar pages, and Ask (answers from your notes with citations).</li>
+<li>PDF / Office / OpenDocument / HTML documents are searchable.</li>
+<li>MCP server for AI assistants, also reachable through the tailnet-only HTTPS front door.</li>
+<li>Redesigned interface: one vocabulary, one New, undo for every change, a coherent keyboard scheme, light and dark, phone layout.</li>
+<li>Licensed GPL-2.0-only; the SilverBullet MIT notice is in NOTICE.md.</li>
+</ul></div>
+        </div>
+      </article>
       </div>
+      <p class="rel-source">GitHub Releases から自動で反映しています(<a href="https://github.com/HayatoShimada/blackbullet/releases">すべてのリリース</a>)。</p>
+      <!-- releases:end -->
     </div>
   </section>
 </main>
