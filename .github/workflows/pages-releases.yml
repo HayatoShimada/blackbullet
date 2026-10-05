@@ -1,0 +1,58 @@
+# Keeps the release history on the project page (gh-pages) in step with GitHub Releases.
+name: Sync releases to the project page
+
+on:
+  release:
+    types: [published, edited, deleted, unpublished, prereleased, released]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: pages-releases
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the sync script (default branch)
+        uses: actions/checkout@v4
+        with:
+          path: src
+          sparse-checkout: scripts/pages
+
+      - name: Check out the project page
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Rewrite the release history
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node src/scripts/pages/sync-releases.mjs site/index.html "$GITHUB_REPOSITORY"
+
+      - name: Commit and push when it changed
+        id: push
+        working-directory: site
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Sync release history from GitHub Releases"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # A push made with GITHUB_TOKEN may not start a Pages build on its own; ask for one.
+      - name: Request a Pages build
+        if: steps.push.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" || echo "Pages build request failed; the next push will rebuild."
