@@ -1,4 +1,5 @@
 import {
+  exceedsDocumentLimit,
   maximumDocumentSize,
   notFoundError,
 } from "@silverbulletmd/silverbullet/constants";
@@ -48,7 +49,10 @@ export function captureSyscalls(
           "maximumDocumentSize",
           maximumDocumentSize,
         );
-        if (typeof limit !== "number" || blob.size > limit * 1024 * 1024) {
+        if (
+          typeof limit !== "number" ||
+          exceedsDocumentLimit(blob.size, limit)
+        ) {
           throw new Error("Shared file is too large");
         }
         const bytes = new Uint8Array(await blob.arrayBuffer());

@@ -3,7 +3,10 @@ import { EditorSelection, Transaction } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 // @ts-expect-error - No type definitions available for this package
 import { tables, taskListItems } from "@joplin/turndown-plugin-gfm";
-import { maximumDocumentSize } from "@silverbulletmd/silverbullet/constants";
+import {
+  exceedsDocumentLimit,
+  maximumDocumentSize,
+} from "@silverbulletmd/silverbullet/constants";
 import { safeRun } from "@silverbulletmd/silverbullet/lib/async";
 import { localDateString } from "@silverbulletmd/silverbullet/lib/dates";
 import { isValidName, isValidPath } from "@silverbulletmd/silverbullet/lib/ref";
@@ -313,7 +316,7 @@ export function documentExtension(editor: Client) {
     const invalidPathMessage =
       "Unable to upload file, invalid target filename or path";
 
-    if (file.content.length > maxSize * 1024 * 1024) {
+    if (exceedsDocumentLimit(file.content.length, maxSize)) {
       editor.ui.flashNotification(
         `Document is too large, maximum is ${maxSize}MiB`,
         "error",

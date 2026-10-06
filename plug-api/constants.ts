@@ -1,4 +1,11 @@
-export const maximumDocumentSize: number = 10; // MiB
+// Upload / paste / capture size limit in MiB, set with config "maximumDocumentSize".
+// BlackBullet default: 0 = no limit (the server accepts any size; upstream's default was 10).
+export const maximumDocumentSize: number = 0; // MiB
+
+/** True when `bytes` is over a limit of `limitMiB`; a limit of 0 (or less) means no limit. */
+export function exceedsDocumentLimit(bytes: number, limitMiB: number): boolean {
+  return limitMiB > 0 && bytes > limitMiB * 1024 * 1024;
+}
 export const defaultLinkStyle: string = "wikilink";
 export const offlineError: Error = new Error("Offline");
 export const notFoundError: Error = new Error("Not found");

@@ -1,6 +1,7 @@
 import { editor, space, system } from "@silverbulletmd/silverbullet/syscalls";
 import {
   defaultLinkStyle,
+  exceedsDocumentLimit,
   maximumDocumentSize,
 } from "@silverbulletmd/silverbullet/constants";
 import { resolveMarkdownLink } from "@silverbulletmd/silverbullet/lib/resolve";
@@ -32,7 +33,7 @@ export async function saveFile(file: UploadFile) {
       "error",
     );
   }
-  if (file.content.length > maxSize * 1024 * 1024) {
+  if (exceedsDocumentLimit(file.content.length, maxSize)) {
     void editor.flashNotification(
       `Document is too large, maximum is ${maxSize}MiB`,
       "error",
