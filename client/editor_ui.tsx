@@ -34,7 +34,7 @@ import {
   emitToEditorMode,
   installEditorMode,
 } from "./editor_mode/mode_host.ts";
-import { chipView } from "./editor_mode/mode_mediator.ts";
+import { chipView, markupSegmentView } from "./editor_mode/mode_mediator.ts";
 import {
   KeyboardBar,
   type KeyboardBarButton,
@@ -374,11 +374,13 @@ export class MainUI {
         vim: viewState.uiOptions.vimMode,
         preview: viewState.uiOptions.forcedROMode,
         locked: modeLocked,
+        code: viewState.uiOptions.markdownSyntaxRendering,
       });
     }, [
       viewState.uiOptions.vimMode,
       viewState.uiOptions.forcedROMode,
       modeLocked,
+      viewState.uiOptions.markdownSyntaxRendering,
     ]);
 
     useEffect(() => {
@@ -683,6 +685,19 @@ export class MainUI {
               : undefined
           }
           onModeChip={() => emitToEditorMode({ type: "toggle" })}
+          markupSegment={
+            viewState.current
+              ? markupSegmentView(
+                  viewState.editorMode,
+                  keyboardHint(
+                    viewState.commands.get("Editor: Toggle Code") ?? {},
+                  ),
+                )
+              : undefined
+          }
+          onMarkup={(markup) =>
+            emitToEditorMode({ type: "markup.set", markup })
+          }
         />
         {menuTrigger && (
           <AnchoredMenu

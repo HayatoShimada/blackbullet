@@ -1210,6 +1210,13 @@ export function editorSyscalls(client: Client): SysCallMapping {
         Vim.defineEx("edit", "e", () =>
           emitToEditorMode({ type: "set", surface: "edit" }),
         );
+        // Markdown marks shown or hidden, as the header's Styled | Code.
+        Vim.defineEx("code", "code", () =>
+          emitToEditorMode({ type: "markup.set", markup: "code" }),
+        );
+        Vim.defineEx("styled", "sty", () =>
+          emitToEditorMode({ type: "markup.set", markup: "styled" }),
+        );
         Vim.defineAction("newline-continue-markup", (cm) => {
           Vim.handleKey(cm, "A", "+input");
           insertNewlineContinueMarkup(client.editorView) ||

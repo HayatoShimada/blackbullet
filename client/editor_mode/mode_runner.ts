@@ -12,6 +12,8 @@ export type EditorModeRunnerDeps = {
   /** Switches read-only on or off; `then` is replayed in vim once it is back. */
   setPreview(on: boolean, then?: EditKey): void;
   armTabFocus(): void;
+  /** Shows the Markdown marks or hides them, and remembers it. */
+  setMarkup(code: boolean): void;
   /** Draws the new state (the header chip). */
   render(state: EditorModeState): void;
 };
@@ -42,6 +44,9 @@ export function createEditorModeRunner(
             break;
           case "armTabFocus":
             deps.armTabFocus();
+            break;
+          case "setMarkup":
+            deps.setMarkup(effect.code);
             break;
         }
       }

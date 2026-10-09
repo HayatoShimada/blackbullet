@@ -56,6 +56,7 @@ Mac では、`Ctrl-k` のように `Ctrl` で始まるキーを `Cmd` に読み�
 | グラフ | `Ctrl-Shift-g` |
 | 新規作成(New) | `Ctrl-Alt-n` |
 | 編集とプレビューを切り替える(Editor: Toggle Preview) | `Ctrl-Alt-p` |
+| Markdown の記号を出す・隠す(Editor: Toggle Code) | `Ctrl-Alt-k` |
 | テンプレートから作る | `Ctrl-q t` |
 | メニューや入力を閉じる・戻る | `Esc` |
 | エディタからヘッダーやパネルへ出る | `Esc` のあと `Tab` |
@@ -72,10 +73,22 @@ Mac では、`Ctrl-k` のように `Ctrl` で始まるキーを `Cmd` に読み�
 | `Read-only` | このページは書けない(押せない) |
 
 * チップを押すか、${widgets.commandButton("Editor: Toggle Preview")}(`Ctrl-Alt-p`)で、Edit と Preview を切り替えます。スマホでもチップを押します。
-* Vim の操作(${widgets.commandButton("Editor: Toggle Vim Mode")})にすると、チップは `NORMAL`・`INSERT`・`VISUAL`(`V-LINE`・`V-BLOCK`)・`REPLACE` を出します。
+* はじめから Vim の操作です(スマホなど、マウスのない端末では切ってあります)。${widgets.commandButton("Editor: Toggle Vim Mode")}で切り替えられ、その端末で覚えます。Vim のあいだ、チップは `NORMAL`・`INSERT`・`VISUAL`(`V-LINE`・`V-BLOCK`)・`REPLACE` を出します。
 * Vim では、`Esc` を押すたびに 1 段ずつ外へ出ます。`INSERT` → `NORMAL` → `Preview`。入力の途中・選択中・検索の強調中の `Esc` は、まずそれを取り消します。
 * `Preview` では、`j`・`k`・`/` などで読めます。`i`・`a`・`o`(`I`・`A`・`O`)でそのまま書き始め、`Enter` で `NORMAL` に戻ります。もう一度 `Esc` のあと `Tab` で、エディタの外へ出ます。
 * `:preview` と `:edit` でも切り替えられます。
+
+# 記号を出す・隠す(Styled / Code)
+チップの右の `Styled | Code` で、Markdown の見え方を選びます。Edit でも Preview でも使えます。
+
+| 表示 | 見え方 |
+| --- | --- |
+| `Styled` | 見出しや太字の記号を隠す(カーソルのある行だけ出る) |
+| `Code` | `#`・`**`・`[[ ]]` などの記号をいつも出す |
+
+* 押すか、${widgets.commandButton("Editor: Toggle Code")}(`Ctrl-Alt-k`)で切り替えます。Vim では `:code` と `:styled` でも切り替えられます。
+* 選んだほうは、その端末で覚えます。ファイルの中身は変わりません。
+* スマホでは見出しの欄が狭いので、`Styled | Code` は出ません。コマンドパレットの Editor: Toggle Code を使います。
 
 # 書き留める
 * クイックノート(`Ctrl-q q`)は、空のページを開いて、すぐ書けます。打つたびに保存されます。`Esc` で、開く前のページへ戻ります。置き場所は受信箱(Inbox)です。
@@ -297,6 +310,7 @@ local FORK_COMMANDS = {
   -- the planned name of the one above: listed once a library registers it
   "Database: New Database",
   "Editor: Toggle Preview",
+  "Editor: Toggle Code",
   "Help: Fork Guide",
 }
 

@@ -406,6 +406,41 @@
 
 // (BlackBullet) The editor-mode chip after the title: Edit / Preview, or vim's
 // NORMAL / INSERT / VISUAL. The word carries the state; colour only helps.
+// Styled | Code: the shared segment, sized to sit beside the mode chip.
+#sb-top .sb-markup-segment {
+  flex: none;
+  flex-wrap: nowrap;
+  margin: 0 8px 0 0;
+  -webkit-app-region: no-drag;
+
+  // A phone's header has room for the page name and the mode chip only;
+  // `Editor: Toggle Code` stays in the palette there.
+  @media (max-width: 600px) {
+    display: none;
+  }
+
+  .sb-segment {
+    min-height: 20px;
+    padding: 0 8px;
+  }
+
+  @media (pointer: coarse) {
+    .sb-segment {
+      min-height: 28px;
+      min-width: 44px;
+      justify-content: center;
+      position: relative;
+    }
+
+    // A 44 px target around a segment that still looks like one.
+    .sb-segment::after {
+      content: "";
+      position: absolute;
+      inset: -8px 0;
+    }
+  }
+}
+
 #sb-top .sb-mode-chip {
   flex: none;
   display: inline-flex;

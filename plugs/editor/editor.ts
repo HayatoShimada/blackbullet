@@ -20,7 +20,11 @@ export async function setEditorMode() {
     void editor.reloadUI();
   }
 
-  if (await clientStore.get("vimMode")) {
+  // Vim is on unless turned off on this client; a touch device without a
+  // fine pointer starts without it, as vim's Normal mode swallows typing.
+  const vimMode =
+    (await clientStore.get("vimMode")) ?? !(await editor.isMobile());
+  if (vimMode) {
     await editor.setUiOption("vimMode", true);
   }
   // Only set the darkmode value if it was deliberatly set in the clientstore,

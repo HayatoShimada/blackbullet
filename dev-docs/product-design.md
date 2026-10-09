@@ -42,6 +42,7 @@ words and no synonyms. The guide stays Japanese but translates these same concep
 | **Home** | The `index` page. | "Home" | "index" as a title | ホーム |
 | **Panel** | A dockable chrome surface: Tree, Related notes, Ask, Search. (Not a "view": that word belongs to databases.) | by its title | `view.define`, "dock" | パネル |
 | **Preview** | The page shown for reading, not writing. **Edit** is the other side. A page that cannot be written at all is **Read-only**. | Header mode chip `Edit` / `Preview` / `Read-only`; with vim `NORMAL` / `INSERT` / `VISUAL` / `V-LINE` / `V-BLOCK` / `REPLACE`; `Editor: Toggle Preview` | `forcedROMode`, "read-only mode" for Preview | プレビュー |
+| **Code** | The page with every Markdown mark shown (`#`, `**`, `[[ ]]`). **Styled** is the other side: marks hidden away from the cursor. Independent of Edit / Preview. | Header segment `Styled` \| `Code`; `Editor: Toggle Code`; `:code` / `:styled` | "markdown syntax rendering", "source mode", "raw" | コード |
 
 ### What the user should never have to know
 - that a database is a tag plus frontmatter in a folder; they declare it once via
@@ -224,7 +225,7 @@ exact match → results, recent first. Pages tab hides `Library/`, `Templates/`,
    - `Ctrl-Shift-<letter>`: open a surface (h Home, k meta, g Graph; f Search *after* §10.1).
    - `Ctrl-q <letter>` ("quick"): q quick note, j journal, p/n day, t template,
      **s Search, a Ask, r Related notes** (new).
-   - `Ctrl-Alt-<letter>`: tools (t tags, i mentions, r reload, c comment, m marker, l centre, **n New**, **p Preview**).
+   - `Ctrl-Alt-<letter>`: tools (t tags, i mentions, r reload, c comment, m marker, l centre, **n New**, **p Preview**, **k Code**).
    - `Mod-.` chords: outline. Nothing else binds `Ctrl-Shift-f` until the editor yields it.
    - `Esc` always means "leave": close the menu/panel, cancel the edit, cancel the
      drag, and (then) let `Tab` leave the editor. With vim, one level per press:

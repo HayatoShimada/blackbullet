@@ -55,6 +55,13 @@ export function registerNavigatorCommands(
     run: async () => emitToEditorMode({ type: "toggle" }),
   });
   hook.registerCommand({
+    name: "Editor: Toggle Code",
+    key: "Ctrl-Alt-k",
+    mac: "Cmd-Alt-k",
+    // Showing the Markdown marks changes nothing on disk: read-only too.
+    run: async () => emitToEditorMode({ type: "markup.toggle" }),
+  });
+  hook.registerCommand({
     name: "Trash: Restore",
     requireMode: "rw",
     run: restoreCommand,

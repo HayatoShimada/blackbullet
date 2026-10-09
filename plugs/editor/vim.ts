@@ -1,8 +1,8 @@
 import { clientStore, editor } from "@silverbulletmd/silverbullet/syscalls";
 
 export async function toggleVimMode() {
-  let vimMode = await clientStore.get("vimMode");
-  vimMode = !vimMode;
+  // From what is on now: vim can be on without a stored choice (the default).
+  const vimMode = !(await editor.getUiOption("vimMode"));
   await editor.setUiOption("vimMode", vimMode);
   await clientStore.set("vimMode", vimMode);
 }

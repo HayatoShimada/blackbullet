@@ -11,8 +11,8 @@ import {
 
 let runner: EditorModeRunner | undefined;
 
-// A Preview switch waits for the option to reach the view state (the next
-// render) before the editor is rebuilt from it; this is what it then does.
+// A Preview or Code switch waits for the option to reach the view state (the
+// next render) before the editor is rebuilt from it; this is what it then does.
 let pendingSwitch: { then?: EditKey } | undefined;
 
 /** Starts the editor-mode Mediator for this client (once). */
@@ -29,6 +29,19 @@ export function installEditorMode(client: Client): EditorModeRunner {
     armTabFocus() {
       client.editorView?.setTabFocusMode(ESCAPE_THEN_TAB_MS);
     },
+    setMarkup(code) {
+      pendingSwitch = {};
+      client.ui.viewDispatch({
+        type: "set-ui-option",
+        key: "markdownSyntaxRendering",
+        value: code,
+      });
+      // The same key `Editor: Toggle Markdown Syntax Rendering` keeps.
+      void client.clientSystem.ds.set(
+        ["client", "markdownSyntaxRendering"],
+        code,
+      );
+    },
     render(state) {
       client.ui.viewDispatch({ type: "set-editor-mode", state });
     },
@@ -43,11 +56,11 @@ export function emitToEditorMode(event: EditorModeEvent): void {
 
 /**
  * Called by the root view after a render with the options the mode follows.
- * Finishes a Preview switch the Mediator asked for: rebuild, focus, replay.
+ * Finishes a switch the Mediator asked for: rebuild, focus, replay.
  */
 export function editorModeRendered(
   client: Client,
-  options: { vim: boolean; preview: boolean; locked: boolean },
+  options: { vim: boolean; preview: boolean; locked: boolean; code: boolean },
 ): void {
   emitToEditorMode({ type: "sync", ...options });
   const pending = pendingSwitch;

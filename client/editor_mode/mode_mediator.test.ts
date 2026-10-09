@@ -6,6 +6,7 @@ import {
   type EditorModeEvent,
   type EditorModeState,
   initialState,
+  markupSegmentView,
   transition,
 } from "./mode_mediator.ts";
 
@@ -100,6 +101,7 @@ describe("a locked page stays read-only", () => {
     vim: true,
     preview: false,
     locked: true,
+    code: false,
   }).state;
 
   test("it shows as Preview and nothing moves it", () => {
@@ -125,6 +127,7 @@ describe("sync follows options set elsewhere", () => {
       vim: false,
       preview: true,
       locked: false,
+      code: false,
     });
     expect(state.surface).toBe("preview");
     expect(effects).toEqual([]);
@@ -136,6 +139,7 @@ describe("sync follows options set elsewhere", () => {
       vim: true,
       preview: false,
       locked: false,
+      code: false,
     } as const;
     expect(transition(vimNormal, sync).state).toBe(vimNormal);
   });
@@ -147,6 +151,7 @@ describe("sync follows options set elsewhere", () => {
       vim: false,
       preview: false,
       locked: false,
+      code: false,
     });
     expect(state).toEqual(initialState);
   });
@@ -182,5 +187,58 @@ describe("chip labels", () => {
     expect(chipView({ ...vimNormal, vimMode: "insert" }).title).toBe(
       "INSERT · Esc for NORMAL",
     );
+  });
+});
+
+describe("Styled | Code", () => {
+  test("the segment and the toggle switch and keep it", () => {
+    const code = run(vimNormal, { type: "markup.set", markup: "code" });
+    expect(code.state.markup).toBe("code");
+    expect(code.effects).toEqual([{ type: "setMarkup", code: true }]);
+    const styled = run(code.state, { type: "markup.toggle" });
+    expect(styled.state).toEqual(vimNormal);
+    expect(styled.effects).toEqual([{ type: "setMarkup", code: false }]);
+  });
+
+  test("the side already shown does nothing", () => {
+    expect(
+      transition(vimNormal, { type: "markup.set", markup: "styled" }),
+    ).toEqual({ state: vimNormal, effects: [] });
+  });
+
+  test("it leaves Edit / Preview and vim alone, and works when locked", () => {
+    const insert = { ...vimNormal, vimMode: "insert" as const };
+    expect(run(insert, { type: "markup.toggle" }).state).toEqual({
+      ...insert,
+      markup: "code",
+    });
+    const locked = { ...vimNormal, surface: "preview" as const, locked: true };
+    expect(run(locked, { type: "markup.toggle" }).effects).toEqual([
+      { type: "setMarkup", code: true },
+    ]);
+  });
+
+  test("the upstream command's option is followed", () => {
+    const { state, effects } = run(vimNormal, {
+      type: "sync",
+      vim: true,
+      preview: false,
+      locked: false,
+      code: true,
+    });
+    expect(state.markup).toBe("code");
+    expect(effects).toEqual([]);
+  });
+
+  test("the segment marks the side shown", () => {
+    const items = markupSegmentView(
+      { ...initialState, markup: "code" },
+      "Ctrl-Alt-k",
+    );
+    expect(items.map((i) => [i.label, i.active])).toEqual([
+      ["Styled", false],
+      ["Code", true],
+    ]);
+    expect(items[1].title).toBe("Code: every Markdown mark shown · Ctrl-Alt-k");
   });
 });

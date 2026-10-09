@@ -9,11 +9,16 @@
  * Preview is the page shown read-only (`forcedROMode`). A page that cannot be
  * written at all (read-only space, read-only page) is `locked`: it stays in
  * Preview and nothing here moves it.
+ *
+ * Separately, the page is drawn Styled (Markdown marks hidden away from the
+ * cursor) or as Code (every `#`, `**`, `[[ ]]` shown: `markdownSyntaxRendering`).
+ * That holds in Edit and Preview alike, and a locked page can switch it too.
  */
 
 export type Surface = "edit" | "preview";
 export type VimMode = "normal" | "insert" | "visual" | "replace";
 export type VimSubMode = "linewise" | "blockwise";
+export type Markup = "styled" | "code";
 
 /** Keys that leave Preview for Edit; the letters then run as vim commands. */
 export const EDIT_KEYS = ["i", "a", "o", "I", "A", "O", "Enter"] as const;
@@ -25,11 +30,18 @@ export type EditorModeState = {
   vimMode: VimMode;
   vimSub?: VimSubMode;
   locked: boolean;
+  markup: Markup;
 };
 
 export type EditorModeEvent =
   /** The options the mode follows, as they are now (set from anywhere). */
-  | { type: "sync"; vim: boolean; preview: boolean; locked: boolean }
+  | {
+      type: "sync";
+      vim: boolean;
+      preview: boolean;
+      locked: boolean;
+      code: boolean;
+    }
   | { type: "vim.modeChanged"; mode: VimMode; subMode?: VimSubMode }
   /** An Esc that vim has no use for (Normal, nothing pending, nothing open). */
   | { type: "key.escape" }
@@ -38,13 +50,19 @@ export type EditorModeEvent =
   /** The header chip, or `Editor: Toggle Preview`. */
   | { type: "toggle" }
   /** `:preview` and `:edit`. */
-  | { type: "set"; surface: Surface };
+  | { type: "set"; surface: Surface }
+  /** The header's Styled | Code segment, `:styled` and `:code`. */
+  | { type: "markup.set"; markup: Markup }
+  /** `Editor: Toggle Code`. */
+  | { type: "markup.toggle" };
 
 export type EditorModeEffect =
   /** Switches the editor to read-only or back; `then` runs once it is back. */
   | { type: "setPreview"; on: boolean; then?: EditKey }
   /** The next Tab leaves the editor. */
-  | { type: "armTabFocus" };
+  | { type: "armTabFocus" }
+  /** Shows the Markdown marks (Code) or hides them (Styled), and keeps it. */
+  | { type: "setMarkup"; code: boolean };
 
 export type Transition = {
   state: EditorModeState;
@@ -56,6 +74,7 @@ export const initialState: EditorModeState = {
   vim: false,
   vimMode: "normal",
   locked: false,
+  markup: "styled",
 };
 
 const stay = (state: EditorModeState): Transition => ({ state, effects: [] });
@@ -83,10 +102,12 @@ export function transition(
     case "sync": {
       const surface: Surface =
         event.locked || event.preview ? "preview" : "edit";
+      const markup: Markup = event.code ? "code" : "styled";
       if (
         surface === state.surface &&
         event.vim === state.vim &&
-        event.locked === state.locked
+        event.locked === state.locked &&
+        markup === state.markup
       ) {
         return stay(state);
       }
@@ -95,6 +116,7 @@ export function transition(
         surface,
         vim: event.vim,
         locked: event.locked,
+        markup,
         ...(event.vim ? {} : { vimMode: "normal", vimSub: undefined }),
       });
     }
@@ -128,7 +150,20 @@ export function transition(
         return stay(state);
       }
       return event.surface === "preview" ? toPreview(state) : toEdit(state);
+    case "markup.set":
+      return event.markup === state.markup
+        ? stay(state)
+        : toMarkup(state, event.markup);
+    case "markup.toggle":
+      return toMarkup(state, state.markup === "code" ? "styled" : "code");
   }
+}
+
+function toMarkup(state: EditorModeState, markup: Markup): Transition {
+  return {
+    state: { ...state, markup },
+    effects: [{ type: "setMarkup", code: markup === "code" }],
+  };
 }
 
 export type ChipTone = "quiet" | "outline" | "accent" | "accent-outline";
@@ -195,4 +230,35 @@ export function chipView(
   const next =
     state.vimMode === "normal" ? "Esc for Preview" : "Esc for NORMAL";
   return { label, tone, title: `${label} · ${next}${toggle}`, disabled: false };
+}
+
+/** One side of the header's Styled | Code segment. */
+export type MarkupSegmentItem = {
+  markup: Markup;
+  label: string;
+  active: boolean;
+  /** Tooltip: what the side shows, and the key that switches. */
+  title: string;
+};
+
+/** What the header's Styled | Code segment draws for a state. */
+export function markupSegmentView(
+  state: EditorModeState,
+  toggleKey?: string,
+): MarkupSegmentItem[] {
+  const toggle = toggleKey ? ` · ${toggleKey}` : "";
+  return [
+    {
+      markup: "styled",
+      label: "Styled",
+      active: state.markup === "styled",
+      title: `Styled: Markdown marks hidden away from the cursor${toggle}`,
+    },
+    {
+      markup: "code",
+      label: "Code",
+      active: state.markup === "code",
+      title: `Code: every Markdown mark shown${toggle}`,
+    },
+  ];
 }

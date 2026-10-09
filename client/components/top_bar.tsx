@@ -4,7 +4,11 @@ import type { ComponentChildren, FunctionalComponent } from "preact";
 import { createPortal } from "preact/compat";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Sidebar } from "preact-feather";
-import type { ModeChipView } from "../editor_mode/mode_mediator.ts";
+import type {
+  Markup,
+  MarkupSegmentItem,
+  ModeChipView,
+} from "../editor_mode/mode_mediator.ts";
 import { resolveIconNode } from "../lib/icon.ts";
 import { installEscapeThenTab } from "../navigator/ui/chrome_focus.ts";
 import {
@@ -13,6 +17,7 @@ import {
   splitPageName,
   titleCommit,
 } from "../navigator/page_title.ts";
+import { MarkupSegment } from "./markup_segment.tsx";
 import { ModeChip } from "./mode_chip.tsx";
 
 export type ActionButton = {
@@ -334,6 +339,8 @@ export function TopBar({
   rightDock,
   modeChip,
   onModeChip,
+  markupSegment,
+  onMarkup,
 }: {
   pageName?: string;
   unsavedChanges: boolean;
@@ -357,6 +364,8 @@ export function TopBar({
   rightDock?: MobileDockButton;
   modeChip?: ModeChipView;
   onModeChip?: () => void;
+  markupSegment?: MarkupSegmentItem[];
+  onMarkup?: (markup: Markup) => void;
 }) {
   const pageIconNode = resolveIconNode(pageIcon);
   const [editingName, setEditingName] = useState(false);
@@ -399,6 +408,9 @@ export function TopBar({
             </span>
             {modeChip && onModeChip && (
               <ModeChip view={modeChip} onActivate={onModeChip} />
+            )}
+            {markupSegment && onMarkup && (
+              <MarkupSegment items={markupSegment} onSelect={onMarkup} />
             )}
             <NotificationPanel
               notifications={notifications}
