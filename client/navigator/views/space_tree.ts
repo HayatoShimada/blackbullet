@@ -295,6 +295,18 @@ export const spaceTreeView: BuiltinView<TreeObj> = {
       when: isRestorable,
       run: (obj) => void restoreRow(obj),
     },
+    {
+      icon: "download",
+      label: "Export…",
+      // A page with a file: PDF, Word or Markdown with its images.
+      when: (obj) =>
+        obj.tag === "page" &&
+        obj.ref != null &&
+        obj.isPending !== true &&
+        !inTrash(obj),
+      run: (obj) =>
+        void system.invokeFunction("export.chooseFormat", String(obj.name)),
+    },
   ],
   keymap: {
     // Peek: open the row without leaving the panel, so the next arrow keeps

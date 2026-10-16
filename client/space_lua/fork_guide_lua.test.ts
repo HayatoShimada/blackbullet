@@ -217,6 +217,7 @@ async function registeredCommands(): Promise<Set<string>> {
     ...(await walk("plugs/object-graph")).filter((f) => f.endsWith(".yaml")),
     // upstream's editor commands the guide points at (Editor: Toggle Vim Mode)
     "plugs/editor/editor.plug.yaml",
+    "plugs/export/export.plug.yaml",
     "client/navigator/commands.ts",
   ];
   for (const file of files) {

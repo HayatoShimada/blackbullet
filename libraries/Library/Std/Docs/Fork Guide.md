@@ -116,6 +116,7 @@ Mac では、`Ctrl-k` のように `Ctrl` で始まるキーを `Cmd` に読み�
 | 移動先を選んで移動 | 「⋯」の「Move to…」から、フォルダを選びます(タッチ端末はこちら) |
 | 先頭に出す | 「⋯」の「Pin」。外すときは「Unpin」(名前順に戻ります) |
 | 名前を変える | 「⋯」の「Rename」。このページへのリンクも更新されます |
+| ファイルに書き出す | ページの「⋯」の「Export…」。下の「書き出す」を参照してください |
 | フォルダの中に新しいページ | フォルダの「⋯」の「New page here」、または「+」 |
 | 消す | 「⋯」の「Move to trash」(一番下の赤い項目)。ゴミ箱を参照してください |
 | 直前の移動・並べ替えを取り消す | コマンド `Tree: Undo Move`(実行から 8 秒以内。下のボタンからも実行できます) |
@@ -125,6 +126,19 @@ Mac では、`Ctrl-k` のように `Ctrl` で始まるキーを `Cmd` に読み�
 * 並び順は、各ページの frontmatter の `pageDecoration.tree.priority`(数が大きいほど上)で決まります。並べ替えると、関係するページの frontmatter が書き換わります。
 * ページを持たないフォルダ、文書、読み取り専用のページは順序を持てません。置けない位置は、理由が表示されて何も変わりません。
 * 上の入力欄(Open…)で絞り込んでいる間は、並べ替えできません。
+
+# 書き出す(Export)
+ページを、PDF・Word(.docx)・画像付きの Markdown(.zip)のファイルにして、ダウンロードします。
+
+| 出し方 | 操作 |
+| --- | --- |
+| 形式を選んで書き出す | ${widgets.commandButton("Export: Page Or Selection")}(`Ctrl-e`)で「File: PDF」「File: Word」「File: Markdown with Images」から選びます。範囲を選んでいると、その部分だけを書き出します |
+| ツリーから | ページの「⋯」の「Export…」 |
+| 形式を決めて書き出す | ${widgets.commandButton("Export: PDF")}・${widgets.commandButton("Export: Word")}・${widgets.commandButton("Export: Markdown with Images")} |
+
+* クエリや埋め込み(`![[…]]`)は、その結果の文章になって書き出されます。frontmatter は、PDF と Word には出ません。
+* .zip には、`ページ名.md` と `images/` に入れた画像が入ります。本文の画像のリンクは `images/…` に書き換わるので、ほかの Markdown エディタでもそのまま開けます。
+* PDF と Word は、検索サービス(`memoSidecar`)が作ります。検索が使えない状態では作れません。.zip はブラウザの中だけで作ります。
 
 # ゴミ箱
 消す操作は、すべて「Move to trash」です。ページは `Trash/<名前>` へ移り、元の場所と日付が frontmatter(`trashedFrom` / `trashedAt`)に残ります。
@@ -311,6 +325,9 @@ local FORK_COMMANDS = {
   "Database: New Database",
   "Editor: Toggle Preview",
   "Editor: Toggle Code",
+  "Export: PDF",
+  "Export: Word",
+  "Export: Markdown with Images",
   "Help: Fork Guide",
 }
 

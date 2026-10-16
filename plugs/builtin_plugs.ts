@@ -8,6 +8,7 @@ export const builtinPlugNames = [
   "configuration-manager",
   "object-graph",
   "db-view",
+  "export",
 ];
 
 export const builtinPlugPaths = builtinPlugNames.map(

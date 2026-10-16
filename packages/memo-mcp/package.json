@@ -20,6 +20,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@sqlite.org/sqlite-wasm": "^3.53.4-build1"
+    "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
+    "@turbodocx/html-to-docx": "^1.23.1"
   }
 }

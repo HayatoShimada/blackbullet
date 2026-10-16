@@ -11,6 +11,7 @@ BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silver
 - **Organise**: databases declared once (typed properties, folder, template) and shown as table, board or calendar views you edit in place; one **New** for pages, rows, quick notes and journal entries (`Ctrl-Alt-n`); a trash you can restore from.
 - **Ask**: answers from your own notes with citations, follow-up questions, and answers saved as pages (`Ctrl-q a`, needs an Anthropic API key).
 - **Documents**: PDF, Word, Excel, PowerPoint, OpenDocument and HTML files in the folder are searchable too, with optional OCR.
+- **Export**: a page as PDF, Word (.docx) or Markdown with its images (.zip), from `Ctrl-e`, the tree's **Export…** or `Export: PDF` / `Export: Word` / `Export: Markdown with Images` (PDF and Word are made by the sidecar).
 - **AI assistants**: an MCP server over the same notes for Claude Code, Claude Desktop and other MCP clients.
 - **Phone and other devices**: works at phone width, and an optional tailnet-only HTTPS front door (Tailscale) with no password screen.
 

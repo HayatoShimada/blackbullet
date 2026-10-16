@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 HayatoShimada
+name: export
+requiredPermissions:
+  - fetch
+functions:
+  exportPage:
+    path: ./export.ts:exportPage
+  chooseFormat:
+    path: ./export.ts:chooseFormat
+  exportPdf:
+    path: ./export.ts:exportPdf
+    command:
+      name: "Export: PDF"
+      requireEditor: page
+      requireMode: rw
+  exportWord:
+    path: ./export.ts:exportWord
+    command:
+      name: "Export: Word"
+      requireEditor: page
+      requireMode: rw
+  exportZip:
+    path: ./export.ts:exportZip
+    command:
+      name: "Export: Markdown with Images"
+      requireEditor: page

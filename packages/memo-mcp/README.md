@@ -21,6 +21,7 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `src/search.mjs` | Hybrid search: BM25 and cosine merged with RRF, boosted by title match / active status / journal freshness |
 | `src/resources.mjs` | MCP resources (`memo://<space>/<page>`) |
 | `src/rest.mjs` | REST (`/api/search`, `/api/related`, `/api/graph` read-only GET; `/api/ask` POST) reusing the same index and embeddings |
+| `src/export.mjs` | `POST /api/export/pdf` and `/api/export/docx`: a page's HTML (images inlined as data URLs) in, a PDF (headless Chromium `--print-to-pdf`, scripts off, no name resolution) or a .docx (`@turbodocx/html-to-docx`) out. Uses no space or index |
 | `src/tools.mjs` | MCP tool definitions (read tools plus a few write tools) |
 | `src/reindex.mjs` / `src/eval.mjs` | Rebuild the index and precompute embeddings / evaluate with a golden set |
 | `src/stdio.mjs` | stdio transport (the MCP client launches the process, optionally over SSH) |
@@ -50,6 +51,8 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `MEMO_TESSERACT` | Path of the `tesseract` binary. Default `tesseract`. |
 | `MEMO_TZ` | IANA time zone (e.g. `Asia/Tokyo`) used for the dates `add_inbox` / `complete_task` write (`completed:`). Default: the process time zone, which is UTC in Docker. Pass it through compose to the sidecar so names match the app. |
 | `MEMO_EXTRACT_KINDS` | Optional comma-separated list restricting which kinds are indexed (`pdf,docx,xlsx,pptx,odf,html,legacy,text,image`; `legacy` reports old `.doc`/`.xls`/`.ppt` as `unsupported`; `.html`/`.htm` are indexed by default, decoded per their `<meta charset>`, or extensions; `image` covers OCR'd pictures). Default: all. Use `pdf,docx,xlsx,pptx` to keep `.txt` / `.csv` out. |
+| `MEMO_CHROMIUM` | Chromium binary for `/api/export/pdf`. Default `chromium` (installed in the Docker image with `fonts-noto-cjk`). Without it the endpoint answers 501. |
+| `MEMO_EXPORT_MAX_BODY` | Largest `/api/export/*` request in bytes (the page's HTML with its images). Default `50331648` (48 MiB). |
 | `MEMO_DOC_EXCLUDE` | Optional regular expression; document pages whose name matches are not indexed (e.g. `^Private/`). |
 
 A space marked `:confidential` gets `confidential: true` in tool and REST results, a notice in
@@ -104,7 +107,7 @@ The unit of search is a **section** (one per `##` heading). Each section is pref
 
 ## REST API
 
-Same port, bearer token and Host / Origin checks as `/mcp`. All endpoints are `GET` except `/api/ask` (`POST`), return JSON and require `space=<name>` (for `/api/ask` it may be in the JSON body or the query string).
+Same port, bearer token and Host / Origin checks as `/mcp`. All endpoints are `GET` except `/api/ask` and `/api/export/*` (`POST`), return JSON and require `space=<name>` (for `/api/ask` it may be in the JSON body or the query string); `/api/export/*` take no space and return a file.
 Errors are `{error}` (400 bad arguments / 401 auth / 403 Host/Origin not allowed / 404 unknown space or page / 405 wrong method / 500; `/api/ask` also 413 for a body over 4 MiB). Every response carries `confidential` (true or false).
 
 | Endpoint | Arguments | Response |
@@ -113,6 +116,7 @@ Errors are `{error}` (400 bad arguments / 401 auth / 403 Host/Origin not allowed
 | `/api/related` | `page` (required), `limit=10`, `include_journal=1` | `{results:[{page, score, via:"semantic"\|"link"\|"both"}]}` |
 | `/api/graph` | `k=3` (1-20), `threshold=0.80`, `page`, `include_journal=1` | `{nodes:[{id, title, tags}], edges:[{from, to, kind:"semantic", score}]}` |
 | `/api/ask` (POST) | JSON body `{space, q (max 500 chars), k=8 (1-20), mode, expand (boolean), tag, area, status, since (YYYY-MM-DD or ISO), prefix, kind}` | `{question, scope?, mode, warning?, confidential, sections:[{page, heading_path:[...], heading_line, line_start, line_end, ref:"Page@L12", text, score \| context:true, kind?, unit?, unit_no?}]}`: the matching sections with full text, as grounding for an answer written elsewhere |
+| `/api/export/pdf`, `/api/export/docx` (POST) | JSON body `{html, title}`; no `space` | The file itself (`application/pdf` / the Word type); errors as `{error}` (400, 401, 413 over `MEMO_EXPORT_MAX_BODY`, 501 PDF without Chromium) |
 
 - `ranks` are 1-based (`null` when that method did not hit). `heading_path` is split on `" > "`.
 - `/api/related` is the union of semantic neighbours and `[[wiki links]]` (outgoing and backlinks). Journal pages are excluded by default.

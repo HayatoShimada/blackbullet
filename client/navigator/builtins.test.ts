@@ -668,6 +668,11 @@ test("std.spaceTree's meta carries hasMove, file actions, and the Space keymap",
       hasWhen: true,
       requireMode: "rw",
     },
+    {
+      icon: "download",
+      label: "Export…",
+      hasWhen: true,
+    },
   ]);
   expect(meta.segments!.map((s) => s.label)).toEqual([
     "All",
@@ -714,11 +719,32 @@ test("std.spaceTree's row state: icon per kind, and the action mask", async () =
     true,
     false,
     false,
+    false,
   ]);
-  expect(page.actions).toEqual([true, true, true, false, false, true, false]);
-  expect(doc.actions).toEqual([true, true, false, false, false, true, false]);
+  // Export… (7): only a page with a file.
+  expect(page.actions).toEqual([
+    true,
+    true,
+    true,
+    false,
+    false,
+    true,
+    false,
+    true,
+  ]);
+  expect(doc.actions).toEqual([
+    true,
+    true,
+    false,
+    false,
+    false,
+    true,
+    false,
+    false,
+  ]);
   expect(aspiring.actions).toEqual([
     true,
+    false,
     false,
     false,
     false,
@@ -728,7 +754,16 @@ test("std.spaceTree's row state: icon per kind, and the action mask", async () =
   ]);
   // A page that also heads a folder (a "dual") keeps its own Move to trash --
   // the one case a bare folder-or-page pair doesn't exercise on either side.
-  expect(dual.actions).toEqual([true, true, true, false, true, true, false]);
+  expect(dual.actions).toEqual([
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    false,
+    true,
+  ]);
   // In Trash/ the only way out is Restore: no rename, move, pin or trashing.
   const [trashed, trashedDoc, trashFolder] = (await rowState("std.spaceTree", [
     { tag: "page", name: "Trash/Old", ref: "Trash/Old" },
@@ -743,6 +778,7 @@ test("std.spaceTree's row state: icon per kind, and the action mask", async () =
     false,
     false,
     true,
+    false,
   ]);
   expect(trashedDoc.actions).toEqual([
     false,
@@ -752,8 +788,10 @@ test("std.spaceTree's row state: icon per kind, and the action mask", async () =
     false,
     false,
     true,
+    false,
   ]);
   expect(trashFolder.actions).toEqual([
+    false,
     false,
     false,
     false,

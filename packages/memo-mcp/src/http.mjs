@@ -20,6 +20,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { registerTools, spaces, indexes } from "./tools.mjs";
 import { registerResources } from "./resources.mjs";
 import { handleRest } from "./rest.mjs";
+import { handleExport } from "./export.mjs";
 
 const PORT = Number(process.env.MEMO_MCP_PORT ?? 3010);
 const HOST = process.env.MEMO_MCP_HOST ?? "127.0.0.1";
@@ -99,7 +100,8 @@ const httpServer = http.createServer(async (req, res) => {
       res.setHeader("WWW-Authenticate", "Bearer");
       return json(401, "Unauthorized");
     }
-    await handleRest(req, res, url, { spaces, indexes });
+    if (url.pathname.startsWith("/api/export/")) await handleExport(req, res, url);
+    else await handleRest(req, res, url, { spaces, indexes });
     return;
   }
   if (url.pathname !== MCP_PATH) {
