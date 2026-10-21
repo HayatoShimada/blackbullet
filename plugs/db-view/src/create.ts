@@ -1,7 +1,7 @@
 /** The pure part of "+ New": where a row goes, and what it starts with. */
 import type { YamlPatch } from "../../../plug-api/lib/yaml.ts";
 import { parseCellInput, parsePropertyInput } from "./edit.ts";
-import type { DatabaseSpec } from "./model.ts";
+import type { DatabaseSpec, Spec } from "./model.ts";
 
 const MAX_TITLE = 100;
 
@@ -84,6 +84,52 @@ export function valuePatches(
     }
   }
   return { ok: true, patches };
+}
+
+/** Keys a `where` can test that are not the row's own frontmatter. */
+const DERIVED_KEYS = new Set([
+  "tags",
+  "title",
+  "name",
+  "page",
+  "created",
+  "modified",
+  "lastModified",
+  "openTasks",
+  "doneTasks",
+  "archived",
+  "__proto__",
+]);
+
+/**
+ * The patches that keep a new row in the view it was made from: every `where`
+ * key that asks for one plain value (`status: inbox`, or a list holding one
+ * such value among its operators) is set to it; failing that, one `contains`
+ * names the value. Other operators (`not`, `empty`, ranges) name no value, so
+ * they set nothing.
+ */
+export function wherePatches(where: Spec["where"]): YamlPatch[] {
+  const patches: YamlPatch[] = [];
+  for (const [key, wanted] of Object.entries(where)) {
+    if (DERIVED_KEYS.has(key)) continue;
+    const conds = Array.isArray(wanted) ? wanted : [wanted];
+    const plain = conds.filter((c) => typeof c !== "object");
+    const contained = conds.flatMap((c) =>
+      typeof c === "object" && c.contains !== undefined ? [c.contains] : [],
+    );
+    const value =
+      plain.length > 0
+        ? plain.length === 1
+          ? plain[0]
+          : undefined
+        : contained.length === 1
+          ? contained[0]
+          : undefined;
+    if (value !== undefined) {
+      patches.push({ op: "set-key", path: key, value });
+    }
+  }
+  return patches;
 }
 
 /** Template frontmatter that describes the template, not the pages it makes. */

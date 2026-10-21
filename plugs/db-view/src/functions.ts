@@ -22,6 +22,7 @@ import {
   rowPageName,
   rowPatches,
   valuePatches,
+  wherePatches,
 } from "./create.ts";
 import { isoDate, matchesWhere, pageName } from "./derive.ts";
 import {
@@ -238,8 +239,9 @@ async function expandedTemplate(
 
 /**
  * Makes a new row of the spec's database: a page in its folder, tagged, with
- * every property's default, and the template's body when it has one. `values`
- * are set last (a board column's value, a calendar day).
+ * every property's default, and the template's body when it has one. Then
+ * what the view's `where` asks for, so the row stays in the view it was made
+ * from; `values` are set last (a board column's value, a calendar day).
  */
 export async function createRow(
   spec: Spec,
@@ -285,6 +287,7 @@ export async function createRow(
       seed.body,
       [
         ...rowPatches(database, isoDate(new Date()), seed.inherited),
+        ...wherePatches(spec.where),
         ...given.patches,
       ],
     );

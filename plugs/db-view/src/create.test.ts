@@ -9,6 +9,7 @@ import {
   rowPageName,
   rowPatches,
   valuePatches,
+  wherePatches,
 } from "./create.ts";
 
 describe("rowPageName", () => {
@@ -203,5 +204,30 @@ describe("valuePatches", () => {
       ok: true,
       patches: [],
     });
+  });
+});
+
+describe("wherePatches", () => {
+  test("a plain value the view asks for is what the row starts with", () => {
+    expect(
+      wherePatches({
+        status: "inbox",
+        priority: [{ gte: 1 }, 2],
+        done: false,
+        due: { empty: false },
+        area: { not: "home" },
+        kind: ["a", "b"],
+        tags: "x",
+        name: "y",
+        kind2: [{ contains: "inbox" }, { not: "done" }],
+        both: ["a", { contains: "b" }],
+      }),
+    ).toEqual([
+      { op: "set-key", path: "status", value: "inbox" },
+      { op: "set-key", path: "priority", value: 2 },
+      { op: "set-key", path: "done", value: false },
+      { op: "set-key", path: "kind2", value: "inbox" },
+      { op: "set-key", path: "both", value: "a" },
+    ]);
   });
 });

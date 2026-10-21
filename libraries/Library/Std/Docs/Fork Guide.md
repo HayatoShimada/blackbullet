@@ -231,7 +231,7 @@ group: status
 * Board の列や Calendar の日の「+」で、その列の値・その日の日付が入った行をその場で作れます。スマホではカードを長押ししてドラッグします。
 * 設定(`columns` `where` `sort` `limit` `weekStart` など)の一覧は、ページ [[Library/Std/Editor/DB View]] にあります。
 * ${widgets.commandButton("Database: Insert View")}(`/database`): データベースとビューを選んで `db` ブロックを挿入します。${widgets.commandButton("Database: New Row")}: 行を作ります。${forkGuide.newDatabaseButton()}: [[CONFIG]] にデータベース定義の雛形を追記して開きます。
-* `database.define` でデータベース(プロパティの型・既定値・置き場・テンプレート)を定義すると、ビューに「+ New」が出て行を追加でき、New の「Row in …」にも出ます(詳細は [[Library/Std/APIs/Database]])。
+* `database.define` でデータベース(プロパティの型・既定値・置き場・テンプレート)を定義すると、ビューに「+ New」が出て行を追加でき、New の「Row in …」にも出ます(詳細は [[Library/Std/APIs/Database]])。ビューの「+ New」で作った行は、`where` が求める値(`status: next`、`status: {contains: inbox}` など)で始まるので、そのビューに残ります。
 
 # `@` で人・日付・ページを呼ぶ
 本文で `@` を打つと、候補が出ます。選ぶと次のように入ります。
