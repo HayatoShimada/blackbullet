@@ -53,6 +53,6 @@ serde_yaml = "0.9"
 uuid = { version = "1", features = ["v4"] }
 aes-gcm = "0.11"
 tempfile = "3"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 notify = "8"
 tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
