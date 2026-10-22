@@ -120,7 +120,10 @@ pub fn extract_zip(src: &Path, dest: &Path) -> Result<(), String> {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("failed to read zip entry {i}: {e}"))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| format!("failed to read zip entry name {i}: {e}"))?
+            .to_string();
         let out_path = safe_extract_path(dest, &name)?;
 
         if entry.is_dir() {
