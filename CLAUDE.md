@@ -57,6 +57,7 @@ Use Docker (Node 24 and Rust images); a Raspberry Pi class host takes 10–20 mi
 - Never point a test instance at a real notes folder; use copies (exclude `.git`). Don't edit one space from two servers at once.
 - `.env`, `.env.*` (except `.env.example`), `.silverbullet.auth.json`, `space/` and `.memo-index/` are gitignored; keep it that way. A space's `CONFIG.md` holds the sidecar token, which is why memo-mcp never indexes it.
 - Don't send private-space content to cloud AI; mark such spaces `:confidential` in `MEMO_SPACES`.
+- `.claude/settings.json` denies agents reading those files. Move secrets file to file (`scp`, redirects); never print them.
 
 ## Architecture (big picture)
 

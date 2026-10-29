@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(/.env)",
+      "Read(/.env.local)",
+      "Read(/.env.*.local)",
+      "Read(/.silverbullet.auth.json)",
+      "Read(/space/**)",
+      "Read(/.memo-index/**)"
+    ]
+  }
+}
