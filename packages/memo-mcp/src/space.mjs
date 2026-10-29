@@ -519,3 +519,136 @@ export async function createTodoPage(spaces, space, title, content) {
   }
   throw new Error("同名の todo ページが多すぎます");
 }
+
+// ---------- 汎用の編集（write_note / edit_note / update_section） ----------
+
+// 汎用の編集ツールが書かない場所。Library/ は Std のコード、Templates/ はテンプレート。
+// ドット始まりは .silverbullet.auth.json や書き込み中の一時ファイル。
+const READ_ONLY_DIRS = ["library", "templates"];
+
+/** 汎用の編集ツールで書いてよいページかを確かめる。CONFIG とスペース外は resolvePage が拒否する。 */
+export function assertWritable(page) {
+  const parts = page.replace(/\\/g, "/").split("/");
+  if (parts.some((p) => p.startsWith("."))) throw new Error(`ドットで始まるパスには書けません: ${page}`);
+  if (READ_ONLY_DIRS.includes(parts[0].toLowerCase())) {
+    throw new Error(`${parts[0]}/ には書けません（Std のコードやテンプレートのため）: ${page}`);
+  }
+}
+
+async function readExisting(full, space, page) {
+  try {
+    return await fs.readFile(full, "utf-8");
+  } catch (e) {
+    if (e.code === "ENOENT") throw new Error(`ページが見つかりません: ${space}/${page}`);
+    throw e;
+  }
+}
+
+async function written(full, space, page, extra = {}) {
+  const stat = await fs.stat(full);
+  return { space, page, ...extra, bytes: stat.size, modified: stat.mtime.toISOString() };
+}
+
+/** ページを丸ごと書く。無ければ作る。既存ページの上書きには expectedModified が要る。 */
+export async function writeNote(spaces, space, page, content, { expectedModified } = {}) {
+  assertWritable(page);
+  const full = resolvePage(spaces, space, page);
+  return withFileLock(full, async () => {
+    let exists = true;
+    try {
+      await fs.access(full);
+    } catch {
+      exists = false;
+    }
+    if (exists) {
+      // ブラウザで開いている内容を黙って消さないよう、読んだ版を示してもらう
+      if (!expectedModified) {
+        throw new Error(`既にあるページです: ${space}/${page}。上書きするには read_note の modified を expected_modified に渡してください`);
+      }
+      await assertUnchanged(full, expectedModified);
+    } else {
+      await fs.mkdir(path.dirname(full), { recursive: true });
+    }
+    await writeAtomic(full, content.endsWith("\n") ? content : `${content}\n`);
+    return written(full, space, page, { created: !exists });
+  });
+}
+
+/** 完全一致の文字列を置き換える。見つからない・複数ある（replaceAll なし）ときは書かずにエラー。 */
+export async function editNote(spaces, space, page, oldText, newText, { replaceAll = false, expectedModified } = {}) {
+  assertWritable(page);
+  if (!oldText) throw new Error("old_text が空です");
+  const full = resolvePage(spaces, space, page);
+  return withFileLock(full, async () => {
+    const current = await readExisting(full, space, page);
+    await assertUnchanged(full, expectedModified);
+    const count = current.split(oldText).length - 1;
+    if (count === 0) throw new Error(`old_text が見つかりません: ${oldText.slice(0, 80)}`);
+    if (count > 1 && !replaceAll) {
+      throw new Error(`old_text が ${count} 箇所にあります。前後の行を含めて一意にするか、replace_all を指定してください`);
+    }
+    const next = replaceAll ? current.split(oldText).join(newText) : current.replace(oldText, () => newText);
+    await writeAtomic(full, next);
+    return written(full, space, page, { replaced: replaceAll ? count : 1 });
+  });
+}
+
+const normHeading = (h) => h.trim().replace(/\s+/g, " ");
+
+/** 見出し行を集める。frontmatter とコードブロックの中の # 行は見出しではない。 */
+function headingLines(lines) {
+  const out = [];
+  let i = 0;
+  if (lines[0]?.trim() === "---") i = lines.findIndex((l, k) => k > 0 && l.trim() === "---") + 1;
+  let fence = null;
+  for (; i < lines.length; i++) {
+    const l = lines[i];
+    const f = /^\s*(```|~~~)/.exec(l);
+    if (f) {
+      if (!fence) fence = f[1];
+      else if (l.trim().startsWith(fence)) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const m = /^(#{1,6})\s+\S/.exec(l);
+    if (m) out.push({ i, level: m[1].length, text: normHeading(l) });
+  }
+  return out;
+}
+
+/**
+ * 見出しの節を置き換える（mode=replace）か、節の末尾に足す（mode=append）。
+ * 節は見出しの次の行から、同じかより上のレベルの次の見出しの手前まで（下位の見出しも節に含む）。
+ * 見出しが無ければページの末尾に作る。
+ */
+export async function updateSection(spaces, space, page, heading, content, { mode = "replace", expectedModified } = {}) {
+  assertWritable(page);
+  const hm = /^(#{1,6})\s+\S/.exec(heading.trim());
+  if (!hm) throw new Error(`見出しは "## 名前" の形で渡してください: ${heading}`);
+  const level = hm[1].length;
+  const full = resolvePage(spaces, space, page);
+  return withFileLock(full, async () => {
+    const current = await readExisting(full, space, page);
+    await assertUnchanged(full, expectedModified);
+    const lines = current.split(/\r?\n/);
+    const body = content.replace(/\s+$/, "").split(/\r?\n/);
+    const headings = headingLines(lines);
+    const h = headings.find((x) => x.text === normHeading(heading));
+    if (!h) {
+      while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+      if (lines.length) lines.push("");
+      lines.push(normHeading(heading), "", ...body, "");
+      await writeAtomic(full, lines.join("\n"));
+      return written(full, space, page, { heading: normHeading(heading), created_heading: true });
+    }
+    const next = headings.find((x) => x.i > h.i && x.level <= level);
+    const end = next ? next.i : lines.length;
+    let contentEnd = end;
+    while (contentEnd > h.i + 1 && lines[contentEnd - 1].trim() === "") contentEnd--;
+    const existing = lines.slice(h.i + 1, contentEnd);
+    const keep = mode === "append" && existing.some((l) => l.trim()) ? existing : [""];
+    lines.splice(h.i + 1, end - (h.i + 1), ...keep, ...body, "");
+    await writeAtomic(full, lines.join("\n"));
+    return written(full, space, page, { heading: h.text, mode });
+  });
+}

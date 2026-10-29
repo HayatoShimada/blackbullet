@@ -55,12 +55,12 @@ if (!ready) {
     const { client, transport } = connect();
     await client.connect(transport);
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 14);
+    assert.equal(tools.length, 17);
     const names = tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
-      "add_inbox", "append_journal", "complete_task", "doc_status", "list_journal",
+      "add_inbox", "append_journal", "complete_task", "doc_status", "edit_note", "list_journal",
       "list_projects", "list_spaces", "list_tasks", "read_note", "read_section",
-      "recent_changes", "reindex_docs", "related_notes", "search_notes",
+      "recent_changes", "reindex_docs", "related_notes", "search_notes", "update_section", "write_note",
     ]);
     await client.close();
   });

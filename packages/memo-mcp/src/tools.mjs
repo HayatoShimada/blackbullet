@@ -15,6 +15,9 @@ import {
   completeTodoPage,
   createTodoPage,
   todoTitle,
+  writeNote,
+  editNote,
+  updateSection,
 } from "./space.mjs";
 import { Indexes } from "./index.mjs";
 import { searchSpace, neighbors } from "./search.mjs";
@@ -593,6 +596,79 @@ export function registerTools(server) {
         const opts = { expectedModified: expected_modified };
         if (line === undefined) return json(await completeTodoPage(spaces, space, page, date ?? today(), opts));
         return json(await completeTask(spaces, space, page, line, date ?? today(), opts));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+  // ---------- 汎用の編集 ----------
+  // 任意のページ（Projects/ など）を書く。Library/ と Templates/、ドット始まり、CONFIG には書けない。
+
+  const pageArg = z.string().describe('ページ名（.md は付けない）。例 "Projects/BlackBullet/Plans/2026-10-29 検索の改善"');
+  const expectedArg = z.string().optional().describe("read_note が返した modified。渡すと、読んだ後に変更されていたら書かずに中断する");
+
+  server.registerTool(
+    "write_note",
+    {
+      title: "ページを書く",
+      description:
+        "ページを丸ごと書く。無ければ（途中のフォルダごと）作る。既にあるページを上書きするときは、read_note で得た modified を expected_modified に渡すこと（無いと拒否する）。" +
+        "一部だけ変えるなら edit_note か update_section を使う。content は frontmatter（--- で囲む）から書いてよい。",
+      inputSchema: { space: spaceEnum, page: pageArg, content: z.string(), expected_modified: expectedArg },
+    },
+    async ({ space, page, content, expected_modified }) => {
+      try {
+        return json(await writeNote(spaces, space, page, content, { expectedModified: expected_modified }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    "edit_note",
+    {
+      title: "ページの一部を置き換える",
+      description:
+        "ページ内の old_text（完全一致、改行を含めてよい）を new_text に置き換える。見つからないとき、複数あるのに replace_all が無いときは書かずにエラー。" +
+        "frontmatter の値（例 \"status: approved\" → \"status: done\"）の変更にも使える。先に read_note で本文と modified を得ておくこと。",
+      inputSchema: {
+        space: spaceEnum,
+        page: pageArg,
+        old_text: z.string(),
+        new_text: z.string(),
+        replace_all: z.boolean().default(false),
+        expected_modified: expectedArg,
+      },
+    },
+    async ({ space, page, old_text, new_text, replace_all = false, expected_modified }) => {
+      try {
+        return json(await editNote(spaces, space, page, old_text, new_text, { replaceAll: replace_all, expectedModified: expected_modified }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.registerTool(
+    "update_section",
+    {
+      title: "節を書き換える",
+      description:
+        "見出し（例 \"## 進捗\"）の節を置き換える（mode=replace）か、節の末尾に足す（mode=append）。" +
+        "節は見出しの次の行から、同じかより上のレベルの次の見出しの手前まで。見出しが無ければページの末尾に作る。ページ自体が無ければエラー（作るのは write_note）。",
+      inputSchema: {
+        space: spaceEnum,
+        page: pageArg,
+        heading: z.string().describe('見出し行そのもの。例 "## 進捗"'),
+        content: z.string().describe("節の本文（見出し行は含めない）。複数行でよい"),
+        mode: z.enum(["replace", "append"]).default("replace"),
+        expected_modified: expectedArg,
+      },
+    },
+    async ({ space, page, heading, content, mode = "replace", expected_modified }) => {
+      try {
+        return json(await updateSection(spaces, space, page, heading, content, { mode, expectedModified: expected_modified }));
       } catch (e) {
         return fail(e);
       }
