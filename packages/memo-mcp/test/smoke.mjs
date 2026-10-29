@@ -26,7 +26,7 @@ test("tools list and basic calls work", async () => {
   };
   try {
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 14);
+    assert.equal(tools.length, 17);
 
     const spaces = JSON.parse((await call("list_spaces")).text);
     assert.equal(spaces.spaces.length, 2);

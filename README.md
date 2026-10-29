@@ -48,7 +48,7 @@ claude mcp add --scope user --transport http memo http://127.0.0.1:3010/mcp \
   --header "Authorization: Bearer <MEMO_MCP_TOKEN>"
 ```
 
-Tools include `search_notes`, `read_note`, `read_section`, `related_notes`, `list_tasks`, `list_projects`, `list_journal`, `recent_changes`, `append_journal`, `add_inbox`, `complete_task`, `doc_status` and `reindex_docs`. `CONFIG` (where tokens and keys live) is never readable through MCP. Other clients and the options are described in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md).
+Tools include `search_notes`, `read_note`, `read_section`, `related_notes`, `list_tasks`, `list_projects`, `list_journal`, `recent_changes`, `append_journal`, `add_inbox`, `complete_task`, `write_note`, `edit_note`, `update_section`, `doc_status` and `reindex_docs`. `CONFIG` (where tokens and keys live) is never readable or writable through MCP, and the general edit tools do not write `Library/` or `Templates/`. `packages/memo-mcp/contrib/plan_to_memo.py` is a Claude Code hook that records each approved agent plan under the project's page. Other clients and the options are described in [`packages/memo-mcp/README.md`](packages/memo-mcp/README.md).
 
 ## Ask your notes
 

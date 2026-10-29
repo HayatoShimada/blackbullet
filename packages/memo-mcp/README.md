@@ -3,7 +3,7 @@
 An MCP server plus a read-only REST API (`/api/ask` is a POST that only reads) over Markdown spaces such as
 [SilverBullet](https://silverbullet.md) / BlackBullet. It provides hybrid search
 (SQLite FTS5 trigram + local multilingual embeddings, merged with Reciprocal Rank Fusion),
-section-level reading, related notes, task / project / journal tools and a few safe write tools.
+section-level reading, related notes, task / project / journal tools and guarded write tools (journal, inbox, tasks, and editing any page).
 Everything runs locally. The sidecar never sends note text to an external service (it only downloads the embedding model once). `/api/ask` returns matching sections to the caller; BlackBullet's `Ask: Notes` sends them to the Anthropic API from the app, see `libraries/Library/Std/Editor/Memo Ask.md`.
 
 (日本語: SilverBullet 系の Markdown スペースを MCP と読み取り専用 REST で公開するサーバー。FTS5 trigram とローカル埋め込みのハイブリッド検索を持ちます。)
@@ -22,7 +22,8 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `src/resources.mjs` | MCP resources (`memo://<space>/<page>`) |
 | `src/rest.mjs` | REST (`/api/search`, `/api/related`, `/api/graph` read-only GET; `/api/ask` POST) reusing the same index and embeddings |
 | `src/export.mjs` | `POST /api/export/pdf` and `/api/export/docx`: a page's HTML (images inlined as data URLs) in, a PDF (headless Chromium `--print-to-pdf`, scripts off, no name resolution) or a .docx (`@turbodocx/html-to-docx`) out. Uses no space or index |
-| `src/tools.mjs` | MCP tool definitions (read tools plus a few write tools) |
+| `src/tools.mjs` | MCP tool definitions (read tools, journal / inbox / task writes, and `write_note` / `edit_note` / `update_section` for any page) |
+| `contrib/plan_to_memo.py` | Claude Code hook: records approved plans under the project's page (see below) |
 | `src/reindex.mjs` / `src/eval.mjs` | Rebuild the index and precompute embeddings / evaluate with a golden set |
 | `src/stdio.mjs` | stdio transport (the MCP client launches the process, optionally over SSH) |
 | `src/http.mjs` | Streamable HTTP transport (run it under a service manager) |
@@ -221,6 +222,39 @@ so a restart does not re-extract unchanged documents. `reindex_docs` bypasses th
 - `complete_task` with only `page` sets `status: done` and `completed: <today, MEMO_TZ>` on a todo page (refused if the page has no `todo` tag); with `line` it ticks a checkbox line. Both use the atomic write, per-file lock and `expected_modified` check.
 - `add_inbox` creates `Tasks/<title>` (title derived from the text: `[[a/b]]` becomes `b`, `[key: value]`, `#tags` and `/ # @ | < > $ \` [ ]` removed, about 40 characters, ` 2`, ` 3` on collision) with `status: inbox` (or `next` / `someday` / `waiting` from a `#tag`), other `#tags` in `tags`, `due` from `[due: ...]` or the argument, and the full text as the body. `mode: "append"` appends a checkbox line to `Inbox.md` instead.
 - `list_projects` excludes `status: done` by default (`status: "all"` lists everything); `open_tasks` counts todo pages whose `project` points at the project plus open checkbox lines inside it.
+
+**Editing any page.** Three general write tools edit pages outside the journal / inbox / task flows (for example `Projects/`). They share the atomic write, the per-file lock and the `expected_modified` check, and refuse `Library/` and `Templates/` (Std code and templates), any path segment starting with a dot, `CONFIG` and paths outside the space.
+
+- `write_note {space, page, content, expected_modified?}` writes a whole page, creating it and its folders if missing. Overwriting an existing page needs `expected_modified` (the `modified` from `read_note`); without it the call is refused, so an edit open in the browser is not silently replaced. Returns `created`.
+- `edit_note {space, page, old_text, new_text, replace_all=false, expected_modified?}` replaces an exact substring (newlines allowed). No match, or several matches without `replace_all`, is an error and nothing is written. Also the way to change a frontmatter value (`status: approved` → `status: done`). Returns `replaced`.
+- `update_section {space, page, heading, content, mode=replace|append, expected_modified?}` replaces, or appends to, the section under a heading line such as `## 進捗`: from the line after it up to the next heading of the same or a higher level (deeper headings belong to the section). `#` lines in frontmatter and code blocks are not headings. A missing heading is created at the end of the page; a missing page is an error (create it with `write_note`).
+
+### Recording agent plans (`contrib/plan_to_memo.py`)
+
+A Claude Code hook that records every approved plan (`ExitPlanMode`) as a child page of the project's page and links it from there, so plans and their progress live next to the project.
+
+- The plan becomes `<project>/Plans/<YYYY-MM-DD> <plan title>` with frontmatter `tags: plan`, `project: "[[<project>]]"`, `status: approved`, `created`, then the plan and an empty `## 進捗`. The project page gets `- [[<page>|<date> <title>]]` under `## Plans` (created at the end if missing). Approving a revised plan in the same session swaps the plan text in that page and keeps its frontmatter and progress; a second plan with the same title and date gets ` 2`.
+- The agent is told the page name in the hook's `additionalContext` and asked to append dated lines to `## 進捗` (`update_section`, `mode: "append"`) and to set `status: done` (`edit_note`) when finished.
+- It talks to the memo MCP server configured in Claude Code: the url and headers of `mcpServers.<server>` in `~/.claude.json`. The bearer token is used for the requests only and never printed.
+- Which project a session belongs to: `~/.config/memo-plans.json`, longest matching directory prefix of the session's working directory. Without the file the hook does nothing; with it but no match it tells the agent the plan was not recorded.
+
+```json
+{
+  "server": "memo",
+  "projects": {
+    "/home/me/src/app": { "space": "notes", "project": "Projects/App" }
+  }
+}
+```
+
+Register it in `~/.claude/settings.json`:
+
+```json
+{ "hooks": { "PostToolUse": [ { "matcher": "ExitPlanMode", "hooks": [
+  { "type": "command", "command": "python3 -I /path/to/packages/memo-mcp/contrib/plan_to_memo.py", "timeout": 30 } ] } ] } }
+```
+
+`MEMO_PLANS_CONFIG`, `MEMO_PLANS_STATE` (default `~/.cache/plan-to-memo/state.json`, which page each session's plan went to) and `MEMO_PLANS_CLAUDE_JSON` override the paths. Tests: `cd contrib && python3 -m unittest` (starts `src/http.mjs` on a temp space).
 
 The image ships without tesseract to stay lean. Build with OCR support:
 `docker build --build-arg WITH_OCR=1 packages/memo-mcp` (adds `tesseract-ocr` with Japanese and English data), then set

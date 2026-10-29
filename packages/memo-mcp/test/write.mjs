@@ -273,3 +273,96 @@ test("add_inbox mode=append は従来どおり Inbox.md に追記する", async 
   const body = await fs.readFile(`${TMP}/Inbox.md`, "utf8");
   assert.match(body, /\* \[ \] legacy one\n\* \[ \] legacy two\n$/);
 });
+
+// ---------- 汎用の編集 ----------
+
+const ok = (r) => {
+  assert.equal(r.isError, false, r.text);
+  return JSON.parse(r.text);
+};
+const read = (page) => fs.readFile(`${TMP}/${page}.md`, "utf8");
+
+test("write_note: 無ければフォルダごと作り、既存の上書きには expected_modified が要る", async () => {
+  const page = "Projects/Sample/Plans/2026-10-29 計画";
+  const made = ok(await call("write_note", { space: "notes", page, content: "---\ntags: plan\n---\n# 計画\n\n## 進捗" }));
+  assert.equal(made.created, true);
+  assert.equal(await read(page), "---\ntags: plan\n---\n# 計画\n\n## 進捗\n");
+
+  const refused = await call("write_note", { space: "notes", page, content: "x" });
+  assert.equal(refused.isError, true);
+  assert.match(refused.text, /expected_modified/);
+  const stale = await call("write_note", { space: "notes", page, content: "x", expected_modified: "2020-01-01T00:00:00.000Z" });
+  assert.equal(stale.isError, true);
+  assert.match(await read(page), /# 計画/);
+
+  const over = ok(await call("write_note", { space: "notes", page, content: "new\n", expected_modified: made.modified }));
+  assert.equal(over.created, false);
+  assert.equal(await read(page), "new\n");
+});
+
+test("write_note / edit_note / update_section は Library/・Templates/・ドット始まり・CONFIG に書かない", async () => {
+  for (const page of ["Library/Std/Foo", "templates/x", ".hidden/x", "Projects/.x", "CONFIG", "../outside"]) {
+    for (const [name, args] of [
+      ["write_note", { content: "x" }],
+      ["edit_note", { old_text: "a", new_text: "b" }],
+      ["update_section", { heading: "## A", content: "x" }],
+    ]) {
+      const r = await call(name, { space: "notes", page, ...args });
+      assert.equal(r.isError, true, `${name} ${page}`);
+    }
+  }
+  await assert.rejects(fs.access(`${TMP}/Library/Std/Foo.md`));
+  await assert.rejects(fs.access(`${TMP}/CONFIG.md`));
+});
+
+test("edit_note: 一意な一致だけ置き換え、0件・複数件（replace_all なし）は書かない", async () => {
+  const page = "Projects/EditMe";
+  ok(await call("write_note", { space: "notes", page, content: "---\nstatus: approved\n---\n- a\n- a\n- b\n" }));
+  const before = await read(page);
+  const none = await call("edit_note", { space: "notes", page, old_text: "- zzz", new_text: "x" });
+  assert.equal(none.isError, true);
+  assert.match(none.text, /見つかりません/);
+  const many = await call("edit_note", { space: "notes", page, old_text: "- a", new_text: "- c" });
+  assert.equal(many.isError, true);
+  assert.match(many.text, /2 箇所/);
+  assert.equal(await read(page), before);
+
+  const st = ok(await call("edit_note", { space: "notes", page, old_text: "status: approved", new_text: "status: done" }));
+  assert.equal(st.replaced, 1);
+  const all = ok(await call("edit_note", { space: "notes", page, old_text: "- a\n", new_text: "- $&c\n", replace_all: true }));
+  assert.equal(all.replaced, 2);
+  assert.equal(await read(page), "---\nstatus: done\n---\n- $&c\n- $&c\n- b\n");
+  const stale = await call("edit_note", { space: "notes", page, old_text: "- b", new_text: "x", expected_modified: "2020-01-01T00:00:00.000Z" });
+  assert.equal(stale.isError, true);
+  assert.match(await read(page), /- b/);
+});
+
+test("update_section: replace は下位の見出しごと次の同レベルの見出しまで、append は節の末尾、無ければ末尾に作る", async () => {
+  const page = "Projects/Sections";
+  ok(await call("write_note", {
+    space: "notes",
+    page,
+    content: "---\n# not a heading: yaml comment\ntags: project\n---\n# Title\n\n## Plans\n\n- old\n\n### sub\n\nsub text\n\n## Links\n\n```\n## not a heading\n```\n- link\n",
+  }));
+  ok(await call("update_section", { space: "notes", page, heading: "## Plans", content: "- one", mode: "append" }));
+  assert.match(await read(page), /## Plans\n\n- old\n\n### sub\n\nsub text\n- one\n\n## Links\n/);
+
+  ok(await call("update_section", { space: "notes", page, heading: "##  Plans ", content: "- only\n- two\n\n" }));
+  assert.match(await read(page), /# Title\n\n## Plans\n\n- only\n- two\n\n## Links\n\n```\n## not a heading\n```\n- link\n$/);
+
+  // コードブロック内の "## not a heading" は見出し扱いしない → 新しく末尾に作る
+  const made = ok(await call("update_section", { space: "notes", page, heading: "## not a heading", content: "x" }));
+  assert.equal(made.created_heading, true);
+  assert.match(await read(page), /- link\n\n## not a heading\n\nx\n$/);
+
+  // 空の節への append は空行 1 つを挟む
+  ok(await call("update_section", { space: "notes", page, heading: "## 進捗", content: "- 2026-10-29 start", mode: "append" }));
+  ok(await call("update_section", { space: "notes", page, heading: "## 進捗", content: "- 2026-10-30 next", mode: "append" }));
+  assert.match(await read(page), /## 進捗\n\n- 2026-10-29 start\n- 2026-10-30 next\n$/);
+
+  const bad = await call("update_section", { space: "notes", page, heading: "Plans", content: "x" });
+  assert.equal(bad.isError, true);
+  const missing = await call("update_section", { space: "notes", page: "Projects/Nope", heading: "## A", content: "x" });
+  assert.equal(missing.isError, true);
+  await assert.rejects(fs.access(`${TMP}/Projects/Nope.md`));
+});
