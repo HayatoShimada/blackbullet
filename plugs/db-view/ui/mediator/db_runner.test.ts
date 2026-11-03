@@ -54,6 +54,12 @@ function setup(
       );
       return write();
     },
+    async updatePageValues(page, changes, modified, database) {
+      log.push(
+        `values ${page} ${changes.map((c) => `${c.key}=${JSON.stringify(c.input)}`).join(" ")} @${modified}${database ? ` db=${database}` : ""}`,
+      );
+      return write();
+    },
     async updateTask(page, pos, state, edit, modified) {
       log.push(
         `task ${page}@${pos} [${state}] ${JSON.stringify(edit)} @${modified}`,
@@ -1123,5 +1129,74 @@ describe("an Undo outlives a rebuilt frame", () => {
     expect(restoreEvent(null, 0)).toBeNull();
     // A time further out than Undo ever lasts is not ours.
     expect(restoreEvent(pending, -UNDO_MS - 1)).toBeNull();
+  });
+});
+
+describe("timeline writes", () => {
+  const tl: Spec = { ...spec, view: "timeline" };
+  const a = row("A", { start: "2026-10-01", due: "2026-10-05" });
+  const b = row("B", {
+    start: "2026-10-06",
+    due: "2026-10-08",
+    blockedBy: ["[[A]]"],
+  });
+
+  test("a move and what it pushes are written in turn, then Undo is offered", async () => {
+    const offered: string[] = [];
+    const { runner, log } = setup(
+      [a, b],
+      undefined,
+      // The fake sleep ends the Undo at once: watch it being offered.
+      { onState: (s) => s.undo && offered.push(s.undo.label) },
+      tl,
+    );
+    runner.emit({ type: "tl.bar.nudge", rowId: "A", edge: "move", delta: 2 });
+    await settle();
+    expect(log).toEqual([
+      'values A start="2026-10-03" due="2026-10-07" @m1',
+      'values B start="2026-10-08" due="2026-10-10" @m1',
+      "query",
+    ]);
+    expect(offered[0]).toBe("Moved to Oct 3 – Oct 7 · 1 pushed later");
+  });
+
+  test("a task's dates go to its line as inline attributes", async () => {
+    const task = row(
+      "Plan@10",
+      { due: "2026-10-01" },
+      { kind: "task", page: "Plan", range: [10, 30], state: " " },
+    );
+    const { runner, log } = setup([task], undefined, {}, tl);
+    runner.emit({
+      type: "tl.bar.nudge",
+      rowId: "Plan@10",
+      edge: "end",
+      delta: 2,
+    });
+    await settle();
+    expect(log[0]).toBe(
+      'task Plan@10 [ ] {"type":"dates","set":{"start":"2026-10-01","due":"2026-10-03"}} @m1',
+    );
+  });
+
+  test("the first write that fails stops the rest and says how far it got", async () => {
+    let n = 0;
+    const { runner, log } = setup(
+      [a, b],
+      () =>
+        ++n === 1
+          ? { ok: true, modified: "m2" }
+          : { ok: false, reason: "stale", message: "B changed." },
+      {},
+      tl,
+    );
+    runner.emit({ type: "tl.bar.nudge", rowId: "A", edge: "move", delta: 2 });
+    await settle();
+    expect(log.slice(0, 2)).toHaveLength(2);
+    expect(runner.getState().notice?.text).toBe(
+      "B changed. (1 of 2 were written.)",
+    );
+    expect(runner.getState().undo).toBeNull();
+    expect(log).toContain("query");
   });
 });

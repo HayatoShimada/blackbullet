@@ -1,5 +1,5 @@
 ---
-description: Insert a database view (table, board or calendar)
+description: Insert a database view (table, board, calendar or timeline)
 tags: meta/template/slash
 ---
 ```db

@@ -38,7 +38,38 @@ export function setTaskDone(
   };
 }
 
-const DUE_ATTRIBUTE = /\s*\[due:\s*[^\]]*\]/;
+/** An inline `[key: value]` attribute of a task line; `key` is a plain
+ * attribute name (letters, digits, `_`). */
+const attributeOf = (key: string) =>
+  new RegExp(String.raw`\s*\[${key}:\s*[^\]]*\]`);
+
+/** Sets (or, given null, clears) the `[key: value]` attributes of a task's
+ * first line: an existing one is replaced where it is, a new one goes at the
+ * end of the line, in the order given. */
+export function setTaskAttributes(
+  text: string,
+  pos: number,
+  expectedState: string,
+  values: Record<string, string | null>,
+): EditResult {
+  if (pos < 0 || pos > text.length) return { ok: false, reason: "stale" };
+  const { start, end } = lineBounds(text, pos);
+  const line = text.slice(start, end);
+  const m = TASK_LINE.exec(line);
+  if (!m) return { ok: false, reason: "not-a-task" };
+  if (m[2] !== expectedState) return { ok: false, reason: "stale" };
+  let next = line;
+  for (const [key, value] of Object.entries(values)) {
+    if (!/^[A-Za-z_]\w*$/.test(key)) return { ok: false, reason: "not-a-task" };
+    const re = attributeOf(key);
+    if (re.test(next)) {
+      next = next.replace(re, value ? ` [${key}: ${value}]` : "");
+    } else if (value) {
+      next = `${next.replace(/\s+$/, "")} [${key}: ${value}]`;
+    }
+  }
+  return { ok: true, text: text.slice(0, start) + next + text.slice(end) };
+}
 
 /** Sets or clears the `[due: ...]` of a task's first line. */
 export function setTaskDue(
@@ -47,23 +78,11 @@ export function setTaskDue(
   expectedState: string,
   due: string | null,
 ): EditResult {
-  if (pos < 0 || pos > text.length) return { ok: false, reason: "stale" };
-  const { start, end } = lineBounds(text, pos);
-  const line = text.slice(start, end);
-  const m = TASK_LINE.exec(line);
-  if (!m) return { ok: false, reason: "not-a-task" };
-  if (m[2] !== expectedState) return { ok: false, reason: "stale" };
-  let next: string;
-  if (DUE_ATTRIBUTE.test(line)) {
-    next = line.replace(DUE_ATTRIBUTE, due ? ` [due: ${due}]` : "");
-  } else {
-    next = due ? `${line.replace(/\s+$/, "")} [due: ${due}]` : line;
-  }
-  return { ok: true, text: text.slice(0, start) + next + text.slice(end) };
+  return setTaskAttributes(text, pos, expectedState, { due });
 }
 
 export type ParsedValue =
-  | { ok: true; value: string | number | boolean | null }
+  | { ok: true; value: string | number | boolean | string[] | null }
   | { ok: false; error: string };
 
 /** What an edited cell becomes in the frontmatter. An empty cell clears the
@@ -82,6 +101,7 @@ export function parseCellInput(
       ? { ok: true, value: iso }
       : { ok: false, error: "Use a date like 2026-10-02" };
   }
+  if (kind === "pages") return { ok: true, value: pageLinks(text) };
   if (kind === "number") {
     const n = Number(text);
     return Number.isFinite(n)
@@ -89,6 +109,19 @@ export function parseCellInput(
       : { ok: false, error: "Use a number" };
   }
   return { ok: true, value: text };
+}
+
+/** `[[A]], B|b` as links: `["[[A]]", "[[B|b]]"]`. Commas inside `[[ ]]`
+ * belong to the link. */
+export function pageLinks(text: string): string[] {
+  const out: string[] = [];
+  for (const part of text.match(/\s*\[\[[^\]]*\]\]|[^,]+/g) ?? []) {
+    const t = part.trim();
+    if (t === "") continue;
+    const link = t.startsWith("[[") ? t : `[[${t}]]`;
+    if (!out.includes(link)) out.push(link);
+  }
+  return out;
 }
 
 /** A write is stale when the page changed after the row was read. */

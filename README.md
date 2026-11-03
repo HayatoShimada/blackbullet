@@ -8,7 +8,7 @@ BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silver
 
 - **Write**: block editor with drag handles and folding, page tree with drag-and-drop, page cover and icon, quick notes (`Ctrl-q q`) and a daily journal (`Ctrl-q j`); a mode chip in the header shows Edit or Preview (`Ctrl-Alt-p`, `Editor: Toggle Preview`), and with vim keys (on by default where there is a mouse) NORMAL / INSERT / VISUAL, where `Esc` steps Insert → Normal → Preview; beside it a Styled | Code segment hides or shows the Markdown marks (`Ctrl-Alt-k`, `Editor: Toggle Code`, `:code` / `:styled`).
 - **Find**: one search over every section by words and meaning (`Ctrl-q s`), related notes for the page you are on (`Ctrl-q r`), and a graph of links and similar pages (`Ctrl-Shift-g`).
-- **Organise**: databases declared once (typed properties, folder, template) and shown as table, board or calendar views you edit in place; one **New** for pages, rows, quick notes and journal entries (`Ctrl-Alt-n`); a trash you can restore from.
+- **Organise**: databases declared once (typed properties, folder, template) and shown as table, board, calendar or timeline (Gantt) views you edit in place; one **New** for pages, rows, quick notes and journal entries (`Ctrl-Alt-n`); a trash you can restore from.
 - **Ask**: answers from your own notes with citations, follow-up questions, and answers saved as pages (`Ctrl-q a`, needs an Anthropic API key).
 - **Documents**: PDF, Word, Excel, PowerPoint, OpenDocument and HTML files in the folder are searchable too, with optional OCR.
 - **Export**: a page as PDF, Word (.docx) or Markdown with its images (.zip), from `Ctrl-e`, the tree's **Export…** or `Export: PDF` / `Export: Word` / `Export: Markdown with Images` (PDF and Word are made by the sidecar).
@@ -70,7 +70,7 @@ database.define {
 }
 ```
 
-Then a ```` ```db ```` block with `database: projects` shows it as a table, board or calendar with **+ New**, filters, a row menu (rename, duplicate, archive, move to trash) and **Save view**. `Database: Insert View` (or `/database`) writes the block for you. See [`DB View.md`](libraries/Library/Std/Editor/DB%20View.md) and [`Database.md`](libraries/Library/Std/APIs/Database.md).
+Then a ```` ```db ```` block with `database: projects` shows it as a table, board, calendar or timeline with **+ New**, filters, a row menu (rename, duplicate, archive, move to trash) and **Save view**. `Database: Insert View` (or `/database`) writes the block for you. See [`DB View.md`](libraries/Library/Std/Editor/DB%20View.md) and [`Database.md`](libraries/Library/Std/APIs/Database.md).
 
 ## Phone and other devices
 

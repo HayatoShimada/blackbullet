@@ -16,7 +16,7 @@ BlackBullet の使い方です。ヘッダー右端の「?」、または ${widg
 | データベース | Database | 同じプロパティを持つページの集まり |
 | プロパティ | Property | 行が持つ、型のある項目 |
 | 行 | Row | データベースの 1 ページ |
-| ビュー | View(Table · Board · Calendar) | データベースの見え方 |
+| ビュー | View(Table · Board · Calendar · Timeline) | データベースの見え方 |
 | タスク | Task | `* [ ]` の行 |
 | ジャーナル | Journal: Today | 1 日 1 ページ |
 | クイックノート / 受信箱 | Quick note / Inbox | すぐ書く / その置き場 |
@@ -195,8 +195,8 @@ pageDecoration:
 
 見出し(`/h1` 〜 `/h4`)、タスク(`/task`)、コールアウト(`/note-admonition` など)、水平線(`/hr`)、表(`/table`)は、元からあるものです。
 
-# データベースとビュー(Table · Board · Calendar)
-ページに ```` ```db ```` のコードブロックを書くと、データベースやタスクを Table・Board・Calendar で表示し、**その場で書き換え**られます。`/db` で雛形を挿入できます。例は [[Library/Std/Examples/Project Board]] と [[Library/Std/Examples/Task List]] にあります。
+# データベースとビュー(Table · Board · Calendar · Timeline)
+ページに ```` ```db ```` のコードブロックを書くと、データベースやタスクを Table・Board・Calendar・Timeline で表示し、**その場で書き換え**られます。`/db` で雛形を挿入できます。例は [[Library/Std/Examples/Project Board]]・[[Library/Std/Examples/Task List]]・[[Library/Std/Examples/Project Timeline]] にあります。
 
 ````
 ```db
@@ -218,18 +218,29 @@ group: status
 | Table(`view: table`) | ヘッダのクリックで並べ替え。編集できるセルは、ホバーで鉛筆が出ます(タッチは 1 回タップ)。`Enter` で保存、`Esc` で取消。タスクのチェックで完了の切替 |
 | Board(`view: board`) | `group`(既定は、タスクならページ、データベースなら最初の選択プロパティ)の値ごとの列。カードを別の列へドラッグすると、その属性を書き換える。列の順は `order` |
 | Calendar(`view: calendar`) | `date`(既定 `due`)の日にカードを置く。カードを別の日へドラッグすると期限を書き換える。「No date」へ落とすと消える |
+| Timeline(`view: timeline`) | ガントチャート。`start`〜`due` を横棒で出す(start が無ければ due の 1 日)。左に表、右に横棒(下に詳細) |
 
-* ヘッダは左から、タイトルと件数・Table / Board / Calendar・「Filter…」・「+ New」・「⋯」です。「⋯」に「Save view」(いまのタブ・並べ替え・絞り込みをブロックへ書き戻す)と「Reload」があります。
+* Timeline の操作:
+  * 横棒をドラッグすると期間ごと動き、両端をドラッグすると開始・終了だけが動きます(1 日単位。動かしている間は日付が出ます)。クリックでそのページを開きます。横棒にフォーカスして ← → で 1 日、Shift+← → で終わり、Alt+Shift+← → で始まりが動きます。
+  * 日付の無い行は、横棒の段が空です。段をクリックするとその日が付きます。「No date (N)」の一覧から日へドラッグしても付けられます。
+  * データベースのビューでは、いちばん下の空いた段を横にドラッグすると、その期間の行を作れます(題名の入力が出ます)。
+  * Day・Week・Month・Quarter・Year で目盛りを変え、「Today」で今日へ戻ります。端までスクロールすると先が足されます。週末は網掛け、今日は赤い縦線です。
+  * 「Group」で、選択・ページの属性ごとにまとめます。見出しで折りたためます。「Table」で左の表を隠せます。表の右端をドラッグすると幅が変わります。
+  * サブアイテム: `parent` で別の行を指すページは、その下に入ります(チェックボックス行は字下げの親子)。▸ で開きます。親の横棒の下には子の期間が薄い帯で出て、親に日付が無ければ、子の期間をハッチの横棒と「完了数/全数」で出します。
+  * Projects のビューでは、`project` でそのプロジェクトを指すページと、そのページのチェックボックス行が、プロジェクトの下に入ります。
+  * 依存関係: `blockedBy` に別の行があると、その行の終わりからこの行の始まりへ矢印が出ます。先に始まってしまう(重なる)ものは赤です。横棒の右端の丸を別の横棒へドラッグすると「その行がこの行を待つ」ようにつなぎます(輪になるつなぎ方は断ります)。矢印をクリックすると「Remove dependency」で外せます。待たれている横棒を動かすと、重なった分だけ後ろの行も後ろへずれ、「Moved to Oct 3 – Oct 7 · 1 pushed later · Undo」が出ます。Undo で全部元に戻ります。
+  * タスク(チェックボックス行)の日付は、行の `[start: ...]` と `[due: ...]` に書かれます。
+* ヘッダは左から、タイトルと件数・Table / Board / Calendar / Timeline・「Filter…」・「+ New」・「⋯」です。「⋯」に「Save view」(いまのタブ・並べ替え・絞り込み、Timeline ならズームとグループを、ブロックへ書き戻す)と「Reload」があります。
 * 書き換えは Markdown のファイルへ直接書かれます(ページの frontmatter、またはタスクの行)。
 * **表示を読んだあとにページが変わっていたら、書き込みません**(「ページが変わっています」と出て、表示を読み直します)。
-* タスクで書き換えられるのは、完了と期限だけです。ページの名前・タグ・タスク数は表では編集しません。
+* タスクで書き換えられるのは、完了と期限(Timeline では開始も)だけです。ページの名前・タグ・タスク数は表では編集しません。
 * 期限は ISO の日付(`2026-10-14`)で書き、遅れているものには「overdue」と文字が付きます。完了したものは、遅れていても灰色です。
 * 完了のチェックは、行を残したまま「Done · Undo」を 8 秒出します。「Undo」で未完了に戻ります。
 * 行の「⋯」(Row actions)は、「Rename」(被リンクも更新)・「Duplicate」・「Archive」/「Unarchive」・「Move to trash」(一番下)です。アーカイブした行は、ブロックに `archived: true` を書かない限り表示されません。
 * 作成日時・更新日時(`created` / `modified`)は読み取り専用の列で、`sort: -modified` のように並べ替えにも使えます。
 * `where` では `{due: {before: today}}` や `status: [{not: done}, {not: someday}]` のように、等しい以外の条件(`not lt lte gt gte before after contains empty`)も書けます。
 * Board の列や Calendar の日の「+」で、その列の値・その日の日付が入った行をその場で作れます。スマホではカードを長押ししてドラッグします。
-* 設定(`columns` `where` `sort` `limit` `weekStart` など)の一覧は、ページ [[Library/Std/Editor/DB View]] にあります。
+* 設定(`columns` `where` `sort` `limit` `weekStart`、Timeline の `start` `parent` `dependsOn` `zoom` など)の一覧は、ページ [[Library/Std/Editor/DB View]] にあります。
 * ${widgets.commandButton("Database: Insert View")}(`/database`): データベースとビューを選んで `db` ブロックを挿入します。${widgets.commandButton("Database: New Row")}: 行を作ります。${forkGuide.newDatabaseButton()}: [[CONFIG]] にデータベース定義の雛形を追記して開きます。
 * `database.define` でデータベース(プロパティの型・既定値・置き場・テンプレート)を定義すると、ビューに「+ New」が出て行を追加でき、New の「Row in …」にも出ます(詳細は [[Library/Std/APIs/Database]])。ビューの「+ New」で作った行は、`where` が求める値(`status: next`、`status: {contains: inbox}` など)で始まるので、そのビューに残ります。
 

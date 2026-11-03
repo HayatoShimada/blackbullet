@@ -109,3 +109,16 @@ describe("patchBlockBody edge cases", () => {
     expect(out).toContain("  # note");
   });
 });
+
+describe("timeline keys", () => {
+  test("zoom and group are written when given", () => {
+    expect(
+      patchBlockBody("source: projects\nview: board\nzoom: week", {
+        view: "timeline",
+        filter: "",
+        zoom: "month",
+        group: "area",
+      }),
+    ).toBe("source: projects\nview: timeline\nzoom: month\ngroup: area");
+  });
+});

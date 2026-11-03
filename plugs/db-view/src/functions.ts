@@ -27,13 +27,22 @@ import {
 import { isoDate, matchesWhere, pageName } from "./derive.ts";
 import {
   isStale,
+  type ParsedValue,
   parseCellInput,
   parsePropertyInput,
+  setTaskAttributes,
   setTaskDone,
   setTaskDue,
 } from "./edit.ts";
 import type { CellKind, DatabaseSpec, DbRow, Spec } from "./model.ts";
-import { countTasks, isListedTaskPage, pageRow, taskRow } from "./rows.ts";
+import {
+  countTasks,
+  isListedTaskPage,
+  nestTasks,
+  pageRow,
+  taskRow,
+} from "./rows.ts";
+import { linkTarget } from "./timeline.ts";
 import { replaceBlock, patchBlockBody, type SavedView } from "./viewblock.ts";
 import { databaseFrom, databaseName, parseSpec } from "./spec.ts";
 
@@ -49,6 +58,10 @@ export type ViewModel = {
   rows: DbRow[];
   /** More rows matched than were loaded. */
   truncated: boolean;
+  /** A projects view's rows under its projects (the todo pages whose
+   * `project` names one, and the tasks on a project's page), for the
+   * timeline; not rows of the view itself. */
+  children?: DbRow[];
   /** Today, in the reader's time zone. */
   today: string;
   /** The ```db block that drew this view, for "Save view" (absent on a
@@ -89,10 +102,11 @@ async function pagesWithTag(tag: string): Promise<Record<string, any>[]> {
 export async function loadRows(
   spec: Spec,
   today: string = isoDate(new Date()),
-): Promise<{ rows: DbRow[]; truncated: boolean }> {
+): Promise<{ rows: DbRow[]; truncated: boolean; children?: DbRow[] }> {
   let rows: DbRow[];
+  let children: DbRow[] | undefined;
   if (spec.source.kind === "tasks") {
-    rows = (await tasksOf()).map(taskRow);
+    rows = nestTasks((await tasksOf()).map(taskRow));
   } else {
     const tag = spec.source.kind === "projects" ? "project" : spec.source.tag;
     const folder = spec.database?.folder;
@@ -114,16 +128,47 @@ export async function loadRows(
   if (!spec.showArchived && !("archived" in spec.where))
     rows = rows.filter((r) => r.values.archived !== true);
   rows = rows.filter((r) => matchesWhere(r, spec.where, today));
+  const shown = rows.slice(0, spec.limit);
+  if (isProjects(spec)) children = await childrenOf(shown);
   return {
-    rows: rows.slice(0, spec.limit),
+    rows: shown,
     truncated: rows.length > spec.limit,
+    ...(children ? { children } : {}),
   };
+}
+
+/** A view of projects: the `projects` source, or the `project` tag's. */
+const isProjects = (spec: Spec) =>
+  spec.source.kind === "projects" ||
+  (spec.source.kind === "tag" && spec.source.tag === "project");
+
+/** What sits under these projects: the pages whose `project` links to one,
+ * and the tasks on a project's own page. */
+async function childrenOf(projects: readonly DbRow[]): Promise<DbRow[]> {
+  const ids = new Set(projects.map((p) => p.id));
+  if (ids.size === 0) return [];
+  const linked = await index.queryLuaObjects<Record<string, any>>("page", {
+    objectVariable: "_",
+    where: await lua.parseExpression("_.project ~= nil"),
+  });
+  const out: DbRow[] = [];
+  for (const p of linked) {
+    const target = linkTarget(p.project);
+    if (!target || !ids.has(target) || String(p.name).startsWith(TRASH))
+      continue;
+    if (p.archived === true || ids.has(String(p.name))) continue;
+    out.push({ ...pageRow(p), parentId: target });
+  }
+  const tasks = (await tasksOf())
+    .filter((t) => ids.has(String(t.page)))
+    .map(taskRow);
+  return [...out, ...nestTasks(tasks, (t) => t.page)];
 }
 
 async function buildModel(spec: Spec): Promise<ViewModel> {
   const today = isoDate(new Date());
-  const { rows, truncated } = await loadRows(spec, today);
-  return { spec, rows, truncated, today };
+  const { rows, truncated, children } = await loadRows(spec, today);
+  return { spec, rows, truncated, today, ...(children ? { children } : {}) };
 }
 
 async function widgetOf(
@@ -356,9 +401,17 @@ async function currentModified(page: string): Promise<string> {
   return String((await space.getPageMeta(page)).lastModified ?? "");
 }
 
+/** One attribute to set: as typed (a cell's text, a checkbox), or a list of
+ * page links as is. */
+export type ValueChange = {
+  key: string;
+  kind: CellKind;
+  input: string | boolean | string[];
+};
+
 /** Sets or clears one frontmatter attribute. Refuses if the page has changed
  * since the row was read, or the value breaks what `database` declares. */
-export async function updatePageValue(
+export function updatePageValue(
   page: string,
   key: string,
   kind: CellKind,
@@ -366,29 +419,47 @@ export async function updatePageValue(
   modified: string,
   database?: string,
 ): Promise<WriteResult> {
-  // A declared property is held to its type and options, whatever `kind` the
-  // caller sent.
-  const declared = (await databaseOf(database))?.properties.find(
-    (p) => p.key === key,
-  );
-  const parsed = declared
-    ? parsePropertyInput(declared, input)
-    : parseCellInput(kind, input);
-  if (!parsed.ok)
-    return { ok: false, reason: "invalid", message: parsed.error };
+  return updatePageValues(page, [{ key, kind, input }], modified, database);
+}
+
+/** Sets or clears several frontmatter attributes in one write (a bar's start
+ * and end). The same checks as `updatePageValue`; nothing is written unless
+ * every value is good. */
+export async function updatePageValues(
+  page: string,
+  changes: ValueChange[],
+  modified: string,
+  database?: string,
+): Promise<WriteResult> {
+  const declared = (await databaseOf(database))?.properties ?? [];
+  const patches: { op: string; path: string; value?: unknown }[] = [];
+  for (const { key, kind, input } of changes) {
+    const property = declared.find((p) => p.key === key);
+    let parsed: ParsedValue;
+    if (Array.isArray(input)) {
+      parsed = { ok: true, value: input.length ? input.map(String) : null };
+    } else {
+      parsed = property
+        ? parsePropertyInput(property, input)
+        : parseCellInput(kind, input);
+    }
+    if (!parsed.ok)
+      return { ok: false, reason: "invalid", message: parsed.error };
+    patches.push(
+      parsed.value === null
+        ? { op: "delete-key", path: key }
+        : { op: "set-key", path: key, value: parsed.value },
+    );
+  }
   try {
     if (isStale(modified, await currentModified(page))) {
       return { ok: false, reason: "stale", message: STALE };
     }
     const text = await space.readPage(page);
-    const patch =
-      parsed.value === null
-        ? { op: "delete-key", path: key }
-        : { op: "set-key", path: key, value: parsed.value };
     const next: string = await system.invokeFunction(
       "index.patchFrontmatter",
       text,
-      [patch],
+      patches,
     );
     if (next === text) return { ok: true, modified };
     const meta = await space.writePage(page, next);
@@ -404,7 +475,9 @@ export async function updatePageValue(
 
 export type TaskEdit =
   | { type: "done"; done: boolean }
-  | { type: "due"; due: string | null };
+  | { type: "due"; due: string | null }
+  /** Dates as inline attributes (`[start: …]`, `[due: …]`); null clears. */
+  | { type: "dates"; set: Record<string, string | null> };
 
 /** Edits a task's line. Refuses if the page has changed since the row was
  * read, or the line no longer shows the task the index saw. */
@@ -420,6 +493,14 @@ export async function updateTask(
     if (!parsed.ok)
       return { ok: false, reason: "invalid", message: parsed.error };
   }
+  if (edit.type === "dates") {
+    for (const value of Object.values(edit.set)) {
+      if (value === null) continue;
+      const parsed = parseCellInput("date", value);
+      if (!parsed.ok)
+        return { ok: false, reason: "invalid", message: parsed.error };
+    }
+  }
   try {
     if (isStale(modified, await currentModified(page))) {
       return { ok: false, reason: "stale", message: STALE };
@@ -428,7 +509,9 @@ export async function updateTask(
     const result =
       edit.type === "done"
         ? setTaskDone(text, pos, state, edit.done)
-        : setTaskDue(text, pos, state, edit.due);
+        : edit.type === "due"
+          ? setTaskDue(text, pos, state, edit.due)
+          : setTaskAttributes(text, pos, state, edit.set);
     if (!result.ok) {
       return {
         ok: false,

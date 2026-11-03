@@ -312,3 +312,39 @@ describe("where operators and filter", () => {
     expect(r.ok && r.spec.filter).toBeUndefined();
   });
 });
+
+describe("timeline settings", () => {
+  test("reads start, parent, dependsOn and zoom; a group is remembered as named", () => {
+    const r = parseSpec({
+      source: "projects",
+      view: "timeline",
+      start: "begin",
+      zoom: "month",
+      group: "area",
+    });
+    expect(r.ok && r.spec).toMatchObject({
+      view: "timeline",
+      start: "begin",
+      zoom: "month",
+      grouped: true,
+    });
+    const plain = parseSpec({ source: "projects", view: "timeline" });
+    expect(plain.ok && plain.spec.grouped).toBeUndefined();
+  });
+
+  test("refuses an unknown zoom or an empty key", () => {
+    expect(parseSpec({ source: "projects", zoom: "decade" })).toEqual({
+      ok: false,
+      error: "zoom must be one of: day, week, month, quarter, year",
+    });
+    expect(parseSpec({ source: "projects", start: " " }).ok).toBe(false);
+  });
+
+  test("a database may declare a list of page links", () => {
+    const d = databaseFrom({
+      name: "t",
+      properties: [{ key: "blockedBy", type: "pages" }],
+    });
+    expect(d?.properties).toEqual([{ key: "blockedBy", type: "pages" }]);
+  });
+});

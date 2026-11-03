@@ -59,6 +59,8 @@ function widgetDeps(
   return {
     updatePageValue: (page, key, kind, input, modified, database) =>
       call("updatePageValue", page, key, kind, input, modified, database),
+    updatePageValues: (page, changes, modified, database) =>
+      call("updatePageValues", page, changes, modified, database),
     updateTask: (page, pos, state, edit, modified) =>
       call("updateTask", page, pos, state, edit, modified),
     query: (spec) => call("query", spec),

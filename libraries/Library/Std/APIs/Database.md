@@ -11,7 +11,7 @@ Defines a database. Options:
 * `folder`: where its pages live and where new rows are made, e.g. `Projects/`; default: `<name>/`. A trailing `/` is added when missing. Only pages under the folder are rows.
 * `template`: a page that seeds a new row. Its body is expanded like a page template: `${...}` is evaluated, with `title`, `page` and `database` in scope (`${title}`, `${os.date("%Y-%m-%d")}`). Its own frontmatter is merged into the new row (also expanded), except keys that describe the template itself (`tags`, `command`, `key`, `mac`, `priority`, `suggestedName`, `confirmName`, `openIfExists`, `description`, `displayName`, `range`); a `frontmatter:` key, as in a page template, holds the page's own attributes. The row's tag and the properties' defaults win over the template's.
 * `title`: shown as the view's heading; default: the name.
-* `properties`: an ordered list of `{ key, type, label?, options?, default? }`. `type` is one of `text`, `select`, `date`, `number`, `boolean`, `page` (a link to another page). A `select` needs `options`. A `default` is written into every new row; for a `date`, `default = "today"` is the day the row is made. The options and the type of a property are enforced when a view writes it: a `select` takes only one of its options. Enforcement applies to writes made through a database-backed view (which names the database), not to edits made by hand.
+* `properties`: an ordered list of `{ key, type, label?, options?, default? }`. `type` is one of `text`, `select`, `date`, `number`, `boolean`, `page` (a link to another page), `pages` (a list of such links, like `blockedBy`; no `default`). A `select` needs `options`. A `default` is written into every new row; for a `date`, `default = "today"` is the day the row is made. The options and the type of a property are enforced when a view writes it: a `select` takes only one of its options. Enforcement applies to writes made through a database-backed view (which names the database), not to edits made by hand.
 * `order`: for a board, the order of its columns, e.g. `{"active", "someday", "done"}`.
 
 The definition is stored as `config.databases.<name>` and the tag's schema is declared with `tag.define`, so the properties are validated and completed in frontmatter. If the tag already has a schema (a builtin's, or another database's on the same tag), the properties are merged into it: the database's win on a clash, and its other keys are kept.
@@ -25,7 +25,7 @@ Expands the `${...}` in `text` with the fields of `ctx` in scope, as `template.n
 The names of the defined databases, sorted. Used by the commands in [[Library/Std/Editor/DB View]].
 
 ## database.viewBlock(name, view)
-The Markdown of a `db` block that shows the database `name`, as a `table` (default), `board` or `calendar`. Insert it into a page to get the view.
+The Markdown of a `db` block that shows the database `name`, as a `table` (default), `board`, `calendar` or `timeline`. Insert it into a page to get the view.
 
 ## database.defineSnippet(name)
 A `space-lua` block with a `database.define` call for a new database called `name`, with a `status` and a `due` property to start from. [[Library/Std/Editor/DB View]] appends it to `CONFIG` with the command **Database: Define in CONFIG**.
@@ -70,7 +70,7 @@ config.define("databases", {
           type = "object",
           properties = {
             key = { type = "string" },
-            type = { type = "string", enum = {"text", "select", "date", "number", "boolean", "page"} },
+            type = { type = "string", enum = {"text", "select", "date", "number", "boolean", "page", "pages"} },
             label = { type = "string" },
             options = { type = "array", items = { type = "string" } },
             default = {},
@@ -86,6 +86,7 @@ config.define("databases", {
 
 local propertyTypes = {
   text = true, select = true, date = true, number = true, boolean = true, page = true,
+  pages = true,
 }
 
 -- The frontmatter schema of one property, for tag.define.
@@ -96,6 +97,8 @@ local function propertySchema(p)
     return { type = "number" }
   elseif p.type == "boolean" then
     return { type = "boolean" }
+  elseif p.type == "pages" then
+    return { type = "array", items = { type = "string" } }
   end
   return { type = "string" }
 end
@@ -131,7 +134,7 @@ function database.define(spec)
       where .. "property " .. i .. " needs a key")
     assert(propertyTypes[p.type],
       where .. "property " .. p.key .. " has an unknown type " .. tostring(p.type)
-        .. " (text, select, date, number, boolean, page)")
+        .. " (text, select, date, number, boolean, page, pages)")
     assert(p.key ~= "tags", where .. "property key 'tags' is reserved (it holds the tag)")
     assert(not seen[p.key], where .. "property " .. p.key .. " is declared twice")
     seen[p.key] = true
@@ -148,6 +151,7 @@ function database.define(spec)
     if p.default ~= nil then
       local d = p.default
       local what = where .. "property " .. p.key .. ": default "
+      assert(p.type ~= "pages", what .. "is not supported for a list of pages")
       if p.type == "number" then
         assert(type(d) == "number", what .. "must be a number")
       elseif p.type == "boolean" then
@@ -232,8 +236,8 @@ local fence = string.rep("`", 3)
 
 function database.viewBlock(name, view)
   view = view or "table"
-  assert(view == "table" or view == "board" or view == "calendar",
-    "database.viewBlock: view must be table, board or calendar")
+  assert(view == "table" or view == "board" or view == "calendar" or view == "timeline",
+    "database.viewBlock: view must be table, board, calendar or timeline")
   return fence .. "db\ndatabase: " .. yamlScalar(name) .. "\nview: " .. view .. "\n" .. fence .. "\n"
 end
 

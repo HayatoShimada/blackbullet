@@ -3,6 +3,7 @@ import type {
   RowResult,
   SaveViewResult,
   TaskEdit,
+  ValueChange,
   ViewModel,
   WriteResult,
 } from "../../src/functions.ts";
@@ -18,6 +19,7 @@ import {
   transition,
   UNDO_MS,
 } from "./db_mediator.ts";
+import type { ValueSet } from "./timeline_mediator.ts";
 
 /** Everything the runner touches outside the pure machine: the plug's
  * functions, reached from the iframe by syscall. */
@@ -31,6 +33,12 @@ export type DbRunnerDeps = {
     key: string,
     kind: CellKind,
     input: string | boolean,
+    modified: string,
+    database?: string,
+  ): Promise<WriteResult>;
+  updatePageValues(
+    page: string,
+    changes: ValueChange[],
     modified: string,
     database?: string,
   ): Promise<WriteResult>;
@@ -275,6 +283,69 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
     });
   }
 
+  /** A timeline's writes, one row after another. A row whose page an
+   * earlier write changed is written against that page's new time. The first
+   * that fails stops the rest; what landed before it is read back. */
+  async function writeMany(effect: Extract<DbEffect, { type: "writeMany" }>) {
+    const fresh = new Map<string, string>();
+    const results: { rowId: string; modified: string; changes: ValueSet[] }[] =
+      [];
+    for (const { row, changes } of effect.writes) {
+      const modified = fresh.get(row.page) ?? row.modified;
+      let result: WriteResult;
+      try {
+        if (row.kind === "page") {
+          result = await deps.updatePageValues(
+            row.page,
+            changes.map((c) => ({
+              key: c.key,
+              kind: c.kind,
+              input: c.value ?? "",
+            })),
+            modified,
+            ...(effect.database ? [effect.database] : []),
+          );
+        } else if (!row.range) {
+          result = {
+            ok: false,
+            reason: "failed",
+            message: "That task could not be located in its page.",
+          };
+        } else {
+          const set: Record<string, string | null> = {};
+          for (const c of changes)
+            set[c.key] = Array.isArray(c.value) ? null : c.value;
+          result = await deps.updateTask(
+            row.page,
+            row.range[0],
+            row.state ?? " ",
+            { type: "dates", set },
+            modified,
+          );
+        }
+      } catch (e) {
+        result = { ok: false, reason: "failed", message: errorMessage(e) };
+      }
+      if (!result.ok) {
+        emit({
+          type: "write.failed",
+          reason: result.reason,
+          message:
+            results.length > 0
+              ? `${result.message} (${results.length} of ${effect.writes.length} were written.)`
+              : result.message,
+        });
+        if (results.length > 0 && result.reason !== "stale")
+          emit({ type: "reload" });
+        return;
+      }
+      fresh.set(row.page, result.modified);
+      written.set(row.page, result.modified);
+      results.push({ rowId: row.id, modified: result.modified, changes });
+    }
+    emit({ type: "tl.written", results });
+  }
+
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -402,6 +473,8 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
         view: effect.view,
         ...(effect.sort ? { sort: effect.sort } : {}),
         filter: effect.filter,
+        ...(effect.zoom ? { zoom: effect.zoom } : {}),
+        ...(effect.group ? { group: effect.group } : {}),
       });
     } catch (e) {
       result = { ok: false, reason: "failed", message: errorMessage(e) };
@@ -417,6 +490,8 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
     switch (effect.type) {
       case "write":
         return write(effect);
+      case "writeMany":
+        return writeMany(effect);
       case "rowAction":
         return rowAction(effect);
       case "create":
@@ -434,6 +509,7 @@ export function createDbRunner(initial: DbState, deps: DbRunnerDeps): DbRunner {
           emit({
             type: "rows.loaded",
             rows: model.rows,
+            ...(model.children ? { children: model.children } : {}),
             truncated: model.truncated,
             today: model.today,
           });

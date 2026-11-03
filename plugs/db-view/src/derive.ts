@@ -319,6 +319,7 @@ export function cellKind(
 ): CellKind {
   const declared = declaredProperty(key, database);
   if (declared) return declared.type === "page" ? "text" : declared.type;
+  if (key === "blockedBy") return "pages";
   if (key === "status") return "select";
   if (DATE_KEY.test(key)) return "date";
   const values = rows.map((r) => valueOf(r, key)).filter((v) => !isEmpty(v));
@@ -397,7 +398,7 @@ export function columnsFor(rows: readonly DbRow[], spec: Spec): Column[] {
       kind,
       editable: !readOnly,
       ...(options ? { options } : {}),
-      ...(declared?.type === "page" ? { link: true } : {}),
+      ...(declared?.type === "page" || kind === "pages" ? { link: true } : {}),
     };
   });
 }

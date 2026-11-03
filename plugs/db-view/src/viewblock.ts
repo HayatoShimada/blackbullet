@@ -2,15 +2,19 @@
  * Saving a view: the reader's tab, sort and filter phrase written back into
  * the ```db block they came from. Pure text work, so it is tested alone; the
  * plug reads and writes the page. Only the three keys are touched: comments,
- * order and every other line of the block stay as they were.
+ * order and every other line of the block stay as they were (a timeline adds
+ * its `zoom` and `group`).
  */
-import type { ViewKind } from "./model.ts";
+import type { ViewKind, Zoom } from "./model.ts";
 
 export type SavedView = {
   view: ViewKind;
   sort?: { key: string; desc: boolean };
   /** The filter phrase; empty removes the key. */
   filter: string;
+  /** A timeline's zoom and grouping: set when given, left alone otherwise. */
+  zoom?: Zoom;
+  group?: string;
 };
 
 /** A YAML scalar: plain when that is safe, double-quoted otherwise. */
@@ -70,6 +74,8 @@ export function patchBlockBody(body: string, saved: SavedView): string {
     "filter",
     saved.filter.trim() === "" ? undefined : JSON.stringify(saved.filter),
   );
+  if (saved.zoom) setKey(lines, "zoom", saved.zoom);
+  if (saved.group) setKey(lines, "group", scalar(saved.group));
   return lines.join("\n");
 }
 
