@@ -10,7 +10,9 @@ function serializeToYamlScalar(
   if (typeof value === "string") {
     if (
       value === "" || // Empty string
-      value.match(/[:{#}[],&*!|>'"%@`]/) || // Special YAML characters
+      // Special YAML characters (`]` escaped: unescaped, it closed the class
+      // early and `[[Page]]` went out unquoted, which reads back as a list)
+      value.match(/[:{#}[\],&*!|>'"%@`]/) ||
       /^\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value) || // Looks like a number
       value.includes(":") || // Contains colons
       ["true", "false", "null", "yes", "no", "on", "off"].includes(

@@ -369,3 +369,18 @@ test("YAML patching - set-key over a scalar, and a nested value that is last, st
     ]),
   ).toBe("a: 1\nm:\n  z: 3\n");
 });
+
+test("YAML patching - a page link is quoted, alone or in a list", () => {
+  const result = applyPatches("a: 1\n", [
+    { op: "set-key", path: "area", value: "[[Areas/Store]]" },
+    {
+      op: "set-key",
+      path: "blockedBy",
+      value: ["[[Tasks/A]]", "[[Tasks/B|b]]"],
+    },
+  ]);
+  expect(result).toContain('area: "[[Areas/Store]]"');
+  expect(result).toContain(
+    'blockedBy:\n  - "[[Tasks/A]]"\n  - "[[Tasks/B|b]]"',
+  );
+});
