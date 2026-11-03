@@ -12,6 +12,7 @@ import { MoreIcon, SearchIcon } from "./icons.tsx";
 import { Popover, rectOf } from "./popover.tsx";
 import { RowPopover } from "./row_menu.tsx";
 import { TableView } from "./table_view.tsx";
+import { TimelineView } from "./timeline_view.tsx";
 
 type Emit = (event: DbEvent) => void;
 
@@ -19,6 +20,7 @@ const TABS: { view: ViewKind; label: string }[] = [
   { view: "table", label: "Table" },
   { view: "board", label: "Board" },
   { view: "calendar", label: "Calendar" },
+  { view: "timeline", label: "Timeline" },
 ];
 
 const SOURCE_TITLES: Record<string, string> = {
@@ -192,6 +194,9 @@ export function App({ state, emit }: { state: DbState; emit: Emit }) {
       )}
       {state.view === "calendar" && (
         <CalendarView state={state} view={view} emit={emit} />
+      )}
+      {state.view === "timeline" && (
+        <TimelineView state={state} view={view} emit={emit} />
       )}
       <RowPopover state={state} emit={emit} />
     </div>

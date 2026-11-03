@@ -180,6 +180,8 @@ def record(data, today=None):
     url, headers = mcp_server(conf.get("server", "memo"), cwd)
     with Mcp(url, headers) as mcp:
         prev = state.get(key)
+        if prev and not _same_plan(mcp, space, prev, title):
+            prev = None  # the same plan file reused for the next task: a new page
         if prev:
             try:
                 # Swap only the plan text, so frontmatter (status) and progress stay as they are.
@@ -216,6 +218,18 @@ def record(data, today=None):
             linked = f"but could not link it from [[{project}]] ({e})"
     return (f"plan-to-memo: recorded this plan as memo page [[{page}]] (space {space}, "
             f"modified {res['modified']}) {linked}. {_progress_hint(space, page)}")
+
+
+def _same_plan(mcp, space, prev, title):
+    """Whether this approval revises the plan recorded before: its page is not
+    done yet and the title is unchanged. A session reuses its plan file for the
+    next task, so the file alone does not tell."""
+    if title_of(prev["plan"]) != title:
+        return False
+    try:
+        return mcp.tool("read_note", {"space": space, "page": prev["page"]}).get("status") != "done"
+    except RuntimeError:
+        return False  # page gone or renamed
 
 
 def _progress_hint(space, page):

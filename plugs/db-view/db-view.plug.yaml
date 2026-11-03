@@ -16,6 +16,8 @@ functions:
     path: ./src/functions.ts:indexedModified
   updatePageValue:
     path: ./src/functions.ts:updatePageValue
+  updatePageValues:
+    path: ./src/functions.ts:updatePageValues
   updateTask:
     path: ./src/functions.ts:updateTask
   createRow:

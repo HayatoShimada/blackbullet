@@ -101,7 +101,25 @@ export function taskRow(obj: Obj): DbRow {
     modified: String(obj.pageLastModified ?? ""),
     range: Array.isArray(obj.range) ? [obj.range[0], obj.range[1]] : undefined,
     state: typeof obj.state === "string" ? obj.state : " ",
+    ...(typeof obj.parent === "string" && obj.parent
+      ? { parentId: obj.parent }
+      : {}),
   };
+}
+
+/** Tasks under the task they are nested in; a task whose parent item is not
+ * one of them (a plain list item, or none) sits under `fallback`, or at the
+ * top when there is none. */
+export function nestTasks(
+  rows: readonly DbRow[],
+  fallback?: (row: DbRow) => string,
+): DbRow[] {
+  const ids = new Set(rows.map((r) => r.id));
+  return rows.map((r) => {
+    if (r.parentId && ids.has(r.parentId)) return r;
+    const { parentId: _, ...rest } = r;
+    return fallback ? { ...rest, parentId: fallback(r) } : rest;
+  });
 }
 
 /** Open and done tasks per page. */

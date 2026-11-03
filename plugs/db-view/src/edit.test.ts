@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  pageLinks,
+  setTaskAttributes,
   isStale,
   parseCellInput,
   parsePropertyInput,
@@ -168,5 +170,45 @@ describe("parsePropertyInput", () => {
       ok: false,
     });
     expect(propertyKind({ key: "p", type: "page" })).toBe("text");
+  });
+});
+
+describe("task attributes", () => {
+  const text = "# P\n- [ ] Draft [due: 2026-10-01] #work\n- [ ] Next\n";
+  test("replaces one in place and adds another at the end", () => {
+    const r = setTaskAttributes(text, 6, " ", {
+      start: "2026-09-28",
+      due: "2026-10-03",
+    });
+    expect(r).toEqual({
+      ok: true,
+      text: "# P\n- [ ] Draft [due: 2026-10-03] #work [start: 2026-09-28]\n- [ ] Next\n",
+    });
+  });
+
+  test("clears with null, and refuses a changed line or an odd key", () => {
+    expect(setTaskAttributes(text, 6, " ", { due: null })).toEqual({
+      ok: true,
+      text: "# P\n- [ ] Draft #work\n- [ ] Next\n",
+    });
+    expect(setTaskAttributes(text, 6, "x", { due: null })).toEqual({
+      ok: false,
+      reason: "stale",
+    });
+    expect(setTaskAttributes(text, 6, " ", { "a]": "x" }).ok).toBe(false);
+  });
+});
+
+describe("page links", () => {
+  test("reads a list typed in a cell", () => {
+    expect(pageLinks("[[A, B]], C|c ,  [[A, B]], ")).toEqual([
+      "[[A, B]]",
+      "[[C|c]]",
+    ]);
+    expect(parseCellInput("pages", "Tasks/X")).toEqual({
+      ok: true,
+      value: ["[[Tasks/X]]"],
+    });
+    expect(parseCellInput("pages", " ")).toEqual({ ok: true, value: null });
   });
 });

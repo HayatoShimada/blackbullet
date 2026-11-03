@@ -1,18 +1,23 @@
-export type ViewKind = "table" | "board" | "calendar";
+export type ViewKind = "table" | "board" | "calendar" | "timeline";
+
+/** How much time a timeline shows across. */
+export type Zoom = "day" | "week" | "month" | "quarter" | "year";
 
 export type SourceSpec =
   | { kind: "projects" }
   | { kind: "tasks" }
   | { kind: "tag"; tag: string };
 
-/** What a declared property holds; `page` is a link to another page. */
+/** What a declared property holds; `page` is a link to another page, `pages`
+ * a list of such links. */
 export type PropertyType =
   | "text"
   | "select"
   | "date"
   | "number"
   | "boolean"
-  | "page";
+  | "page"
+  | "pages";
 
 export type DatabaseProperty = {
   key: string;
@@ -83,8 +88,19 @@ export type Spec = {
   title?: string;
   /** Board: the attribute whose values are the columns. */
   group: string;
-  /** Calendar: the attribute holding the date a card sits on. */
+  /** Calendar: the attribute holding the date a card sits on; timeline: the
+   * date a bar ends on. */
   date: string;
+  /** Timeline: the attribute holding the date a bar starts on (`start`). */
+  start?: string;
+  /** Timeline: the link to a row's parent (`parent`). */
+  parent?: string;
+  /** Timeline: the links to the rows a row waits for (`blockedBy`). */
+  dependsOn?: string;
+  /** Timeline: the zoom it opens at (`week`). */
+  zoom?: Zoom;
+  /** The block named a `group`: a timeline groups only then. */
+  grouped?: boolean;
   /** Table: which attributes to show, in order. */
   columns?: string[];
   sort?: { key: string; desc: boolean };
@@ -121,12 +137,22 @@ export type DbRow = {
   /** A task's range in the page text, and its state character. */
   range?: [number, number];
   state?: string;
+  /** The row it sits under on a timeline, when the source says so (a
+   * project's task, a nested task's parent item). */
+  parentId?: string;
   /** A project's task counts. */
   openTasks?: number;
   doneTasks?: number;
 };
 
-export type CellKind = "text" | "select" | "date" | "number" | "boolean";
+/** `pages`: a list of page links, edited as text separated by commas. */
+export type CellKind =
+  | "text"
+  | "select"
+  | "date"
+  | "number"
+  | "boolean"
+  | "pages";
 
 export type Column = {
   key: string;

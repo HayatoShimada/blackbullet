@@ -87,6 +87,7 @@ describe("Database library", () => {
           { key = "area", type = "page" },
           { key = "n", type = "number" },
           { key = "flag", type = "boolean" },
+          { key = "blockedBy", type = "pages" },
         },
         order = {"active", "done"},
       }
@@ -94,7 +95,7 @@ describe("Database library", () => {
       assert(d.name == "projects" and d.tag == "project", "name and tag")
       assert(d.folder == "Projects/", "folder gets its slash: " .. d.folder)
       assert(d.template == "Templates/Project" and d.title == "Projects")
-      assert(#d.properties == 5, "all properties kept, in order")
+      assert(#d.properties == 6, "all properties kept, in order")
       assert(d.properties[1].key == "status" and d.properties[1].type == "select")
       assert(d.properties[1].options[2] == "done" and d.properties[1].default == "active")
       assert(d.properties[1].label == "Status")
@@ -108,6 +109,7 @@ describe("Database library", () => {
       assert(p.status.type == "string" and p.status.enum[1] == "active" and p.status.enum[2] == "done")
       assert(p.due.type == "string" and p.area.type == "string")
       assert(p.n.type == "number" and p.flag.type == "boolean")
+      assert(p.blockedBy.type == "array" and p.blockedBy.items.type == "string")
     `);
   });
 

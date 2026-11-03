@@ -104,7 +104,7 @@ describe("Fork Guide page", () => {
       データベース: "Database",
       プロパティ: "Property",
       行: "Row",
-      ビュー: "View(Table · Board · Calendar)",
+      ビュー: "View(Table · Board · Calendar · Timeline)",
       タスク: "Task",
       ジャーナル: "Journal: Today",
       "クイックノート / 受信箱": "Quick note / Inbox",

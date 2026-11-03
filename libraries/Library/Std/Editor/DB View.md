@@ -1,6 +1,6 @@
 #meta
 
-Database views over your pages and tasks: a table you can edit in place, a board you can drag cards across, and a calendar you can drag cards onto. Put a `db` code block anywhere:
+Database views over your pages and tasks: a table you can edit in place, a board you can drag cards across, a calendar you can drag cards onto, and a timeline (Gantt chart) whose bars you move, stretch and link. Put a `db` code block anywhere:
 
 ````
 ```db
@@ -19,11 +19,15 @@ A YAML mapping:
 | --- | --- |
 | `database` | The name of a database declared with `database.define` (see below). The source, the kind of each property, the board order and the title then come from it, and **+ New** adds a row |
 | `source` | `projects` (pages tagged `project`, with their task counts), `tasks`, or `tag:<name>` (pages with that tag; `tag: <name>` also works). Not needed with `database` |
-| `view` | `table` (default), `board`, `calendar` |
+| `view` | `table` (default), `board`, `calendar`, `timeline` |
 | `title` | A heading; defaults to the database's title, else the source |
-| `group` | Board: the attribute whose values are the columns (default `status`) |
+| `group` | Board: the attribute whose values are the columns (default `status`). Timeline: groups the rows by it, only when given |
 | `order` | Board: the order of the columns, e.g. `[active, someday, done]` (default for `status`, or the database's `order`); other values follow |
-| `date` | Calendar: the attribute a card sits on (default `due`) |
+| `date` | Calendar: the attribute a card sits on (default `due`). Timeline: the day a bar ends on |
+| `start` | Timeline: the day a bar starts on (default `start`); without one a bar is the `date` day alone |
+| `parent` | Timeline: the link to the row a row sits under (default `parent`) |
+| `dependsOn` | Timeline: the links to the rows a row waits for (default `blockedBy`) |
+| `zoom` | Timeline: `day`, `week` (default), `month`, `quarter` or `year` |
 | `columns` | Table: attributes to show, in order, e.g. `[title, status, due]` |
 | `sort` | Table: an attribute, `-due` for descending |
 | `where` | Only rows whose attributes match, e.g. `{status: active}`; see *Filters* below for `not`, `lt` `lte` `gt` `gte` (also `before` / `after`), `contains`, `empty` and several conditions per key |
@@ -48,10 +52,10 @@ where:
 `today` stands for today's date in any comparison (a plain `due: today` still means the text "today"). Numbers compare as numbers, everything else as text, which orders ISO dates right. A row without a value fails every comparison (use `empty: true` to find those).
 
 # The header
-One row: **Title · count**, the tabs **Table | Board | Calendar**, a **Filter…** box, **+ New** (only on a view of a database) and a **⋯** with **Edit source**, **Save view** and **Reload**. The host's own Edit/Reload bar is hidden on a `db` block (the view has its own header); **Edit source** puts the cursor in the block so its text shows for editing. On a phone the header takes two rows (title, **+ New**, **⋯**; then the tabs) with the filter below, and every control is 44 px.
+One row: **Title · count**, the tabs **Table | Board | Calendar | Timeline**, a **Filter…** box, **+ New** (only on a view of a database) and a **⋯** with **Edit source**, **Save view** and **Reload**. The host's own Edit/Reload bar is hidden on a `db` block (the view has its own header); **Edit source** puts the cursor in the block so its text shows for editing. On a phone the header takes two rows (title, **+ New**, **⋯**; then the tabs) with the filter below, and every control is 44 px.
 
 # Saving a view
-The tab, sort and filter box live in the widget only, so they reset on every re-render. **Save view** (in the **⋯** menu; enabled once they differ from the block) writes them back into the block as `view:`, `sort:` and `filter:`, leaving every other line and comment alone. It only runs when you choose it. If the block was edited since it was drawn, or another identical `db` block exists on the page, nothing is written and you are told why.
+The tab, sort and filter box live in the widget only, so they reset on every re-render. **Save view** (in the **⋯** menu; enabled once they differ from the block) writes them back into the block as `view:`, `sort:` and `filter:` (and, on a timeline, `zoom:` and `group:`), leaving every other line and comment alone. It only runs when you choose it. If the block was edited since it was drawn, or another identical `db` block exists on the page, nothing is written and you are told why.
 
 # A database
 A database is a folder of pages that share a tag and a declared set of properties. Declare it in `CONFIG` (the API is documented in [[Library/Std/APIs/Database]]):
@@ -108,7 +112,17 @@ Each is refused when the page changed since the view read it, or is no longer a 
 * **Table**: click a cell (or its pencil, which shows on hover; a single tap on a touch screen; or focus the cell and press Enter or F2) to edit; Enter saves, Esc cancels, dates are ISO (`2026-10-14`). A task's checkbox toggles its `[ ]` / `[x]`: the row stays, struck through, with **Done · Undo** for 8 seconds, then leaves the list. An empty cell clears the attribute. The name, tags and counts are not edited here. A header cell sorts. Under 480 px wide the table is a list of cards (checkbox, name, one line of the other properties, **⋯**), so nothing scrolls sideways.
 * **Board**: drag a card to another column to set the `group` attribute (the empty column clears it); the view says **Moved to *column* · Undo** for 8 seconds, and Undo writes the previous value back. Columns with no rows are not shown when the *None* column holds every row. A board of **tasks** is grouped by page (the project) unless you name a `group`, and its cards cannot be dragged to another page.
 * **Calendar**: drag a card to a day to set the `date` attribute; the _No date_ box clears it; **Moved to *date* · Undo** works as on a board. The title reads like *October 2026*, with **‹ › Today**.
-* A **task** can change only its done state and its `[due: ...]`. A date shows the word *overdue*, *today* or *tomorrow* beside it, so colour is never the only cue; a done row is grey and never red.
+* **Timeline**: one line per row, the table on the left (its `columns`, default the name alone; drag its edge to resize it, **Table** hides it) and the bars on the right.
+  * Drag a bar to move it, an end to stretch it (whole days; the dates show while you drag); a click opens the row. A focused bar moves a day with ← →, Shift+← → moves its end, Alt+Shift+← → its start.
+  * A row with no dates has an empty lane: a click there gives it that day. **No date (N)** lists those rows, to drag onto a day.
+  * On a database's view, drag across the last, empty lane to draw a new row's span; the title input opens with it.
+  * **Day / Week / Month / Quarter / Year** set the scale; **Today** scrolls back; the grid grows as you scroll near an edge. Weekends are shaded and today has a red line.
+  * **Group** sorts the rows under the values of a select or page attribute; a heading folds them.
+  * Sub-items: a page whose `parent` links to another row sits under it, a nested task under its task, folded until you open it with ▸. A parent shows its children's span as a faint band under its bar, or, with no dates of its own, as a hatched bar with *done/total*.
+  * A **projects** view carries each project's items: the pages whose `project` links to it and the tasks on its page. A project without dates is drawn from them.
+  * Dependencies: a row whose `blockedBy` lists another is drawn with an arrow from the other's end to its start, red when it starts before the other is done. Drag the dot at a bar's right end onto another bar to make that one wait for it (a link that would close a loop is refused); click an arrow to remove it. Moving a bar pushes what waits for it later, just far enough to start the day after; the view says **Moved to *Oct 3 – Oct 7* · 1 pushed later · Undo**, and Undo puts every bar back.
+  * A task's dates are its line's `[start: ...]` and `[due: ...]`; a page's are its frontmatter. A row with only a `due` keeps only that until it is stretched to more than a day.
+* A **task** can change only its done state and its dates (`[due: ...]`, and on a timeline `[start: ...]`). A date shows the word *overdue*, *today* or *tomorrow* beside it, so colour is never the only cue; a done row is grey and never red.
 * An empty view says what to do next: *No rows yet. + New makes a page in Projects/ from Templates/Project.*, *Nothing matches "…".* with **Clear filter**, or *All done.* for open tasks.
 
 # Implementation
@@ -147,7 +161,7 @@ local function insertView()
   local name = pickDatabase()
   if not name then return end
   local picked = editor.filterBox("View", {
-    { name = "table" }, { name = "board" }, { name = "calendar" },
+    { name = "table" }, { name = "board" }, { name = "calendar" }, { name = "timeline" },
   })
   if not picked then return end
   editor.insertAtCursor(database.viewBlock(name, picked.name), false, true)

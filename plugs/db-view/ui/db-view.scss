@@ -224,6 +224,7 @@ body { margin: 0; }
 .db-chip-page { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .db-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.db-links { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .db-tag, .db-chip {
   font-size: var(--sb-text-xs, 11px);
   padding: 0 8px;
@@ -439,4 +440,255 @@ body { margin: 0; }
   .db-cal-day .db-card-meta { display: flex; }
   .db-cal-num { font-size: var(--sb-text-sm, 12.5px); }
   .db-cal-wd { display: inline; }
+}
+
+// Timeline: toolbar | (table | scrolling grid). One line is 32px everywhere.
+.db-timeline { --tl-row: 32px; }
+.db-tl-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 2px 8px;
+  .sb-button, .sb-segment, .sb-select { min-height: 28px; height: 28px; }
+}
+.db-tl-group { display: inline-flex; align-items: center; gap: 4px; color: var(--sb-ink-2); font-size: var(--sb-text-sm, 12.5px); }
+.db-tl-spacer { flex: 1; }
+.db-tl-on { background: var(--sb-bg-2); }
+.db-tl-undated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px 10px;
+}
+.db-tl-undated-item { cursor: grab; touch-action: none; user-select: none; }
+
+.db-tl-body {
+  display: flex;
+  border: 1px solid var(--sb-line);
+  border-radius: var(--sb-radius-2, 8px);
+  overflow: hidden;
+}
+
+// The table on the left.
+.db-tl-table {
+  position: relative;
+  flex: none;
+  max-width: 45cqw;
+  border-right: 1px solid var(--sb-line);
+  background: var(--sb-bg);
+}
+.db-tl-tr {
+  display: flex;
+  align-items: center;
+  height: var(--tl-row);
+  border-bottom: 1px solid var(--sb-line);
+  min-width: 0;
+}
+.db-tl-th {
+  align-items: flex-end;
+  padding-bottom: 6px;
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-sm, 12.5px);
+  font-weight: 500;
+}
+.db-tl-td {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.db-tl-td-title { flex: 2 1 0; display: flex; align-items: center; gap: 2px; .db-link { overflow: hidden; text-overflow: ellipsis; } }
+.db-tl-group-line { gap: 6px; padding: 0 6px; background: var(--sb-bg-2); font-size: var(--sb-text-sm, 12.5px); }
+.db-tl-fold {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--sb-radius-1, 4px);
+  background: transparent;
+  color: var(--sb-ink-2);
+  cursor: pointer;
+  &:hover { background: var(--sb-bg-2); }
+  &:focus-visible { outline: 2px solid var(--sb-focus); }
+}
+.db-tl-fold-gap { flex: none; width: 20px; }
+.db-tl-caret { display: inline-block; transition: transform var(--sb-dur-1, 120ms) var(--sb-ease-out, ease-out); }
+.db-tl-open { transform: rotate(90deg); }
+.db-tl-resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+  &:hover, &:focus-visible { background: var(--sb-focus); opacity: 0.4; outline: none; }
+}
+
+// The grid on the right.
+.db-tl-scroll { flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.db-tl-canvas { position: relative; }
+.db-tl-head {
+  position: relative;
+  border-bottom: 1px solid var(--sb-line);
+  color: var(--sb-ink-2);
+  font-size: var(--sb-text-xs, 11px);
+  user-select: none;
+}
+.db-tl-ticks { position: relative; height: 50%; }
+.db-tl-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-left: 1px solid var(--sb-line);
+  // clip, not hidden: hidden would make each tick a scroll container and stop
+  // the month or year label from sticking to the left edge.
+  overflow: clip;
+  white-space: nowrap;
+}
+.db-tl-upper .db-tl-tick-label { position: sticky; left: 0; padding: 0 6px; color: var(--sb-ink); font-weight: 500; }
+.db-tl-lower .db-tl-tick { justify-content: center; }
+.db-tl-lower .db-today .db-tl-tick-label {
+  background: var(--sb-accent);
+  color: var(--db-on-accent);
+  border-radius: var(--sb-radius-pill, 999px);
+  padding: 0 5px;
+}
+.db-tl-rows { position: relative; }
+.db-tl-weekend, .db-tl-gridline, .db-tl-now { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+.db-tl-weekend { background: var(--sb-bg-2); opacity: 0.6; }
+.db-tl-gridline { width: 1px; background: var(--sb-line); opacity: 0.5; }
+.db-tl-now { width: 2px; margin-left: -1px; background: var(--db-overdue, var(--sb-danger)); z-index: 2; }
+.db-tl-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--tl-row);
+  border-bottom: 1px solid var(--sb-line);
+}
+.db-tl-group-lane { background: var(--sb-bg-2); opacity: 0.7; }
+.db-tl-empty { position: absolute; inset: 0; cursor: pointer; }
+.db-tl-ghost {
+  position: absolute;
+  top: 6px;
+  height: calc(var(--tl-row) - 12px);
+  border: 1px dashed var(--sb-accent);
+  border-radius: var(--sb-radius-1, 4px);
+  pointer-events: none;
+}
+.db-tl-add-lane { cursor: crosshair; touch-action: none; }
+.db-tl-add-hint { position: sticky; left: 8px; line-height: var(--tl-row); padding-left: 8px; }
+.db-tl-add-line { color: var(--sb-ink-3); }
+
+// Bars.
+.db-tl-bar-item {
+  position: absolute;
+  top: 5px;
+  height: calc(var(--tl-row) - 10px);
+  display: flex;
+  align-items: center;
+  border-radius: var(--sb-radius-1, 4px);
+  background: color-mix(in srgb, var(--sb-accent) 22%, var(--sb-bg));
+  border: 1px solid color-mix(in srgb, var(--sb-accent) 55%, transparent);
+  color: var(--sb-ink);
+  font-size: var(--sb-text-sm, 12.5px);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  z-index: 1;
+  &:hover { box-shadow: var(--sb-shadow-1); }
+  &:focus-visible { outline: 2px solid var(--sb-focus); outline-offset: 2px; }
+  &.db-tl-active { cursor: grabbing; box-shadow: var(--sb-shadow-2); z-index: 4; }
+  &.db-row-done { background: var(--sb-bg-2); border-color: var(--sb-line); color: var(--sb-ink-3); }
+}
+.db-tl-bar-label {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: visible;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.db-tl-progress { color: var(--sb-ink-2); font-variant-numeric: tabular-nums; }
+.db-tl-grip {
+  flex: none;
+  width: 8px;
+  align-self: stretch;
+  cursor: ew-resize;
+  &:hover { background: color-mix(in srgb, var(--sb-accent) 40%, transparent); }
+}
+.db-tl-grip-start { border-radius: var(--sb-radius-1, 4px) 0 0 var(--sb-radius-1, 4px); }
+.db-tl-grip-end { border-radius: 0 var(--sb-radius-1, 4px) var(--sb-radius-1, 4px) 0; }
+.db-tl-link {
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border: 2px solid var(--sb-accent);
+  border-radius: 50%;
+  background: var(--sb-bg);
+  cursor: crosshair;
+  opacity: 0;
+  .db-tl-bar-item:hover &, .db-tl-bar-item:focus-visible & { opacity: 1; }
+}
+// No hover on a touch screen: the handle is always there.
+@media (hover: none) { .db-tl-link { opacity: 1; } }
+.db-tl-tip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  padding: 1px 6px;
+  border-radius: var(--sb-radius-1, 4px);
+  background: var(--sb-ink);
+  color: var(--sb-bg);
+  font-size: var(--sb-text-xs, 11px);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.db-tl-drawing { opacity: 0.7; border-style: dashed; cursor: crosshair; }
+.db-tl-rollup {
+  position: absolute;
+  top: 5px;
+  height: calc(var(--tl-row) - 10px);
+  display: flex;
+  align-items: center;
+  border-radius: var(--sb-radius-1, 4px);
+  border: 1px dashed color-mix(in srgb, var(--sb-accent) 55%, transparent);
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--sb-accent) 14%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+  font-size: var(--sb-text-sm, 12.5px);
+  pointer-events: auto;
+}
+// Under a row's own bar, its children's span is only a faint band.
+.db-tl-rollup-band { top: auto; bottom: 1px; height: 4px; border: 0; opacity: 0.8; }
+
+// Dependency arrows.
+// Under the bars (their ends and link handles stay on top), over the lanes.
+.db-tl-arrows { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; z-index: 0; }
+.db-tl-arrow-line { fill: none; stroke: var(--sb-ink-3); stroke-width: 1.5; }
+.db-tl-head { fill: var(--sb-ink-3); }
+.db-tl-late .db-tl-arrow-line, .db-tl-arrow.db-tl-late .db-tl-arrow-line { stroke: var(--sb-danger); }
+.db-tl-head.db-tl-late { fill: var(--sb-danger); }
+.db-tl-arrow-hit { fill: none; stroke: transparent; stroke-width: 10; pointer-events: stroke; cursor: pointer; }
+.db-tl-arrow:hover .db-tl-arrow-line, .db-tl-arrow.db-tl-active .db-tl-arrow-line { stroke-width: 2.5; }
+
+@container (max-width: 480px) {
+  .db-tl-table { max-width: 55cqw; }
+  .db-tl-bar .db-tl-group > span { display: none; }
 }

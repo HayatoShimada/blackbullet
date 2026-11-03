@@ -10,13 +10,15 @@ import {
   type WhereValue,
   type Spec,
   type ViewKind,
+  type Zoom,
 } from "./model.ts";
 
 export type SpecResult =
   | { ok: true; spec: Spec }
   | { ok: false; error: string };
 
-const VIEWS: ViewKind[] = ["table", "board", "calendar"];
+const VIEWS: ViewKind[] = ["table", "board", "calendar", "timeline"];
+const ZOOMS: Zoom[] = ["day", "week", "month", "quarter", "year"];
 const PROPERTY_TYPES: PropertyType[] = [
   "text",
   "select",
@@ -24,6 +26,7 @@ const PROPERTY_TYPES: PropertyType[] = [
   "number",
   "boolean",
   "page",
+  "pages",
 ];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -226,7 +229,7 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   if (typeof view !== "string" || !VIEWS.includes(view as ViewKind)) {
     return {
       ok: false,
-      error: `view "${String(view)}" is not supported. Use table, board or calendar`,
+      error: `view "${String(view)}" is not supported. Use table, board, calendar or timeline`,
     };
   }
 
@@ -299,6 +302,20 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
   if (typeof group !== "string" || typeof date !== "string") {
     return { ok: false, error: "group and date must be property names" };
   }
+  for (const key of ["start", "parent", "dependsOn"] as const) {
+    if (
+      raw[key] !== undefined &&
+      (typeof raw[key] !== "string" || raw[key].trim() === "")
+    ) {
+      return { ok: false, error: `${key} must be a property name` };
+    }
+  }
+  if (raw.zoom !== undefined && !ZOOMS.includes(raw.zoom as Zoom)) {
+    return {
+      ok: false,
+      error: `zoom must be one of: ${ZOOMS.join(", ")}`,
+    };
+  }
 
   return {
     ok: true,
@@ -314,6 +331,13 @@ export function parseSpec(raw: unknown, database?: DatabaseSpec): SpecResult {
             : undefined,
       group,
       date,
+      ...(typeof raw.start === "string" ? { start: raw.start.trim() } : {}),
+      ...(typeof raw.parent === "string" ? { parent: raw.parent.trim() } : {}),
+      ...(typeof raw.dependsOn === "string"
+        ? { dependsOn: raw.dependsOn.trim() }
+        : {}),
+      ...(raw.zoom !== undefined ? { zoom: raw.zoom as Zoom } : {}),
+      ...(raw.group !== undefined ? { grouped: true } : {}),
       columns,
       // A database lists by title unless told otherwise: a stable order, so
       // an edited row does not jump to the top.

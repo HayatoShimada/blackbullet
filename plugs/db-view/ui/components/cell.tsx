@@ -154,6 +154,24 @@ export function CellValue({
       />
     );
   }
+  if (Array.isArray(value) && column.kind === "pages") {
+    return (
+      <span class="db-links">
+        {value.map((v) => {
+          const target = linkTarget(String(v));
+          return (
+            <PageLink
+              key={target}
+              title={target}
+              onOpen={() => emit({ type: "link.open", target })}
+            >
+              {linkLabel(String(v))}
+            </PageLink>
+          );
+        })}
+      </span>
+    );
+  }
   if (Array.isArray(value)) {
     return (
       <span class="db-tags">
@@ -338,7 +356,12 @@ export function CellEditor({
   useEffect(() => field.current?.focus(), []);
   const commit = (v: string) =>
     emit({ type: "cell.commit", rowId: row.id, column: column.key, value: v });
-  const text = value === undefined || value === null ? "" : String(value);
+  const text =
+    value === undefined || value === null
+      ? ""
+      : Array.isArray(value)
+        ? value.join(", ")
+        : String(value);
 
   if (column.kind === "select") {
     return (

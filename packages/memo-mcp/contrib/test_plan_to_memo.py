@@ -127,6 +127,26 @@ class EndToEnd(unittest.TestCase):
         self.assertIn(f"[[{page} 2]]", note)
         self.assertEqual(self.read("Projects/App").count("[[Projects/App/Plans/"), 2)
 
+    def test_reused_plan_file_for_next_task(self):
+        # the session's plan file is reused: another title, or a done page, is a new plan
+        first = "# 一つ目の計画\n\n- a\n"
+        note = p.record(self.event(first, session="s4", path="/plans/b.md"), today="2026-10-30")
+        page = "Projects/App/Plans/2026-10-30 一つ目の計画"
+        self.assertIn(f"[[{page}]]", note)
+        note = p.record(self.event("# 二つ目の計画\n\n- b\n", session="s4", path="/plans/b.md"), today="2026-10-30")
+        self.assertIn("[[Projects/App/Plans/2026-10-30 二つ目の計画]]", note)
+        self.assertIn("- a", self.read(page))
+
+        path = os.path.join(self.space, page + ".md")
+        with open(path, encoding="utf-8") as f:
+            done = f.read().replace("status: approved", "status: done")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(done)
+        p.record(self.event(first, session="s4", path="/plans/c.md"), today="2026-10-30")
+        note = p.record(self.event(first + "- more\n", session="s4", path="/plans/c.md"), today="2026-10-30")
+        self.assertIn("updated the plan", note)  # still approved: a revision
+        self.assertEqual(self.read(page), done)
+
     def test_unmapped_cwd_writes_nothing(self):
         e = self.event(PLAN, session="s3")
         e["cwd"] = "/"

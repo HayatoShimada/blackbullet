@@ -20,12 +20,23 @@ import {
   type Day,
 } from "../../src/derive.ts";
 import type { NewValues } from "../../src/create.ts";
+import {
+  initialTimeline,
+  type RowWrite,
+  selectTimeline,
+  type TimelineEvent,
+  type TimelineMode,
+  type TimelineState,
+  type TimelineView,
+  transitionTimeline,
+} from "./timeline_mediator.ts";
 import type {
   CellKind,
   Column,
   DbRow,
   Spec,
   ViewKind,
+  Zoom,
 } from "../../src/model.ts";
 
 /** Where a control sits in the iframe, for anchoring its popover. */
@@ -61,7 +72,8 @@ export type Mode =
   /** Waiting for the reader to answer the host's "move to trash?" dialog. */
   | { kind: "confirming"; rowId: string }
   /** A write is in flight: one at a time, so a second edit is not started. */
-  | { kind: "writing" };
+  | { kind: "writing" }
+  | TimelineMode;
 
 export type Notice = { level: "info" | "error"; text: string };
 
@@ -84,7 +96,9 @@ export type UndoAction =
       column: string;
       cellKind: CellKind;
       previous: string;
-    };
+    }
+  /** A timeline write goes back: each row's attributes as they were. */
+  | { kind: "revertMany"; writes: RowWrite[] };
 
 export type Undo = { id: number; label: string; action: UndoAction };
 
@@ -95,6 +109,11 @@ export type PendingUndo = { undo: Undo; ghost: boolean; until: number };
 export type DbState = {
   spec: Spec;
   rows: DbRow[];
+  /** What sits under a projects view's rows (the timeline's sub-items). */
+  children: DbRow[];
+  timeline: TimelineState;
+  /** The timeline write in flight: its Undo label, and what Undo writes. */
+  pending?: { label: string; undo: RowWrite[] };
   truncated: boolean;
   today: string;
   view: ViewKind;
@@ -119,7 +138,13 @@ export type DbState = {
   /** The ```db block that drew the view: where "Save view" writes. */
   block?: { page: string; body: string };
   /** What "Save view" sent, so view.saved records that and not later edits. */
-  saving?: { view: ViewKind; sort: Spec["sort"]; filter: string };
+  saving?: {
+    view: ViewKind;
+    sort: Spec["sort"];
+    filter: string;
+    zoom?: Zoom;
+    group?: string;
+  };
 };
 
 /** Whether "Save view" can be pressed now. */
@@ -138,6 +163,7 @@ export function visibleCount(state: DbState): number {
 }
 
 export type DbEvent =
+  | TimelineEvent
   | { type: "view.set"; view: ViewKind }
   | { type: "phrase.set"; phrase: string }
   | { type: "sort.toggle"; key: string }
@@ -220,12 +246,16 @@ export type DbEvent =
   | {
       type: "rows.loaded";
       rows: DbRow[];
+      children?: DbRow[];
       truncated: boolean;
       today: string;
     }
   | { type: "rows.failed"; message: string };
 
 export type DbEffect =
+  /** Timeline writes, one row after another: a bar's dates, the bars it
+   * pushes, a dependency. */
+  | { type: "writeMany"; writes: RowWrite[]; database?: string }
   | {
       type: "write";
       row: DbRow;
@@ -247,6 +277,8 @@ export type DbEffect =
       view: ViewKind;
       sort: Spec["sort"];
       filter: string;
+      zoom?: Zoom;
+      group?: string;
     }
   | { type: "navigate"; target: string }
   /** Put the editor's cursor inside the ```db block that drew the view. */
@@ -269,14 +301,23 @@ export type Transition = { state: DbState; effects: DbEffect[] };
 export function initialState(model: {
   spec: Spec;
   rows: DbRow[];
+  children?: DbRow[];
   truncated: boolean;
   today: string;
   block?: { page: string; body: string };
 }): DbState {
   const [year, month] = model.today.split("-").map(Number);
+  const children = model.children ?? [];
   return {
     spec: model.spec,
     rows: model.rows,
+    children,
+    timeline: initialTimeline({
+      spec: model.spec,
+      rows: model.rows,
+      children,
+      today: model.today,
+    }),
     truncated: model.truncated,
     today: model.today,
     view: model.spec.view,
@@ -294,8 +335,10 @@ export function initialState(model: {
 
 const stay = (state: DbState): Transition => ({ state, effects: [] });
 
+/** A row of the view, or one under a project (the timeline shows those too). */
 const rowById = (state: DbState, id: string) =>
-  state.rows.find((r) => r.id === id);
+  state.rows.find((r) => r.id === id) ??
+  state.children.find((r) => r.id === id);
 
 /** A cell as the table shows it, for telling whether an edit changed anything. */
 function same(current: unknown, input: string | boolean): boolean {
@@ -358,11 +401,35 @@ export function viewDirty(state: DbState): boolean {
   return (
     state.view !== state.spec.view ||
     state.phrase.trim() !== (state.spec.filter ?? "").trim() ||
-    !sameSort
+    !sameSort ||
+    (state.view === "timeline" && timelineDirty(state))
   );
 }
 
+/** Whether the timeline's zoom or grouping differ from the block's. */
+function timelineDirty(state: DbState): boolean {
+  const t = state.timeline;
+  const group = state.spec.grouped ? state.spec.group : undefined;
+  return (
+    t.zoom !== (state.spec.zoom ?? "week") ||
+    (t.group !== undefined && t.group !== group)
+  );
+}
+
+/** What "Save view" writes for the timeline: its zoom, and its grouping. */
+function timelineSaved(state: DbState): { zoom?: Zoom; group?: string } {
+  if (state.view !== "timeline") return {};
+  return {
+    zoom: state.timeline.zoom,
+    ...(state.timeline.group ? { group: state.timeline.group } : {}),
+  };
+}
+
+const isTimelineEvent = (event: DbEvent): event is TimelineEvent =>
+  event.type.startsWith("tl.");
+
 export function transition(state: DbState, event: DbEvent): Transition {
+  if (isTimelineEvent(event)) return transitionTimeline(state, event);
   const busy = state.mode.kind === "writing";
   switch (event.type) {
     case "view.set":
@@ -785,6 +852,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
             view: state.view,
             sort: state.sort,
             filter: state.phrase.trim(),
+            ...timelineSaved(state),
           },
         },
         effects: [
@@ -793,6 +861,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
             view: state.view,
             sort: state.sort,
             filter: state.phrase.trim(),
+            ...timelineSaved(state),
           },
         ],
       };
@@ -809,6 +878,8 @@ export function transition(state: DbState, event: DbEvent): Transition {
           view: saved.view,
           sort: saved.sort,
           ...(saved.filter ? { filter: saved.filter } : { filter: undefined }),
+          ...(saved.zoom ? { zoom: saved.zoom } : {}),
+          ...(saved.group ? { group: saved.group, grouped: true } : {}),
         },
         block: state.block && { ...state.block, body: event.body },
         notice: { level: "info", text: "View saved" },
@@ -945,6 +1016,19 @@ export function transition(state: DbState, event: DbEvent): Transition {
           ],
         };
       }
+      if (undo.action.kind === "revertMany") {
+        // Its own write offers no Undo: `pending` is not set.
+        return {
+          state: cleared,
+          effects: [
+            {
+              type: "writeMany",
+              writes: undo.action.writes,
+              ...databaseOf(state),
+            },
+          ],
+        };
+      }
       if (undo.action.kind === "revert") {
         const a = undo.action;
         return {
@@ -1027,6 +1111,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
           ...state,
           mode: { kind: "idle" },
           move: undefined,
+          pending: undefined,
           notice: { level: "error", text: event.message },
           // A reload may already be in flight (after a write): leave it be.
           reloading: event.reason === "stale" ? true : state.reloading,
@@ -1051,6 +1136,7 @@ export function transition(state: DbState, event: DbEvent): Transition {
         ...state,
         ghost: keep && rows !== event.rows ? state.ghost : undefined,
         rows,
+        children: event.children ?? [],
         truncated: event.truncated,
         today: event.today,
         reloading: false,
@@ -1076,6 +1162,8 @@ export type DbView = {
   weeks: Day[][];
   byDay: Map<string, DbRow[]>;
   undated: DbRow[];
+  /** Only while the timeline is the view. */
+  timeline?: TimelineView;
 };
 
 /** The last segment of a page name: a project's column or card title. */
@@ -1130,6 +1218,9 @@ export function selectView(state: DbState): DbView {
     weeks: monthGrid(state.month.year, state.month.month, state.spec.weekStart),
     byDay,
     undated,
+    ...(state.view === "timeline"
+      ? { timeline: selectTimeline(state, filtered) }
+      : {}),
   };
 }
 
