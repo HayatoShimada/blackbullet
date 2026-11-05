@@ -40,9 +40,16 @@ services:
       # it is SITE_DOMAIN (Caddy forwards Host without the default :443, so accept both forms).
       - MEMO_MCP_PUBLIC_HOST=${MEMO_MCP_PUBLIC_HOST:-${SITE_DOMAIN:-}}
       - MEMO_MCP_EXTRA_HOSTS=${SITE_DOMAIN:+${SITE_DOMAIN},${SITE_DOMAIN}:443}
+      # Notifications (Web Push): the morning digest of what is due. Subscriptions and the server's
+      # key pair live in /state (kept, unlike /cache). MEMO_TZ sets "today" and the hour (e.g. Asia/Tokyo).
+      - MEMO_STATE_DIR=/state
+      - MEMO_TZ=${MEMO_TZ:-}
+      - MEMO_PUSH_AT=${MEMO_PUSH_AT:-08:00}
+      - MEMO_PUSH_TITLES=${MEMO_PUSH_TITLES:-on}
     volumes:
       - ${SPACE_DIR:-./space}:/data
       - ${MEMO_INDEX_DIR:-./.memo-index}:/cache
+      - ${MEMO_STATE_DIR:-./.memo-state}:/state
     depends_on: [app]
 
   # ---- optional: docker compose --profile tailnet up -d ----

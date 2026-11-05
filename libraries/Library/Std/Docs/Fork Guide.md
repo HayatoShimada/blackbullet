@@ -357,6 +357,9 @@ local FORK_COMMANDS = {
   "Export: Markdown with Images",
   "Help: Fork Guide",
   "Client: Reset Cache",
+  "Notifications: Turn On",
+  "Notifications: Send Test",
+  "Notifications: Turn Off",
 }
 
 -- A binding is a string, or a list of them.

@@ -17,6 +17,10 @@ import {
 import { openCaptureStore } from "./capture/store.ts";
 import { WorkerLogout } from "./service_worker/logout.ts";
 import { cachesToDrop } from "./service_worker/cache_names.ts";
+import {
+  notificationTarget,
+  parsePushMessage,
+} from "./service_worker/push_message.ts";
 import { ProxyRouter } from "./service_worker/proxy_router.ts";
 import { SyncEngine } from "./service_worker/sync_engine.ts";
 import { getOrCreateClientId } from "./spaces/client_id.ts";
@@ -527,6 +531,48 @@ self.addEventListener("fetch", (event: any) => {
   }
 
   proxyRouter.onFetch(event);
+});
+
+// (BlackBullet) Notifications sent by the sidecar (memo-mcp's morning digest
+// of what is due). The message is JSON: {title, body, url, tag}.
+self.addEventListener("push", (event: any) => {
+  const message = parsePushMessage(event.data);
+  event.waitUntil(
+    // @ts-expect-error: service worker API
+    self.registration.showNotification(message.title, {
+      body: message.body,
+      tag: message.tag,
+      icon: `${baseURI}/.client/logo-maskable-192.png`,
+      data: { url: message.url },
+    }),
+  );
+});
+
+// Opens what the notification is about: in a window of this app when one is
+// open, otherwise in a new one.
+self.addEventListener("notificationclick", (event: any) => {
+  event.notification.close();
+  // baseURI has no trailing slash; the target is relative to it.
+  const target = `${baseURI}/${notificationTarget(event.notification.data?.url)}`;
+  event.waitUntil(
+    (async () => {
+      // @ts-expect-error: service worker API
+      const windows = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      const open = windows.find((w: { url: string }) =>
+        w.url.startsWith(baseURI),
+      );
+      if (open) {
+        await open.focus();
+        await open.navigate(target);
+        return;
+      }
+      // @ts-expect-error: service worker API
+      await self.clients.openWindow(target);
+    })(),
+  );
 });
 
 self.addEventListener("install", (event: any) => {

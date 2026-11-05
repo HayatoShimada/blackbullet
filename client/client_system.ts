@@ -55,6 +55,7 @@ import type { ObjectIndex } from "./data/object_index.ts";
 import { searchSyscalls } from "./plugos/syscalls/search.ts";
 import { iconSyscalls } from "./plugos/syscalls/icon.ts";
 import { navigatorSyscalls } from "./plugos/syscalls/navigator.ts";
+import { notificationSyscalls } from "./plugos/syscalls/notifications.ts";
 import { setRevisionsAvailable } from "./navigator/builtins.ts";
 import { registerNavigatorCommands } from "./navigator/commands.ts";
 import { restoreDocks, setViewDefaults } from "./navigator/navigator.ts";
@@ -247,6 +248,7 @@ export class ClientSystem {
       searchSyscalls(),
       iconSyscalls(),
       navigatorSyscalls(),
+      notificationSyscalls(),
     );
 
     if (!this.readOnlyMode) {
