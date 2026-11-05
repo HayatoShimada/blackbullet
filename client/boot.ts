@@ -8,6 +8,7 @@ import {
 import { initLogger } from "./lib/logger.ts";
 import { extractSpaceLuaFromPageText, loadConfig } from "./boot_config.ts";
 import { Client } from "./client.ts";
+import { watchForUpdates } from "./app_update.ts";
 import type { Config } from "./config.ts";
 import {
   flushCachesAndUnregisterServiceWorker,
@@ -238,6 +239,28 @@ safeRun(async () => {
       })
       .then((registration) => {
         console.log("Service worker registered...");
+
+        let booted: Client | undefined;
+        void clientReady.promise.then((client) => {
+          booted = client;
+        });
+        watchForUpdates({
+          registration,
+          container: navigator.serviceWorker,
+          page: document,
+          bootedAt: performance.timeOrigin,
+          now: () => Date.now(),
+          hasUnsavedChanges: () => !!booted?.ui.viewState.unsavedChanges,
+          reload: () => location.reload(),
+          announce: (reload) =>
+            void clientReady.promise.then((client) =>
+              client.ui.flashNotification("A new version is ready", "info", {
+                timeout: 0,
+                actions: [{ name: "Reload", run: reload }],
+              }),
+            ),
+          every: (run, ms) => setInterval(run, ms),
+        });
 
         // Send the shared encryption key before configuration initializes the
         // encrypted data store for this prefix.
