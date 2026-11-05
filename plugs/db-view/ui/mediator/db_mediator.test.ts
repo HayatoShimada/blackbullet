@@ -1371,3 +1371,41 @@ describe("board columns", () => {
     expect(newRowGroup(d, selectView(d).groups)).toBe("someday");
   });
 });
+
+describe("changes made elsewhere", () => {
+  const loaded: DbEvent = {
+    type: "rows.loaded",
+    rows,
+    truncated: false,
+    today: "2026-10-02",
+  };
+
+  test("an idle view reads its rows again", () => {
+    const { state, effects } = run([{ type: "index.changed" }]);
+    expect(effects).toEqual([{ type: "reload" }]);
+    expect(state.reloading).toBe(true);
+    expect(state.refreshPending).toBe(false);
+  });
+
+  test("an open edit is not disturbed; the rows come once it ends", () => {
+    const editing = run([
+      { type: "view.set", view: "table" },
+      { type: "cell.edit", rowId: "A", column: "status" },
+      { type: "index.changed" },
+    ]);
+    expect(editing.state.mode.kind).toBe("editing");
+    expect(editing.effects).toEqual([]);
+    const after = transition(editing.state, { type: "cell.cancel" });
+    expect(after.state.mode.kind).toBe("idle");
+    expect(after.effects).toEqual([{ type: "reload" }]);
+  });
+
+  test("a change during a reload is read by one more reload", () => {
+    const first = run([{ type: "index.changed" }]);
+    const again = run([{ type: "index.changed" }], first.state);
+    expect(again.effects).toEqual([]);
+    const done = transition(again.state, loaded);
+    expect(done.effects).toEqual([{ type: "reload" }]);
+    expect(transition(done.state, loaded).effects).toEqual([]);
+  });
+});

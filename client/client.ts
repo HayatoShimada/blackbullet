@@ -69,6 +69,8 @@ import {
 } from "./navigator/views/revisions.ts";
 import { PathPageNavigator, parseRefFromURI } from "./navigator.ts";
 import { EventHook } from "./plugos/hooks/event.ts";
+import { postToWidgets } from "./components/widget_sandbox_iframe.ts";
+import { relayIndexChanges } from "./live_widgets.ts";
 import {
   fileListPollDue,
   REALTIME_HEALTH_TTL_MS,
@@ -570,6 +572,7 @@ export class Client {
     });
 
     this.space.watch();
+    relayIndexChanges(this.eventHook, postToWidgets);
 
     this.realtimeEvents = new RealtimeEvents({
       noteOrigin: (name, origin) => {
