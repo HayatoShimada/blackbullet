@@ -27,6 +27,10 @@ export async function wipeClientCommand() {
   await system.wipeClient();
 }
 
+export async function resetCacheCommand() {
+  await system.resetClientCache();
+}
+
 export async function wipeAndLogoutCommand() {
   await system.wipeClient(true);
 }

@@ -117,6 +117,10 @@ export function isInitialSyncLocalReadCandidate(
   );
 }
 
+/** (BlackBullet) How long a page load waits for the server before the
+ * precached shell is shown instead. */
+export const NAVIGATION_TIMEOUT_MS = 4000;
+
 export type ProxyRouterEvents = {
   // Use case: the user likely has this file open in the editor, so it's good to prioritize syncing it
   observedRequest: (path: string) => void;
@@ -128,7 +132,8 @@ export type ProxyRouterEvents = {
  * Implements a service worker level HTTP proxy (fetch requests) that serves /.fs calls locally for synced spaces.
  *
  * Offline serving strategy:
- * - Static client assets (HTML, JS, CSS) are always served from the pre-cache (populated on SW install).
+ * - Static client assets (JS, CSS) are served from the pre-cache (populated on SW install); page loads
+ *   go to the server first and fall back to the precached shell (BlackBullet).
  * - File system (/.fs) requests are served locally from IndexedDB once a full sync has been confirmed.
  * - Before a full sync is confirmed, requests are proxied to the server. If the server is unreachable
  *   (network error), we fall through to serve locally so the app still works offline.
@@ -262,14 +267,21 @@ export class ProxyRouter extends EventEmitter<ProxyRouterEvents> {
             return fetch(request);
           }
 
-          const cachedResponse = await caches.match(cacheKey);
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-
           const pathname = requestUrl.pathname.substring(
             this.basePathName.length,
           );
+
+          // (BlackBullet) A navigation never comes from the precache first:
+          // the server renders the shell per request, and the copy taken at
+          // install would be served until the next worker (see navigate()).
+          if (request.mode !== "navigate") {
+            const cachedResponse = await caches.match(cacheKey);
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            const previous = await this.previousClientFile(pathname, request);
+            if (previous) return previous;
+          }
 
           // Paths that can never be served locally (auth, shell, etc.) — always proxy.
           // If the proxy fails, there's no local fallback, so let the outer catch
@@ -287,6 +299,10 @@ export class ProxyRouter extends EventEmitter<ProxyRouterEvents> {
             belongsToSiblingSpace(pathname, this.siblingPrefixes)
           ) {
             return await fetch(request);
+          }
+
+          if (request.mode === "navigate" && !pathname.startsWith(fsEndpoint)) {
+            return await this.navigate(request);
           }
 
           // Not yet configured (no sync engine / local storage) — must proxy.
@@ -348,23 +364,8 @@ export class ProxyRouter extends EventEmitter<ProxyRouterEvents> {
           } else if (pathname.startsWith(fsEndpoint)) {
             return this.handleRequest(pathname, request);
           } else {
-            if (request.mode === "navigate" && this.online) {
-              try {
-                return await fetch(request);
-              } catch (e: any) {
-                if (e.message !== "Offline" && !isNetworkError(e)) {
-                  throw e;
-                }
-                this.online = false;
-              }
-            }
-            // Only a navigation may be answered with the app shell.
-            if (request.mode !== "navigate") {
-              return await fetch(request);
-            }
-            return (
-              (await caches.match(this.precacheFiles["/"])) || fetch(request)
-            );
+            // Navigations were answered above; only they get the app shell.
+            return await fetch(request);
           }
         } catch (e: any) {
           console.warn("Fetch failed for", request.url, "error:", e.message);
@@ -375,6 +376,52 @@ export class ProxyRouter extends EventEmitter<ProxyRouterEvents> {
         }
       })(),
     );
+  }
+
+  /**
+   * (BlackBullet) A page load: the server's shell when it answers, the
+   * precached one when it does not (offline, or no answer within
+   * `NAVIGATION_TIMEOUT_MS`, as on a weak phone signal). Works before the
+   * worker is configured too, so an installed app starts offline.
+   */
+  private async navigate(request: Request): Promise<Response> {
+    const shell = () => caches.match(this.precacheFiles["/"]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), NAVIGATION_TIMEOUT_MS);
+    });
+    try {
+      const answer = await Promise.race([fetch(request), late]);
+      if (answer !== "late") return answer;
+      const cached = await shell();
+      return cached ?? (await fetch(request));
+    } catch (e: any) {
+      if (e.message !== "Offline" && !isNetworkError(e)) throw e;
+      this.online = false;
+      const cached = await shell();
+      if (cached) return cached;
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * (BlackBullet) A client file the current precache does not list, asked
+   * for by a tab still running the previous version (a lazily loaded chunk):
+   * served from the previous version's cache, which activation keeps, so the
+   * open tab keeps working until it reloads. Chunk names carry their content
+   * hash, so the version query can be ignored.
+   */
+  private async previousClientFile(
+    pathname: string,
+    request: Request,
+  ): Promise<Response | undefined> {
+    if (!pathname.startsWith("/.client/") || this.precacheFiles[pathname]) {
+      return undefined;
+    }
+    if (request.method !== "GET") return undefined;
+    return await caches.match(request.url, { ignoreSearch: true });
   }
 
   handleRequest(pathname: string, request: Request): Promise<Response> {

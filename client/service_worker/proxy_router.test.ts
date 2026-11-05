@@ -4,6 +4,7 @@ import {
   belongsToAnotherSpace,
   belongsToSiblingSpace,
   isInitialSyncLocalReadCandidate,
+  NAVIGATION_TIMEOUT_MS,
   ProxyRouter,
   scopedSiblingPrefixes,
 } from "./proxy_router.ts";
@@ -410,4 +411,107 @@ test("a missing local cheap metadata probe is proxied with its mode intact", asy
   } finally {
     vi.stubGlobal("fetch", originalFetch);
   }
+});
+
+// (BlackBullet) Page loads: the server first, the precached shell offline.
+async function navigateTo(
+  router: ProxyRouter,
+  url: string,
+  fetchImpl: () => Promise<Response>,
+  cached: Record<string, Response> = {},
+  mode = "navigate",
+): Promise<Response> {
+  const originalCaches = (globalThis as any).caches;
+  const originalFetch = globalThis.fetch;
+  (globalThis as any).caches = {
+    match: async (key: string, opts?: { ignoreSearch?: boolean }) => {
+      const k = opts?.ignoreSearch ? key.split("?")[0] : key;
+      return Object.entries(cached).find(([c]) =>
+        opts?.ignoreSearch ? c.split("?")[0] === k : c === k,
+      )?.[1];
+    },
+  };
+  globalThis.fetch = fetchImpl as any;
+  try {
+    let responsePromise: Promise<Response> | undefined;
+    router.onFetch({
+      request: {
+        url,
+        method: "GET",
+        mode,
+        headers: new Headers(),
+      },
+      respondWith: (p: Promise<Response>) => {
+        responsePromise = p;
+      },
+    });
+    return await responsePromise!;
+  } finally {
+    (globalThis as any).caches = originalCaches;
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test("a page load gets the server's shell, not the install-time copy", async () => {
+  const router = new ProxyRouter("", "http://localhost/", {
+    "/": "http://localhost/?v=cache-1",
+  });
+  const resp = await navigateTo(
+    router,
+    "http://localhost/",
+    async () => new Response("fresh"),
+    { "http://localhost/?v=cache-1": new Response("old") },
+  );
+  expect(await resp.text()).toBe("fresh");
+});
+
+test("offline, even before the worker is configured, the precached shell answers", async () => {
+  const router = new ProxyRouter("", "http://localhost/", {
+    "/": "http://localhost/?v=cache-1",
+  });
+  const resp = await navigateTo(
+    router,
+    "http://localhost/Some%20Page",
+    () => Promise.reject(new TypeError("Failed to fetch")),
+    { "http://localhost/?v=cache-1": new Response("shell") },
+  );
+  expect(await resp.text()).toBe("shell");
+  expect(router.online).toBe(false);
+});
+
+test("a server that does not answer in time is not waited for", async () => {
+  vi.useFakeTimers();
+  try {
+    const router = new ProxyRouter("", "http://localhost/", {
+      "/": "http://localhost/?v=cache-1",
+    });
+    const pending = navigateTo(
+      router,
+      "http://localhost/",
+      () => new Promise<Response>(() => {}),
+      { "http://localhost/?v=cache-1": new Response("shell") },
+    );
+    await vi.advanceTimersByTimeAsync(NAVIGATION_TIMEOUT_MS);
+    expect(await (await pending).text()).toBe("shell");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a chunk of the previous version comes from its kept cache", async () => {
+  const router = new ProxyRouter("", "http://localhost/", {
+    "/.client/client.js": "http://localhost/.client/client.js?v=cache-2",
+  });
+  const resp = await navigateTo(
+    router,
+    "http://localhost/.client/chunk-OLD12345.js",
+    async () => new Response("missing", { status: 404 }),
+    {
+      "http://localhost/.client/chunk-OLD12345.js?v=cache-1": new Response(
+        "old chunk",
+      ),
+    },
+    "no-cors",
+  );
+  expect(await resp.text()).toBe("old chunk");
 });

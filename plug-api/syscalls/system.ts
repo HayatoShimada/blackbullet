@@ -159,6 +159,14 @@ export function wipeClient(logout = false): Promise<void> {
 }
 
 /**
+ * (BlackBullet) Drops the app's cached code (caches and service worker) and
+ * loads it again from the server; synced notes are kept. Asks first.
+ */
+export function resetClientCache(): Promise<boolean> {
+  return syscall("system.resetClientCache");
+}
+
+/**
  * DEPRECATED
  * Deletes all IndexedDB databases that are not connected to client (e.g. legacy databases)
  */

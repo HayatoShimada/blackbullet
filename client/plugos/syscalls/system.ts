@@ -4,6 +4,8 @@ import { version as publicVersion } from "../../../version.json";
 import type { CommandDef } from "@silverbulletmd/silverbullet/type/manifest";
 import type { SyscallMeta } from "@silverbulletmd/silverbullet/type/index";
 import { loadAccounts, loadProfile } from "../../accounts.ts";
+import { resetCache } from "../../cache_reset.ts";
+import { flushCachesAndUnregisterServiceWorker } from "../../service_worker/util.ts";
 import type {
   Account,
   ClientProfile,
@@ -220,6 +222,34 @@ export function systemSyscalls(
       description:
         "Wipes local client state, cached files, databases, and optionally the login session.",
       signatures: ["system.wipeClient(logout?)"],
+    },
+    // (BlackBullet)
+    "system.resetClientCache": {
+      callback: () =>
+        resetCache({
+          reachable: async () => {
+            try {
+              const res = await fetch(new URL(".ping", document.baseURI), {
+                cache: "no-store",
+              });
+              return res.ok;
+            } catch {
+              return false;
+            }
+          },
+          confirm: (message) => client.ui.confirm(message),
+          notify: (message) => client.ui.flashNotification(message, "error"),
+          storage: async () => {
+            const estimate = await navigator.storage?.estimate?.();
+            const persisted = await navigator.storage?.persisted?.();
+            return { usage: estimate?.usage, persisted };
+          },
+          flush: flushCachesAndUnregisterServiceWorker,
+          reload: () => location.reload(),
+        }),
+      description:
+        "Drops the app's cached code and loads it again from the server; synced notes are kept.",
+      signatures: ["system.resetClientCache()"],
     },
     // DEPRECATED
     "system.cleanDatabases": {
