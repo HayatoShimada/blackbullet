@@ -13,7 +13,7 @@ BlackBullet is a fork of [SilverBullet](https://github.com/silverbulletmd/silver
 - **Documents**: PDF, Word, Excel, PowerPoint, OpenDocument and HTML files in the folder are searchable too, with optional OCR.
 - **Export**: a page as PDF, Word (.docx) or Markdown with its images (.zip), from `Ctrl-e`, the tree's **Export…** or `Export: PDF` / `Export: Word` / `Export: Markdown with Images` (PDF and Word are made by the sidecar).
 - **AI assistants**: an MCP server over the same notes for Claude Code, Claude Desktop and other MCP clients.
-- **Phone and other devices**: works at phone width, and an optional tailnet-only HTTPS front door (Tailscale) with no password screen.
+- **Phone and other devices**: works at phone width and installs as an app (Quick note, Today, Journal and Graph shortcuts; works offline), with a morning notification of what is due, and an optional tailnet-only HTTPS front door (Tailscale) with no password screen.
 
 ## Quick start
 
@@ -74,13 +74,19 @@ Then a ```` ```db ```` block with `database: projects` shows it as a table, boar
 
 ## Phone and other devices
 
-The layout adapts to phones: 44 px touch targets, cards instead of wide tables, and a drawer with Search, New and Journal.
+The layout adapts to phones: 44 px touch targets, cards instead of wide tables, and a drawer with Search, New, Journal, Today and Graph.
+
+- **Install it** from the browser (Add to Home Screen). It opens full screen and offline; a long press on its icon offers **Quick note** (a capture sheet that saves to the Inbox or appends a timed line to today's journal), **Today** (overdue, due today and this week, as views you tick off; [`Today.md`](libraries/Library/Std/Pages/Today.md)), **Journal** and **Graph**. On Android, sharing to the app from any other app opens the same sheet.
+- **Notifications**: `Notifications: Turn On` subscribes the device to a morning message of what is due, sent by memo-mcp with Web Push (encrypted for the device; `MEMO_PUSH_AT`, `MEMO_TZ`, `MEMO_PUSH_TITLES`). An iPhone receives them in the installed app only.
+- **Updates**: a new version waits until you pick **Reload** on "A new version is ready" (or loads at once right after a reload); `Client: Reset Cache` reloads the app from the server without touching your notes. How the cache works: [`Client Bundle Cache.md`](docs/Architecture/Client%20Bundle%20Cache.md).
 
 `./setup.sh --tailnet` adds a front door reachable only from your [Tailscale](https://tailscale.com) network and only by the logins you allow, with a real domain and certificate and no password screen. The same address serves the MCP endpoint (`https://<SITE_DOMAIN>/mcp`) to other machines on the tailnet. Setup steps are in [`deploy/tailnet-proxy/README.md`](deploy/tailnet-proxy/README.md).
 
 ## Help
 
 The **?** button in the header opens the in-app guide (Japanese). The command palette (`Ctrl-/`) lists every command with its shortcut. `Esc` then `Tab` moves the keyboard from the editor to the header.
+
+Commands added by BlackBullet (open the command palette with `Ctrl-/` or `Cmd-/`): `Navigate: Tree`, `Tree: Undo Move`, `New`, `Trash: Restore`, `Trash: Empty`, `Page: Set Icon`, `Page: Set Cover`, `Page: Remove Cover`, `Search: Notes`, `Search: Related Notes`, `Graph: Open`, `Graph: Explore`, `Graph: Global Page Map`, `Ask: Notes`, `Ask: Follow-up`, `Ask: New Conversation`, `Ask: Save Answer`, `Ask: History`, `Ask: Set up`, `Database: Insert View`, `Database: New Row`, `Database: Define in CONFIG`, `Editor: Toggle Preview`, `Editor: Toggle Code`, `Export: PDF`, `Export: Word`, `Export: Markdown with Images`, `Help: Fork Guide`, `Client: Reset Cache`, `Notifications: Turn On`, `Notifications: Send Test`, `Notifications: Turn Off`.
 
 ## Develop
 
