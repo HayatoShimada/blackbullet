@@ -54,6 +54,13 @@ function panelDeps(
     navigate: (target) => editor.navigate(target),
     openUrl: (url) => editor.openUrl(url),
     closePanel: () => editor.hidePanel("modal"),
+    openScope: async (scope) => {
+      await system.invokeFunction(
+        scope === "space"
+          ? "object-graph.showGlobalGraph"
+          : "object-graph.showGraph",
+      );
+    },
     onState,
   };
 }

@@ -216,7 +216,9 @@ function NodesSection({
 }
 
 function LegendSection() {
-  const [open, setOpen] = useState(true);
+  // (BlackBullet) Closed until asked for: the lines explain themselves on
+  // hover, and the sidebar starts with what changes the picture.
+  const [open, setOpen] = useState(false);
   return (
     <div class="gv-section">
       <SectionHeader

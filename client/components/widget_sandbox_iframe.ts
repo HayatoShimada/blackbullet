@@ -92,6 +92,15 @@ export function broadcastReload() {
   }
 }
 
+/** Posts `data` to every sandbox widget on the page. */
+export function postToWidgets(data: unknown) {
+  for (const preloadedIframe of iframePool) {
+    if (preloadedIframe.used) {
+      preloadedIframe.iframe.contentWindow?.postMessage(data, "*");
+    }
+  }
+}
+
 export function mountIFrame(
   preloadedIFrame: PreloadedIFrame,
   client: Client,

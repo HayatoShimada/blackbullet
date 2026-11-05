@@ -82,12 +82,31 @@ export const defaultForceSettings: ForceSettings = {
   linkStrength: 0.1,
 };
 
+// (BlackBullet) Words on the lines only for what is hovered or selected: a
+// graph with every label drawn read as noise.
 export const defaultFilters: Filters = {
   hiddenTags: [],
   hiddenLabels: [],
-  hideEdgeLabels: false,
+  hideEdgeLabels: true,
   hideOrphans: true,
 };
+
+export const FILTERS_VERSION = 1;
+
+/**
+ * Merges saved filters over the defaults. Filters saved before the version
+ * (when labels were shown by default) start with them hidden once; the
+ * version is saved with them, so showing them again afterwards is kept.
+ */
+export function migrateFilters(
+  raw: (Partial<Filters> & { version?: number }) | undefined,
+): Filters & { version: number } {
+  const merged = { ...defaultFilters, ...raw };
+  if (raw && raw.version === undefined) {
+    merged.hideEdgeLabels = defaultFilters.hideEdgeLabels;
+  }
+  return { ...merged, version: FILTERS_VERSION };
+}
 
 /**
  * Universe of filter options that exist in the whole space, regardless of
@@ -127,17 +146,23 @@ export const SEMANTIC_STEP = 0.04;
 // threshold near the top of the range left the graph without similar pages on
 // first open. 0.80 with the three nearest pages per page shows the neighbours
 // of the current page without anyone touching a control.
+// (BlackBullet) Opened on a page, the graph shows that page and the pages one
+// link away, with its two nearest similar pages: a whole space at once, or
+// three dashed lines per page, buried the page it was opened for.
 export const defaultSemanticSettings: SemanticSettings = {
   show: true,
   threshold: 0.8,
-  k: 3,
-  hops: 0,
+  k: 2,
+  hops: 1,
 };
 
 // The default before 0.80. Settings saved while it was the default hold this
 // value without the person ever having chosen it, so it reads as "unset".
 export const LEGACY_SEMANTIC_THRESHOLD = 0.92;
-export const SEMANTIC_SETTINGS_VERSION = 2;
+export const SEMANTIC_SETTINGS_VERSION = 3;
+// The defaults before version 3, held by settings nobody chose.
+const LEGACY_HOPS = 0;
+const LEGACY_K = 3;
 
 /**
  * Merges saved settings over the defaults. Unversioned settings holding the
@@ -154,6 +179,16 @@ export function migrateSemanticSettings(
     raw.threshold === LEGACY_SEMANTIC_THRESHOLD
   ) {
     merged.threshold = defaultSemanticSettings.threshold;
+  }
+  // Settings saved before version 3 holding the old radius and count were
+  // the defaults then, not a choice: they move to the new ones once.
+  if (raw && (raw.version ?? 0) < 3) {
+    if (raw.hops === undefined || raw.hops === LEGACY_HOPS) {
+      merged.hops = defaultSemanticSettings.hops;
+    }
+    if (raw.k === undefined || raw.k === LEGACY_K) {
+      merged.k = defaultSemanticSettings.k;
+    }
   }
   merged.version = SEMANTIC_SETTINGS_VERSION;
   return merged;

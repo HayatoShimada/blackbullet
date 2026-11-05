@@ -567,6 +567,13 @@ config.set("actionButtons", {
     dropdown = false,
   },
   {
+    -- Fork: the graph around this page, one press away (Ctrl-Shift-g).
+    icon = "share-2",
+    description = "Graph of this page",
+    command = "Graph: Open",
+    priority = 2.2,
+  },
+  {
     icon = "terminal",
     description = "Run command",
     command = "Open Command Palette",

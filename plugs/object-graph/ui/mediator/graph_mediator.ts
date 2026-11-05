@@ -85,7 +85,12 @@ export type GraphEvent =
   | { type: "semantic.patch"; patch: Partial<SemanticSettings> }
   /** The phone's filters sheet was pulled up or put away. */
   | { type: "sheet.set"; open: boolean }
+  /** (BlackBullet) "This page" / "Whole space": the graph opened the other way. */
+  | { type: "scope.switch"; scope: GraphScope }
   | { type: "panel.close" };
+
+/** (BlackBullet) Around the page it was opened on, or every page at once. */
+export type GraphScope = "page" | "space";
 
 export type GraphEffect =
   | { type: "persist"; key: "filters" | "forces" | "semantic"; value: unknown }
@@ -116,6 +121,8 @@ export type GraphEffect =
   | { type: "focus"; anchor: string }
   | { type: "navigate"; target: string; close: boolean }
   | { type: "openUrl"; url: string }
+  /** Open the graph again with the other scope. */
+  | { type: "openScope"; scope: GraphScope }
   | { type: "closePanel" };
 
 export type Transition = { state: GraphState; effects: GraphEffect[] };
@@ -463,9 +470,11 @@ function step(state: GraphState, event: GraphEvent): Transition {
     case "semantic.patch": {
       const semantic = { ...state.semantic, ...event.patch };
       const next = { ...state, semantic };
-      const effects: GraphEffect[] = [
-        { type: "persist", key: "semantic", value: semantic },
-      ];
+      // (BlackBullet) The whole-space view opens with no radius of its own;
+      // what is changed there stays there, like its filters.
+      const effects: GraphEffect[] = state.allExpanded
+        ? []
+        : [{ type: "persist", key: "semantic", value: semantic }];
       if (semantic.hops !== state.semantic.hops) {
         // A new radius abandons whatever the old one was still loading.
         effects.push({ type: "cancelRings" });
@@ -479,6 +488,11 @@ function step(state: GraphState, event: GraphEvent): Transition {
         ? { state, effects: [] }
         : { state: { ...state, sheetOpen: event.open }, effects: [] };
 
+    case "scope.switch": {
+      const current: GraphScope = state.allExpanded ? "space" : "page";
+      if (event.scope === current) return { state, effects: [] };
+      return { state, effects: [{ type: "openScope", scope: event.scope }] };
+    }
     case "panel.close":
       return { state, effects: [{ type: "closePanel" }] };
   }

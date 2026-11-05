@@ -65,7 +65,7 @@ const withHost = (port, host) =>
 const OFF_PORT = 3041;
 const ON_PORT = 3042;
 // 埋め込みは有効だがモデルが取得できない（オフライン / 初回ダウンロード失敗）状況。配布元を閉じたポートに向ける
-const FAIL_PORT = 3043;
+const FAIL_PORT = 3047;
 let off, on, fail;
 
 before(async () => {
@@ -482,3 +482,11 @@ test("MEMO_MCP_EXTRA_HOSTS の Host だけ追加で許可される", async () =>
     assert.ok(hits.length === 3 && hits.every((h) => h.kind !== "md"));
   });
 }
+
+test("通知の API: 認証が要る。MEMO_STATE_DIR が無ければ無効（404）", async () => {
+  const a = api(OFF_PORT);
+  assert.equal((await a("push/key", { token: null })).status, 401);
+  const r = await a("push/key");
+  assert.equal(r.status, 404);
+  assert.match(r.body.error, /MEMO_STATE_DIR/);
+});

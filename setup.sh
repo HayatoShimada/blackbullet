@@ -85,6 +85,7 @@ ensure PGID "$(id -g)"
 ensure MEMO_MCP_TOKEN "$(random_hex)"
 ensure MEMO_SPACE_NAME notes
 ensure MEMO_INDEX_DIR ./.memo-index
+ensure MEMO_STATE_DIR ./.memo-state
 ensure MEMO_EMBED on
 
 if [ "$tailnet" = 1 ]; then
@@ -103,7 +104,7 @@ case "$mode" in
   --status) ops_status; exit $? ;;
 esac
 
-mkdir -p "$SPACE_DIR" "$MEMO_INDEX_DIR"
+mkdir -p "$SPACE_DIR" "$MEMO_INDEX_DIR" "$MEMO_STATE_DIR"
 # The server seeds the welcome page only into a folder without any .md file, and CONFIG.md below
 # would count as one; so put the welcome page there ourselves when the folder is new.
 if [ -z "$(find "$SPACE_DIR" -name '*.md' -print -quit)" ]; then

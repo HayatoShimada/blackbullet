@@ -59,3 +59,4 @@ __pycache__/
 # ./setup.sh --backup output
 /backups/
 *.pre-restore-*
+.memo-state

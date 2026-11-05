@@ -320,6 +320,11 @@ functions:
     command:
       name: "Client: Wipe"
 
+  resetCacheCommand:
+    path: ./system.ts:resetCacheCommand
+    command:
+      name: "Client: Reset Cache"
+
   wipeAndLogoutCommand:
     path: ./system.ts:wipeAndLogoutCommand
     command:

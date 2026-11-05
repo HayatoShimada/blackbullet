@@ -54,6 +54,10 @@ License: GPL-2.0-only. Copyright (C) 2026 HayatoShimada.
 | `MEMO_EXTRACT_KINDS` | Optional comma-separated list restricting which kinds are indexed (`pdf,docx,xlsx,pptx,odf,html,legacy,text,image`; `legacy` reports old `.doc`/`.xls`/`.ppt` as `unsupported`; `.html`/`.htm` are indexed by default, decoded per their `<meta charset>`, or extensions; `image` covers OCR'd pictures). Default: all. Use `pdf,docx,xlsx,pptx` to keep `.txt` / `.csv` out. |
 | `MEMO_CHROMIUM` | Chromium binary for `/api/export/pdf`. Default `chromium` (installed in the Docker image with `fonts-noto-cjk`). Without it the endpoint answers 501. |
 | `MEMO_EXPORT_MAX_BODY` | Largest `/api/export/*` request in bytes (the page's HTML with its images). Default `50331648` (48 MiB). |
+| `MEMO_STATE_DIR` | Turns notifications (Web Push) on: where the subscriptions (`push.json`) and the server's VAPID key pair (`vapid.json`, made on first use, mode 0600) are kept. Not derived data: deleting it means turning notifications on again on every device. Unset: `/api/push/*` answers 404. |
+| `MEMO_PUSH_AT` | The hour of the morning digest, `HH:MM` in `MEMO_TZ`. Default `08:00`. Sent once a day, after this time, only when something is due. |
+| `MEMO_PUSH_TITLES` | `off`: the digest carries only the counts, never task titles. A `:confidential` space never sends titles. Default `on`. |
+| `MEMO_PUSH_SUBJECT` | The VAPID `sub` claim (an `https:` or `mailto:` URL the push services may contact). Default: this project's repository URL. |
 | `MEMO_DOC_EXCLUDE` | Optional regular expression; document pages whose name matches are not indexed (e.g. `^Private/`). |
 
 A space marked `:confidential` gets `confidential: true` in tool and REST results, a notice in
@@ -117,12 +121,17 @@ Errors are `{error}` (400 bad arguments / 401 auth / 403 Host/Origin not allowed
 | `/api/related` | `page` (required), `limit=10`, `include_journal=1` | `{results:[{page, score, via:"semantic"\|"link"\|"both"}]}` |
 | `/api/graph` | `k=3` (1-20), `threshold=0.80`, `page`, `include_journal=1` | `{nodes:[{id, title, tags}], edges:[{from, to, kind:"semantic", score}]}` |
 | `/api/ask` (POST) | JSON body `{space, q (max 500 chars), k=8 (1-20), mode, expand (boolean), tag, area, status, since (YYYY-MM-DD or ISO), prefix, kind}` | `{question, scope?, mode, warning?, confidential, sections:[{page, heading_path:[...], heading_line, line_start, line_end, ref:"Page@L12", text, score \| context:true, kind?, unit?, unit_no?}]}`: the matching sections with full text, as grounding for an answer written elsewhere |
+| `/api/push/key` | no `space` | `{publicKey}`: the VAPID public key (base64url) a browser subscribes with |
+| `/api/push/subscribe` (POST) | JSON body `{space, subscription}` (the browser's `PushSubscription.toJSON()`; `https:` endpoint) | `{ok, at}` |
+| `/api/push/unsubscribe` (POST) | JSON body `{endpoint}` | `{ok, removed}` |
+| `/api/push/test` (POST) | JSON body `{endpoint}` | `{sent}`: today's digest (or "Nothing is due today") to that subscription now |
 | `/api/export/pdf`, `/api/export/docx` (POST) | JSON body `{html, title}`; no `space` | The file itself (`application/pdf` / the Word type); errors as `{error}` (400, 401, 413 over `MEMO_EXPORT_MAX_BODY`, 501 PDF without Chromium) |
 
 - `ranks` are 1-based (`null` when that method did not hit). `heading_path` is split on `" > "`.
 - `/api/related` is the union of semantic neighbours and `[[wiki links]]` (outgoing and backlinks). Journal pages are excluded by default.
 - `/api/graph` similarity between pages is the maximum cosine over section pairs. Each page keeps its top `k` neighbours at or above `threshold`; A-B and B-A collapse into one edge. `Journal/` is excluded by default. e5 cosines are high across the board, so raise `threshold` (0.92-0.95) to thin the graph.
 - With `MEMO_EMBED=off`: search is lexical only (`mode=semantic` returns empty plus `warning`), related returns links only plus `warning`, graph returns `edges: []` plus `warning`.
+- Notifications: the digest is "N due today · M overdue" plus the first three titles, from open todo pages and checkbox lines due today or earlier. It is encrypted for each device (RFC 8291, aes128gcm) and signed with VAPID (RFC 8292), both with `node:crypto` only; the push service (FCM, APNs, Mozilla) carries it but cannot read it. A subscription the push service reports gone (404/410) is dropped.
 - `CONFIG.md` is never indexed or embedded (it may hold tokens). Markdown under `Templates/`, `Library/` and `Images/` is skipped too; documents are skipped only under `Templates/` and `Library/`.
 
 ```bash

@@ -215,7 +215,8 @@ html, body {
 // remain, Close always on screen.
 .gv-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  // Title · This page | Whole space · view controls · close.
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
   row-gap: 4px;
@@ -237,20 +238,23 @@ html, body {
   justify-self: end;
   min-width: 0;
 }
+.gv-scope {
+  justify-self: start;
+}
 .gv-close-button {
-  grid-column: 3;
+  grid-column: 4;
   font-size: 20px;
   line-height: 1;
 }
 
 @media (max-width: 860px) {
-  .gv-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .gv-header { grid-template-columns: auto minmax(0, 1fr) auto; }
   .gv-header-controls {
     grid-column: 1 / -1;
     grid-row: 2;
     justify-self: start;
   }
-  .gv-close-button { grid-column: 2; grid-row: 1; }
+  .gv-close-button { grid-column: 3; grid-row: 1; }
 }
 
 // The view controls: radius, labels, orphans, expand, focus.

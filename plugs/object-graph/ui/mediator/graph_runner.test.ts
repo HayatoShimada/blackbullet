@@ -95,6 +95,9 @@ function setup(over: Partial<GraphRunnerDeps> = {}, view = vm()) {
     async closePanel() {
       log.push("close");
     },
+    async openScope(scope) {
+      log.push(`open ${scope}`);
+    },
     onState: (s) => states.push(s),
     ...over,
   };

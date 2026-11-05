@@ -8,12 +8,16 @@ build:
 assets:
   - "assets/**"
 functions:
+  openGraph:
+    path: ./src/object_graph.ts:openGraph
+    command:
+      name: "Graph: Open"
+      key: "Ctrl-Shift-g"
+      mac: "Cmd-Shift-g"
   showGraph:
     path: ./src/object_graph.ts:showGraph
     command:
       name: "Graph: Explore"
-      key: "Ctrl-Shift-g"
-      mac: "Cmd-Shift-g"
   showGlobalGraph:
     path: ./src/object_graph.ts:showGlobalGraph
     command:

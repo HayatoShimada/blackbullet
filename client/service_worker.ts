@@ -16,6 +16,11 @@ import {
 } from "./capture/intake.ts";
 import { openCaptureStore } from "./capture/store.ts";
 import { WorkerLogout } from "./service_worker/logout.ts";
+import { cachesToDrop } from "./service_worker/cache_names.ts";
+import {
+  notificationTarget,
+  parsePushMessage,
+} from "./service_worker/push_message.ts";
 import { ProxyRouter } from "./service_worker/proxy_router.ts";
 import { SyncEngine } from "./service_worker/sync_engine.ts";
 import { getOrCreateClientId } from "./spaces/client_id.ts";
@@ -140,14 +145,13 @@ self.addEventListener("message", async (event: any) => {
       break;
     }
     case "flush-cache": {
+      // (BlackBullet) Every cache, this version's too: the worker is being
+      // unregistered, and a cache left behind would never be cleaned.
       const cacheNames = await caches.keys();
-
       await Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log("Removing cache", cacheName);
-            return caches.delete(cacheName);
-          }
+          console.log("Removing cache", cacheName);
+          return caches.delete(cacheName);
         }),
       );
       broadcastMessage({
@@ -159,12 +163,16 @@ self.addEventListener("message", async (event: any) => {
       await (await captureStore).clear();
       if (proxyRouter.syncEngine) {
         await proxyRouter.syncEngine.wipe();
-        broadcastMessage({
-          type: "dataWiped",
-        });
       } else {
         console.warn("Not performing sync data wipe, sync engine not started");
       }
+      // (BlackBullet) The cached app goes too, and the client is always told:
+      // it waits for this before unregistering the worker (a worker that was
+      // never configured, as during a login error, used to leave it waiting).
+      await Promise.all((await caches.keys()).map((n) => caches.delete(n)));
+      broadcastMessage({
+        type: "dataWiped",
+      });
       break;
     }
     case "perform-file-sync": {
@@ -480,6 +488,13 @@ self.addEventListener("fetch", (event: any) => {
     throttledServiceWorkerStarted();
   }
 
+  // (BlackBullet) The /.events stream goes straight to the network. A stream
+  // this worker answered would keep it busy for as long as the tab is open,
+  // and a busy worker holds the next version back: it never activated.
+  if (new URL(event.request.url).pathname === `${basePathName}/.events`) {
+    return;
+  }
+
   if (isShareTarget(event.request, basePathName, location.origin)) {
     event.respondWith(
       captureStore.then(async (store) => {
@@ -496,7 +511,10 @@ self.addEventListener("fetch", (event: any) => {
     event.request.mode === "navigate" &&
     url.origin === location.origin &&
     url.pathname === `${basePathName}/` &&
-    captureId
+    captureId &&
+    // (BlackBullet) A new capture is an ordinary page load (network first,
+    // the precached shell offline), handled by the router below.
+    captureId !== "new"
   ) {
     event.respondWith(
       (async () => {
@@ -515,20 +533,73 @@ self.addEventListener("fetch", (event: any) => {
   proxyRouter.onFetch(event);
 });
 
+// (BlackBullet) Notifications sent by the sidecar (memo-mcp's morning digest
+// of what is due). The message is JSON: {title, body, url, tag}.
+self.addEventListener("push", (event: any) => {
+  const message = parsePushMessage(event.data);
+  event.waitUntil(
+    // @ts-expect-error: service worker API
+    self.registration.showNotification(message.title, {
+      body: message.body,
+      tag: message.tag,
+      icon: `${baseURI}/.client/logo-maskable-192.png`,
+      data: { url: message.url },
+    }),
+  );
+});
+
+// Opens what the notification is about: in a window of this app when one is
+// open, otherwise in a new one.
+self.addEventListener("notificationclick", (event: any) => {
+  event.notification.close();
+  // baseURI has no trailing slash; the target is relative to it.
+  const target = `${baseURI}/${notificationTarget(event.notification.data?.url)}`;
+  event.waitUntil(
+    (async () => {
+      // @ts-expect-error: service worker API
+      const windows = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      const open = windows.find((w: { url: string }) =>
+        w.url.startsWith(baseURI),
+      );
+      if (open) {
+        await open.focus();
+        await open.navigate(target);
+        return;
+      }
+      // @ts-expect-error: service worker API
+      await self.clients.openWindow(target);
+    })(),
+  );
+});
+
 self.addEventListener("install", (event: any) => {
   console.log("Installing service worker...");
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       console.log("Now pre-caching client files");
-      await cache.addAll(
-        Object.values<string>(precacheFiles).map(
-          (url) => new Request(url, { cache: "reload" }),
-        ),
+      // (BlackBullet) Like cache.addAll, but a response that came through a
+      // redirect (an auth proxy's login page) is not kept as the app.
+      await Promise.all(
+        Object.values<string>(precacheFiles).map(async (url) => {
+          const response = await fetch(new Request(url, { cache: "reload" }));
+          if (!response.ok) {
+            throw new Error(`Precache of ${url} failed: ${response.status}`);
+          }
+          if (response.redirected) {
+            console.warn("Not caching", url, "(redirected)");
+            return;
+          }
+          await cache.put(url, response);
+        }),
       );
       console.log(Object.keys(precacheFiles).length, "client files cached");
-      // @ts-expect-error: Force the waiting service worker to become the active service worker
-      await self.skipWaiting();
+      // (BlackBullet) No skipWaiting here: a new version waits until a tab
+      // takes it (app_update.ts: at once right after a reload, otherwise on
+      // "Reload"), so it never swaps the code under a tab that is running.
     })(),
   );
 });
@@ -542,13 +613,13 @@ self.addEventListener("activate", (event: any) => {
 
   event.waitUntil(
     (async () => {
+      // (BlackBullet) The previous version's cache stays one more version,
+      // for the tabs still running it (see cachesToDrop).
       const cacheNames = await caches.keys();
       await Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log("Removing old cache", cacheName);
-            return caches.delete(cacheName);
-          }
+        cachesToDrop(cacheNames, CACHE_NAME).map((cacheName) => {
+          console.log("Removing old cache", cacheName);
+          return caches.delete(cacheName);
         }),
       );
       // @ts-expect-error: Take control of all clients as soon as the service worker activates

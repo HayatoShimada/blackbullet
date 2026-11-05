@@ -135,6 +135,9 @@ export type DbState = {
    * if the create fails. */
   draft?: Extract<Mode, { kind: "creating" }>;
   reloading: boolean;
+  /** The space changed elsewhere (another page, an agent, the disk) since the
+   * rows were read: they are read again once the view is at rest. */
+  refreshPending?: boolean;
   /** The ```db block that drew the view: where "Save view" writes. */
   block?: { page: string; body: string };
   /** What "Save view" sent, so view.saved records that and not later edits. */
@@ -222,6 +225,8 @@ export type DbEvent =
   | { type: "row.archive"; rowId: string }
   | { type: "row.duplicate"; rowId: string }
   | { type: "reload" }
+  /** The host's index took in changes made outside this view. */
+  | { type: "index.changed" }
   /** "Save view": write tab, sort and filter phrase into the block. */
   | { type: "view.save" }
   | { type: "notice.dismiss" }
@@ -428,7 +433,21 @@ function timelineSaved(state: DbState): { zoom?: Zoom; group?: string } {
 const isTimelineEvent = (event: DbEvent): event is TimelineEvent =>
   event.type.startsWith("tl.");
 
+/** A change made elsewhere is read in once the view is at rest: never under
+ * an open edit, menu, input or drag (that would move rows from under the
+ * pointer or drop what is being typed), nor over a write or a reload already
+ * on its way; when one of those ends, the rows are read again. */
 export function transition(state: DbState, event: DbEvent): Transition {
+  const next = step(state, event);
+  const s = next.state;
+  if (!s.refreshPending || s.mode.kind !== "idle" || s.reloading) return next;
+  return {
+    state: { ...s, refreshPending: false, reloading: true },
+    effects: [...next.effects, { type: "reload" }],
+  };
+}
+
+function step(state: DbState, event: DbEvent): Transition {
   if (isTimelineEvent(event)) return transitionTimeline(state, event);
   const busy = state.mode.kind === "writing";
   switch (event.type) {
@@ -825,6 +844,8 @@ export function transition(state: DbState, event: DbEvent): Transition {
         },
         effects: event.reason === "stale" ? [{ type: "reload" }] : [],
       };
+    case "index.changed":
+      return stay({ ...state, refreshPending: true });
     case "reload":
       if (busy || state.reloading) {
         return stay(

@@ -55,7 +55,9 @@ function vm(over: Partial<RootViewModel> = {}): RootViewModel {
     universe: { tags: [], labels: [], statuses: [], areas: [] },
     filters: { ...defaultFilters, hideOrphans: false },
     forces: defaultForceSettings,
-    semantic: defaultSemanticSettings,
+    // These tests were written against the whole-graph radius and three
+    // similar pages; the shipped defaults (one hop, two) are tested apart.
+    semantic: { ...defaultSemanticSettings, hops: 0, k: 3 },
     ...over,
   };
 }
@@ -295,7 +297,7 @@ describe("settings", () => {
   });
 
   test("a wider radius cancels the old load and starts the new one", () => {
-    const semantic = { ...defaultSemanticSettings, hops: 2 };
+    const semantic = { ...defaultSemanticSettings, hops: 2, k: 3 };
     expect(
       run([{ type: "semantic.patch", patch: { hops: 2 } }]).effects,
     ).toEqual([
@@ -319,19 +321,24 @@ describe("settings", () => {
   });
 
   test("changing the threshold does not touch the rings", () => {
-    const semantic = { ...defaultSemanticSettings, threshold: 0.8 };
+    const semantic = {
+      ...defaultSemanticSettings,
+      hops: 0,
+      k: 3,
+      threshold: 0.8,
+    };
     expect(
       run([{ type: "semantic.patch", patch: { threshold: 0.8 } }]).effects,
     ).toEqual([{ type: "persist", key: "semantic", value: semantic }]);
   });
 
-  test("the global view has no rings to load at any radius", () => {
+  test("the global view has no rings to load at any radius, and keeps its settings to itself", () => {
     const global = initialState(vm({ initialAllExpanded: true }));
     expect(
       run([{ type: "semantic.patch", patch: { hops: 3 } }], global).effects.map(
         (e) => e.type,
       ),
-    ).toEqual(["persist", "cancelRings"]);
+    ).toEqual(["cancelRings"]);
   });
 });
 
@@ -657,5 +664,21 @@ describe("selection and the sheet", () => {
         { type: "sheet.set", open: false },
       ]).state.sheetOpen,
     ).toBe(false);
+  });
+});
+
+describe("scope", () => {
+  test("switching to the other scope opens the graph that way", () => {
+    const s = initialState(vm());
+    expect(
+      transition(s, { type: "scope.switch", scope: "space" }).effects,
+    ).toEqual([{ type: "openScope", scope: "space" }]);
+    expect(
+      transition(s, { type: "scope.switch", scope: "page" }).effects,
+    ).toEqual([]);
+    const global = initialState(vm({ initialAllExpanded: true }));
+    expect(
+      transition(global, { type: "scope.switch", scope: "page" }).effects,
+    ).toEqual([{ type: "openScope", scope: "page" }]);
   });
 });

@@ -21,6 +21,7 @@ import { registerTools, spaces, indexes } from "./tools.mjs";
 import { registerResources } from "./resources.mjs";
 import { handleRest } from "./rest.mjs";
 import { handleExport } from "./export.mjs";
+import { createPush } from "./push.mjs";
 
 const PORT = Number(process.env.MEMO_MCP_PORT ?? 3010);
 const HOST = process.env.MEMO_MCP_HOST ?? "127.0.0.1";
@@ -77,6 +78,15 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+// Web Push（朝のまとめ）。MEMO_STATE_DIR が無ければ無効
+const push = createPush({ spaces, indexes });
+const PUSH_TICK_MS = 60_000;
+if (push) {
+  setInterval(() => {
+    push.tick().catch((e) => console.error("[memo-mcp] push failed:", e.message));
+  }, PUSH_TICK_MS).unref();
+}
+
 // セッションごとにトランスポートを保持する（2025-11-25 のセッション方式）
 const transports = new Map();
 
@@ -99,6 +109,22 @@ const httpServer = http.createServer(async (req, res) => {
     if (!tokenOk(req.headers.authorization)) {
       res.setHeader("WWW-Authenticate", "Bearer");
       return json(401, "Unauthorized");
+    }
+    if (url.pathname.startsWith("/api/push/")) {
+      if (!push) return json(404, "通知は無効です（MEMO_STATE_DIR が未設定）");
+      try {
+        const out = await push.handle(req, url, async () => {
+          const raw = await readBody(req);
+          const parsed = raw.trim() ? JSON.parse(raw) : {};
+          return parsed && typeof parsed === "object" ? parsed : {};
+        });
+        res.writeHead(out.status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(out.body));
+      } catch (e) {
+        console.error("[memo-mcp] push request failed:", e.message);
+        json(400, "リクエストを処理できません");
+      }
+      return;
     }
     if (url.pathname.startsWith("/api/export/")) await handleExport(req, res, url);
     else await handleRest(req, res, url, { spaces, indexes });

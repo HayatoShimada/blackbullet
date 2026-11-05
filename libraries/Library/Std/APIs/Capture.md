@@ -27,6 +27,8 @@ The bundled **Save as Quick Note** action is itself a Space Lua capture service.
 config.set("capture.quickNote", false)
 ```
 
+(BlackBullet) **Add to today's journal** appends the draft to today's journal page as one item with the time (`* 09:12 …`), creating the page when it is missing; it is offered for drafts without files. Turn it off with `config.set("capture.journal", false)`. A new capture can also be started without a share, from `?capture=new` (the app's **Quick note** shortcut), which is how a phone without a share target (an iPhone) captures.
+
 ```space-lua
 config.defineCategory {
   name = "Capture",
@@ -43,6 +45,12 @@ config.define("capture", {
       default = true,
       description = "Offer Save as Quick Note when a share arrives",
       ui = { category = "Capture", label = "Save as Quick Note", priority = 1 },
+    },
+    journal = {
+      type = "boolean",
+      default = true,
+      description = "Offer Add to today's journal for a capture without files",
+      ui = { category = "Capture", label = "Add to today's journal", priority = 2 },
     },
   },
 })
@@ -128,6 +136,54 @@ service.define {
         end
       end
       error(failure)
+    end
+    editor.navigate(page)
+  end,
+}
+
+-- (BlackBullet) One line in today's journal, with the time it was captured.
+local function journalItem(data)
+  local parts = {}
+  local title = trim(data.title):gsub("[\r\n]+", " ")
+  if title ~= "" then table.insert(parts, title) end
+  local body = trim(data.text)
+  if body ~= "" then table.insert(parts, body) end
+  local url = trim(data.url)
+  if url ~= "" then table.insert(parts, url) end
+  local text = table.concat(parts, " — ")
+  -- Lines after the first stay inside the item.
+  text = text:gsub("\n", "\n  ")
+  local clock = os.date("%H:%M", math.floor(data.receivedAt / 1000))
+  return "* " .. clock .. " " .. text
+end
+
+service.define {
+  selector = "capture",
+  match = function(data)
+    if not config.get("capture.journal", true) then return nil end
+    if #data.files > 0 then return nil end
+    return {
+      name = "Add to today's journal",
+      description = "Append it to today's journal page",
+      priority = 90,
+    }
+  end,
+  run = function(data)
+    local page = config.get("journal.prefix", "Journal/") .. date.today()
+    local item = journalItem(data)
+    if trim(item:gsub("^%* %d%d:%d%d", "")) == "" then
+      error("Nothing to add: the capture is empty")
+    end
+    if space.pageExists(page) then
+      local current = space.readPage(page)
+      if not current:match("\n$") then current = current .. "\n" end
+      space.writePage(page, current .. item .. "\n")
+    else
+      space.writePage(
+        page,
+        "---\ntags: " .. config.get("journal.tag", "journal") .. "\ndate: "
+          .. date.today() .. "\n---\n" .. item .. "\n"
+      )
     end
     editor.navigate(page)
   end,

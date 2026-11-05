@@ -1,4 +1,5 @@
 import { Button, Input } from "@silverbulletmd/silverbullet/ui";
+import { useEffect, useRef } from "preact/hooks";
 import type { CaptureActionData } from "./types.ts";
 
 export type CaptureActionOption = {
@@ -19,7 +20,21 @@ export type CaptureViewProps = {
   onDiscard: () => void;
   onClose: () => void;
   onNext: () => void;
+  /** (BlackBullet) A capture started in the app (`?capture=new`), not a
+   * share: the text is focused to type at once. */
+  fresh?: boolean;
 };
+
+/** (BlackBullet) The text of a fresh capture holds the focus: taken on
+ * mount, and again once the actions are ready, since the editor focuses
+ * itself when the app finishes starting. */
+function useFocusText(fresh: boolean | undefined, ready: boolean) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (fresh) ref.current?.focus();
+  }, [fresh, ready]);
+  return ref;
+}
 
 export function CaptureView(props: CaptureViewProps) {
   const {
@@ -34,24 +49,28 @@ export function CaptureView(props: CaptureViewProps) {
     onDiscard,
     onClose,
     onNext,
+    fresh,
   } = props;
+  const textRef = useFocusText(fresh, !loadingActions);
   return (
     <div class="sb-modal-backdrop sb-capture-backdrop">
       <section
         class="sb-capture"
         role="dialog"
-        aria-label="Capture share"
+        aria-label={fresh ? "Quick capture" : "Capture share"}
         aria-modal="true"
       >
         <header class="sb-capture-header">
-          <h2>Capture share</h2>
+          <h2>{fresh ? "Quick capture" : "Capture share"}</h2>
           <Button onClick={onClose} disabled={busy}>
             Close
           </Button>
         </header>
-        <p>
-          {pendingCount} pending capture{pendingCount === 1 ? "" : "s"}
-        </p>
+        {!(fresh && pendingCount === 1) && (
+          <p>
+            {pendingCount} pending capture{pendingCount === 1 ? "" : "s"}
+          </p>
+        )}
         <label>
           Title
           <Input
@@ -62,6 +81,7 @@ export function CaptureView(props: CaptureViewProps) {
         <label>
           Text
           <textarea
+            ref={textRef}
             value={draft.text}
             onInput={(event) => onChange("text", event.currentTarget.value)}
           />

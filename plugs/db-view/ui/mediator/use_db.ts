@@ -1,5 +1,5 @@
 import { syscall } from "@silverbulletmd/silverbullet/syscall";
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ViewModel } from "../../src/functions.ts";
 import {
   type DbEvent,
@@ -111,6 +111,17 @@ export function useDb(model: ViewModel): {
   useLayoutEffect(() => {
     const again = restoreEvent(store.current!.recall(), Date.now());
     if (again) runner.current!.emit(again);
+  }, []);
+  // The host says so when its index took in changes made elsewhere (another
+  // tab, an agent, the disk): the machine reads the rows again when idle.
+  useEffect(() => {
+    const listener = (e: MessageEvent) => {
+      if (e.source === window.parent && e.data?.type === "index-changed") {
+        runner.current!.emit({ type: "index.changed" });
+      }
+    };
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
   }, []);
   return { state, emit };
 }

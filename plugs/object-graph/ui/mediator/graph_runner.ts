@@ -31,6 +31,8 @@ export type GraphRunnerDeps = {
   navigate(target: string): Promise<void>;
   openUrl(url: string): Promise<void>;
   closePanel(): Promise<void>;
+  /** (BlackBullet) Opens the graph again, around the page or of the space. */
+  openScope(scope: "page" | "space"): Promise<void>;
   /** Told after every transition that changed the state. */
   onState(state: GraphState): void;
 };
@@ -196,6 +198,8 @@ export function createGraphRunner(
         return guarded("opening a URL", () => deps.openUrl(effect.url));
       case "closePanel":
         return guarded("closing", () => deps.closePanel());
+      case "openScope":
+        return guarded("opening", () => deps.openScope(effect.scope));
     }
   }
 

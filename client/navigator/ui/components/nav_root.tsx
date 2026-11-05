@@ -40,10 +40,12 @@ import { emptySegmentText } from "../segments.ts";
 import { markSlotReady, type NavActivation } from "../slots.ts";
 import {
   CloseIcon,
+  GraphIcon,
   JournalIcon,
   moreIconNode,
   PlusIcon,
   SearchIcon,
+  TodayIcon,
 } from "./chrome_icons.tsx";
 import { EmptyTree } from "./empty_tree.tsx";
 import { PopoverMenu } from "./popover_menu.tsx";
@@ -504,7 +506,7 @@ export function NavRoot({
           </button>
         </div>
         {spaceTree && (
-          // The phone's three one-tap doors: shown only under a coarse pointer.
+          // The phone's one-tap doors: shown only under a coarse pointer.
           <div className="sb-nav-entry-points">
             <button
               type="button"
@@ -532,6 +534,20 @@ export function NavRoot({
                 <span>Journal</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => void cmd.runEntryPoint("today")}
+            >
+              <TodayIcon />
+              <span>Today</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void cmd.runEntryPoint("graph")}
+            >
+              <GraphIcon />
+              <span>Graph</span>
+            </button>
           </div>
         )}
         {segments && (

@@ -8,6 +8,8 @@ import {
 import { initLogger } from "./lib/logger.ts";
 import { extractSpaceLuaFromPageText, loadConfig } from "./boot_config.ts";
 import { Client } from "./client.ts";
+import { reloadOnStaleChunks, watchForUpdates } from "./app_update.ts";
+import { bootCommand } from "./boot_open.ts";
 import type { Config } from "./config.ts";
 import {
   flushCachesAndUnregisterServiceWorker,
@@ -167,6 +169,8 @@ safeRun(async () => {
   const isHeadless = new URLSearchParams(location.search).has("headless");
   globalThis.sbRuntime.captureId =
     new URLSearchParams(location.search).get("capture") ?? undefined;
+  // (BlackBullet) A shortcut of the installed app (Journal, Graph).
+  globalThis.sbRuntime.openOnBoot = bootCommand(location.search);
   const reviewGitConflicts =
     new URLSearchParams(location.search).get("gitConflicts") === "1";
   // Expose headless flag on the runtime bridge so client.init() can detect
@@ -239,28 +243,54 @@ safeRun(async () => {
       .then((registration) => {
         console.log("Service worker registered...");
 
+        let booted: Client | undefined;
+        void clientReady.promise.then((client) => {
+          booted = client;
+        });
+        watchForUpdates({
+          registration,
+          container: navigator.serviceWorker,
+          page: document,
+          bootedAt: performance.timeOrigin,
+          now: () => Date.now(),
+          hasUnsavedChanges: () => !!booted?.ui.viewState.unsavedChanges,
+          reload: () => location.reload(),
+          announce: (reload) =>
+            void clientReady.promise.then((client) =>
+              client.ui.flashNotification("A new version is ready", "info", {
+                timeout: 0,
+                actions: [{ name: "Reload", run: reload }],
+              }),
+            ),
+          every: (run, ms) => setInterval(run, ms),
+        });
+
+        // (BlackBullet) A new worker waits until watchForUpdates lets it take
+        // over (it no longer skips waiting on install).
+        reloadOnStaleChunks({
+          target: window,
+          now: () => Date.now(),
+          lastReload: () =>
+            Number(sessionStorage.getItem("sb-stale-reload") ?? 0),
+          markReload: (at) =>
+            sessionStorage.setItem("sb-stale-reload", String(at)),
+          hasUnsavedChanges: () => !!booted?.ui.viewState.unsavedChanges,
+          reload: () => location.reload(),
+          announce: (reload) =>
+            void clientReady.promise.then((client) =>
+              client.ui.flashNotification("A new version is ready", "info", {
+                timeout: 0,
+                actions: [{ name: "Reload", run: reload }],
+              }),
+            ),
+        });
+        // (BlackBullet) Ask the browser to keep the synced notes: Safari
+        // otherwise clears a site's storage after a week without a visit.
+        void navigator.storage?.persist?.().catch(() => {});
+
         // Send the shared encryption key before configuration initializes the
         // encrypted data store for this prefix.
         void configureWorker(registration);
-
-        registration.addEventListener("updatefound", () => {
-          const newWorker = registration.installing;
-          console.log("New service worker installing...");
-
-          if (newWorker) {
-            newWorker.addEventListener("statechange", () => {
-              if (
-                newWorker.state === "installed" &&
-                navigator.serviceWorker.controller
-              ) {
-                console.log(
-                  "New service worker installed and ready to take over.",
-                );
-                newWorker.postMessage({ type: "skip-waiting" });
-              }
-            });
-          }
-        });
       });
   } else {
     console.info("Service worker disabled.");

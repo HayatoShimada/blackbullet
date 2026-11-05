@@ -13,6 +13,19 @@ import type {
 
 type Props = { client: Client; initialId?: string };
 
+/** (BlackBullet) The `?capture=` value that starts an empty capture. */
+export const NEW_CAPTURE = "new";
+
+/** Whether a draft holds nothing worth keeping. */
+export function isEmptyDraft(draft: CaptureActionData): boolean {
+  return (
+    !draft.title.trim() &&
+    !draft.text.trim() &&
+    !draft.url.trim() &&
+    draft.files.length === 0
+  );
+}
+
 function editable(record: CaptureRecord): CaptureActionData {
   return {
     id: record.id,
@@ -28,7 +41,10 @@ export function CaptureController({ client, initialId }: Props) {
   const ownerId = client.bootConfig.shareOwnerId;
   const [store, setStore] = useState<CaptureStore>();
   const [queue, setQueue] = useState<CaptureDraft[]>([]);
-  const [selectedId, setSelectedId] = useState<string | undefined>(initialId);
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    initialId === NEW_CAPTURE ? undefined : initialId,
+  );
+  const [freshId, setFreshId] = useState<string>();
   const [record, setRecord] = useState<CaptureRecord>();
   const [draft, setDraft] = useState<CaptureActionData>();
   const editedDrafts = useRef(new Map<string, CaptureActionData>());
@@ -50,6 +66,20 @@ export function CaptureController({ client, initialId }: Props) {
     const url = new URL("service_worker.js", document.baseURI).href;
     void openCaptureStore(url).then(async (opened) => {
       if (cancelled) return;
+      // (BlackBullet) `?capture=new`: a capture started in the app, staged
+      // empty like a share so the same actions (Quick Note, journal) apply.
+      // A share is never empty, so an empty capture is one started here and
+      // left (the app was closed over it): it is dropped, not kept pending.
+      for (const item of await opened.list(ownerId)) {
+        if (isEmptyDraft(item)) await opened.remove(item.id, ownerId);
+      }
+      if (initialId === NEW_CAPTURE) {
+        await opened.configure(ownerId, true);
+        const id = await opened.stage({ title: "", text: "", url: "" }, []);
+        if (cancelled) return;
+        setFreshId(id);
+        setSelectedId(id);
+      }
       setStore(opened);
       setQueue(await opened.list(ownerId));
     });
@@ -115,6 +145,13 @@ export function CaptureController({ client, initialId }: Props) {
   if (!store || !ownerId || queue.length === 0) return null;
 
   const close = () => {
+    // (BlackBullet) A capture started in the app and left empty is dropped,
+    // not kept as a pending capture.
+    if (record && record.id === freshId && draft && isEmptyDraft(draft)) {
+      void store
+        .remove(record.id, ownerId)
+        .then(async () => setQueue(await store.list(ownerId)));
+    }
     setSelectedId(undefined);
     setRecord(undefined);
     setDraft(undefined);
@@ -207,6 +244,7 @@ export function CaptureController({ client, initialId }: Props) {
           .catch((reason) => setError(String(reason)));
       }}
       onClose={close}
+      fresh={record.id === freshId}
       onNext={() => {
         setRecord(undefined);
         setDraft(undefined);

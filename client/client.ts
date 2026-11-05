@@ -69,6 +69,8 @@ import {
 } from "./navigator/views/revisions.ts";
 import { PathPageNavigator, parseRefFromURI } from "./navigator.ts";
 import { EventHook } from "./plugos/hooks/event.ts";
+import { postToWidgets } from "./components/widget_sandbox_iframe.ts";
+import { relayIndexChanges } from "./live_widgets.ts";
 import {
   fileListPollDue,
   REALTIME_HEALTH_TTL_MS,
@@ -136,6 +138,8 @@ function pickerSegment(mode: "page" | "meta" | "document" | "all") {
 export type SBRuntime = {
   headless?: boolean;
   captureId?: string;
+  /** (BlackBullet) A command to run once the app is up (`?open=`). */
+  openOnBoot?: string;
   ready?: boolean;
   evalLua?: (expr: string) => Promise<unknown>;
   evalLuaScript?: (script: string) => Promise<unknown>;
@@ -159,6 +163,9 @@ const SYNC_PROGRESS_MESSAGES = new Set([
   "space-sync-complete",
   "sync-status",
 ]);
+
+/** (BlackBullet) How long "Client: Wipe" waits for the worker's answer. */
+const WIPE_CONFIRM_TIMEOUT_MS = 10_000;
 
 export class Client {
   eventHook: EventHook;
@@ -396,6 +403,12 @@ export class Client {
     await timedSpan("init-navigator", () => this.initNavigator());
     await this.eventHook.dispatchEvent("system:ready");
     this.systemReady = true;
+    const openOnBoot = globalThis.sbRuntime?.openOnBoot;
+    if (openOnBoot) {
+      void this.runCommandByName(openOnBoot).catch((e) =>
+        console.warn("Could not open", openOnBoot, e),
+      );
+    }
     performance.mark("sb:system-ready");
     this.maybeDispatchWidgetsReady();
 
@@ -570,6 +583,7 @@ export class Client {
     });
 
     this.space.watch();
+    relayIndexChanges(this.eventHook, postToWidgets);
 
     this.realtimeEvents = new RealtimeEvents({
       noteOrigin: (name, origin) => {
@@ -1406,15 +1420,14 @@ export class Client {
             void this.objectIndex.ensureFullIndex(this.space);
           }
         } else if (!this.versionMismatchNotified) {
+          // (BlackBullet) The server runs a newer version: fetch its worker
+          // now. watchForUpdates (app_update.ts) then says so, once, and
+          // reloads; a second notice here only told the reader the same.
           this.versionMismatchNotified = true;
-          this.ui.flashNotification(
-            "A new version of SilverBullet client is available. A reload or two is required to update.",
-            "warning",
-            {
-              timeout: 0,
-              actions: [{ name: "Reload", run: () => location.reload() }],
-            },
-          );
+          void navigator.serviceWorker
+            ?.getRegistration()
+            .then((registration) => registration?.update())
+            .catch(() => {});
         }
         break;
       }
@@ -1477,19 +1490,31 @@ export class Client {
     }
     if (navigator.serviceWorker?.controller) {
       await new Promise<void>((resolve) => {
-        navigator.serviceWorker.addEventListener("message", async (e: any) => {
+        let done = false;
+        const unregister = async () => {
+          if (done) return;
+          done = true;
+          const registrations =
+            await navigator.serviceWorker.getRegistrations();
+          for (const registration of registrations) {
+            await registration.unregister();
+          }
+          console.log("Unregistered all service workers");
+          resolve();
+        };
+        // (BlackBullet) Not forever: a worker that cannot answer is
+        // unregistered all the same.
+        setTimeout(() => {
+          console.warn("No data wipe confirm, unregistering anyway");
+          void unregister();
+        }, WIPE_CONFIRM_TIMEOUT_MS);
+        navigator.serviceWorker.addEventListener("message", (e: any) => {
           const message: ServiceWorkerSourceMessage = e.data;
           if (message.type === "dataWiped") {
             console.log(
               "Got data wipe confirm, uninstalling service worker now",
             );
-            const registrations =
-              await navigator.serviceWorker.getRegistrations();
-            for (const registration of registrations) {
-              await registration.unregister();
-            }
-            console.log("Unregistered all service workers");
-            resolve();
+            void unregister();
           }
         });
         navigator.serviceWorker?.getRegistration().then((registration) => {

@@ -60,6 +60,7 @@ export function App({
         hideEdgeLabels={state.filters.hideEdgeLabels}
         hideOrphans={state.filters.hideOrphans}
         hops={state.semantic.hops}
+        scope={state.allExpanded ? "space" : "page"}
         emit={emit}
       />
       <div
@@ -94,6 +95,7 @@ export function App({
           nodes={view.visibleNodes}
           edges={view.visibleEdges}
           selectedRef={state.selectedRef}
+          rootRef={state.allExpanded ? null : state.rootRef}
           hideEdgeLabels={state.filters.hideEdgeLabels}
           forces={state.forces}
           empty={

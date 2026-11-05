@@ -29,6 +29,33 @@ const EMPTY_NOTE_LIFT = 64;
 // Ticks the force simulation runs before the first paint when motion is
 // reduced: enough to settle, so the graph appears at rest.
 const SETTLE_TICKS = 300;
+// (BlackBullet) Graphs up to this many nodes are laid out before they are
+// painted; larger ones animate into place.
+const SETTLE_BEFORE_PAINT_MAX = 400;
+// (BlackBullet) How firmly a node is held on its ring around the root.
+const RADIAL_STRENGTH = 0.35;
+
+/** (BlackBullet) Links from `root` to every node it reaches. */
+export function hopsFrom(
+  root: string,
+  adjacency: Map<string, Set<string>>,
+): Map<string, number> {
+  const hops = new Map<string, number>([[root, 0]]);
+  let frontier = [root];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const nb of adjacency.get(id) ?? []) {
+        if (hops.has(nb)) continue;
+        hops.set(nb, (hops.get(id) ?? 0) + 1);
+        next.push(nb);
+      }
+    }
+    frontier = next;
+  }
+  return hops;
+}
+
 // How long an idle canvas stays awake when motion is reduced (see wake()).
 const IDLE_PAUSE_MS = 400;
 
@@ -38,6 +65,10 @@ type Props = {
   nodes: { node: ObjectNode; status: NodeStatus }[];
   edges: Edge[];
   selectedRef: string | null;
+  /** (BlackBullet) The page the graph was opened on: pinned at the centre,
+   * with the others in rings by how many links away they are. Null in the
+   * whole-space view, which has no centre. */
+  rootRef: string | null;
   hideEdgeLabels: boolean;
   forces: ForceSettings;
   /** Set when the page has nothing to draw but itself: the canvas says why. */
@@ -613,9 +644,13 @@ export class GraphCanvas extends Component<Props, State> {
     }
 
     if (prevProps.selectedRef !== this.props.selectedRef) {
-      // Selected-node ring change: force a repaint.
+      // Selected-node ring change: force a repaint (its lines too, which
+      // show their arrows and words while it is selected).
       const fg = this.fg;
-      if (fg) fg.nodeCanvasObject(fg.nodeCanvasObject());
+      if (fg) {
+        fg.nodeCanvasObject(fg.nodeCanvasObject());
+        fg.linkCanvasObject(fg.linkCanvasObject());
+      }
       this.wake();
     }
 
@@ -712,6 +747,27 @@ export class GraphCanvas extends Component<Props, State> {
       }
     }
 
+    // (BlackBullet) The page it was opened on sits still at the centre, and
+    // the rest settle in rings by their distance from it, so the picture
+    // keeps its shape as pages are added.
+    const root = this.props.rootRef;
+    const hops = root ? hopsFrom(root, adjacency) : new Map<string, number>();
+    for (const n of nodes) {
+      if (n.id === root && n.fx === undefined) {
+        n.fx = 0;
+        n.fy = 0;
+      }
+    }
+    const ring = this.props.forces.linkDistance;
+    fg.d3Force(
+      "radial",
+      root
+        ? d3
+            .forceRadial<FGNode>((n) => (hops.get(n.id) ?? 3) * ring, 0, 0)
+            .strength((n) => (n.id === root ? 0 : RADIAL_STRENGTH))
+        : null,
+    );
+
     fg.graphData({ nodes, links });
     // Re-apply our link-force tuning. force-graph's update() runs after
     // graphData and rebinds the link set from the merged links, but
@@ -727,8 +783,14 @@ export class GraphCanvas extends Component<Props, State> {
     // from-scratch layout settles in a few hundred ms instead of the
     // engine's multi-second default. recenter() handles the single-node and
     // MAX_AUTO_ZOOM cases.
-    this.pendingFit = true;
-    if (this.reduceMotion) {
+    // (BlackBullet) Framed the first time, and later only while the person
+    // has not moved the camera: an expansion no longer swings the view.
+    this.pendingFit = !this.fedOnce || !this.cameraTouched;
+    // (BlackBullet) Settled before it is painted, not only under reduced
+    // motion: the graph appears at rest instead of shaking into place. A
+    // very large graph (the whole space) still animates, so opening it does
+    // not freeze the page.
+    if (this.reduceMotion || nodes.length <= SETTLE_BEFORE_PAINT_MAX) {
       // Settle before the first paint: the engine runs its ticks now, stops
       // after the next one, and onEngineStop frames the camera.
       fg.warmupTicks(SETTLE_TICKS).cooldownTicks(0);
@@ -801,6 +863,15 @@ export class GraphCanvas extends Component<Props, State> {
     const hov = this.hoveredId;
     if (!hov) return false;
     return getId(link.source) === hov || getId(link.target) === hov;
+  }
+
+  /** (BlackBullet) A line of the selected node: it shows its arrow and word.
+   * Not the centre page's: every line of a page's own graph touches it, so
+   * selecting it (as on opening) would label them all. */
+  private linkTouchesSelected(link: FGLink): boolean {
+    const sel = this.props.selectedRef;
+    if (!sel || sel === this.props.rootRef) return false;
+    return getId(link.source) === sel || getId(link.target) === sel;
   }
 
   private drawNode(node: FGNode, ctx: CanvasRenderingContext2D, scale: number) {
@@ -948,8 +1019,11 @@ export class GraphCanvas extends Component<Props, State> {
     ctx.setLineDash([]);
     ctx.lineCap = "butt";
 
-    // Arrowheads — skip on undirected co-mention collapses.
-    if (!link.edge.undirected) {
+    // Arrowheads — skip on undirected co-mention collapses. (BlackBullet) Only
+    // on the lines of the hovered or selected node: drawn on every line they
+    // were most of the ink and said little.
+    const focused = touches || this.linkTouchesSelected(link);
+    if (!link.edge.undirected && focused) {
       const headLen = 7 / scale;
       const drawHead = (hx: number, hy: number, angle: number) => {
         ctx.beginPath();
@@ -976,9 +1050,9 @@ export class GraphCanvas extends Component<Props, State> {
     // Suppressed entirely when the global "hide labels" toggle is on,
     // unless the edge is incident to the hovered node.
     const label = link.edge.label;
-    const labelsAllowed = !this.props.hideEdgeLabels || touches;
+    const labelsAllowed = !this.props.hideEdgeLabels || focused;
     const showLabel =
-      label && labelsAllowed && (touches || scale >= EDGE_LABEL_MIN_SCALE);
+      label && labelsAllowed && (focused || scale >= EDGE_LABEL_MIN_SCALE);
     if (showLabel) {
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;

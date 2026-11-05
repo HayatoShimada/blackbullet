@@ -230,7 +230,7 @@ group: status
   * Projects のビューでは、`project` でそのプロジェクトを指すページと、そのページのチェックボックス行が、プロジェクトの下に入ります。
   * 依存関係: `blockedBy` に別の行があると、その行の終わりからこの行の始まりへ矢印が出ます。先に始まってしまう(重なる)ものは赤です。横棒の右端の丸を別の横棒へドラッグすると「その行がこの行を待つ」ようにつなぎます(輪になるつなぎ方は断ります)。矢印をクリックすると「Remove dependency」で外せます。待たれている横棒を動かすと、重なった分だけ後ろの行も後ろへずれ、「Moved to Oct 3 – Oct 7 · 1 pushed later · Undo」が出ます。Undo で全部元に戻ります。
   * タスク(チェックボックス行)の日付は、行の `[start: ...]` と `[due: ...]` に書かれます。
-* ヘッダは左から、タイトルと件数・Table / Board / Calendar / Timeline・「Filter…」・「+ New」・「⋯」です。「⋯」に「Save view」(いまのタブ・並べ替え・絞り込み、Timeline ならズームとグループを、ブロックへ書き戻す)と「Reload」があります。
+* ヘッダは左から、タイトルと件数・Table / Board / Calendar / Timeline・「Filter…」・「+ New」・「⋯」です。「⋯」に「Save view」(いまのタブ・並べ替え・絞り込み、Timeline ならズームとグループを、ブロックへ書き戻す)と「Reload」があります。表は、ほかのタブやエージェント、ディスク上での変更を索引が取り込むと自動で読み直します(セルの編集中・メニューやドラッグの最中は、終わるまで待ちます)。
 * 書き換えは Markdown のファイルへ直接書かれます(ページの frontmatter、またはタスクの行)。
 * **表示を読んだあとにページが変わっていたら、書き込みません**(「ページが変わっています」と出て、表示を読み直します)。
 * タスクで書き換えられるのは、完了と期限(Timeline では開始も)だけです。ページの名前・タグ・タスク数は表では編集しません。
@@ -265,7 +265,11 @@ group: status
 * 検索語の頭に `in:Projects/`(`folder:` でも可)や `kind:pdf` を書くと、範囲を絞れます。入力すると、ヒントが出ます。
 * PDF・Word・Excel・PowerPoint・OpenDocument・HTML の中身も検索できます(結果に `PDF p.3` のような位置が付きます)。
 * ${widgets.commandButton("Search: Related Notes")}(`Ctrl-q r`): ページ下部に、関連ノート(Related notes)を出します。1 行目に件数が出て、各ページは名前(パスの最後の部分)と、薄いフォルダ、Similar(意味が近い)・Linked(リンクされている)・Similar · Linked の印で並びます。
-* ${widgets.commandButton("Graph: Explore")}(`Ctrl-Shift-g`): 明示リンクに加えて、意味の近いページ(Similar pages)同士を破線でつなぎます。${widgets.commandButton("Graph: Global Page Map")} は、ページ全体の地図です。
+* ${widgets.commandButton("Graph: Open")}(`Ctrl-Shift-g`、ヘッダのグラフのボタン、スマホではドロワーの「Graph」): いま開いているページを真ん中に置き、そこから 1 つ先のページを周りに並べます。明示リンクに加えて、意味の近いページ(Similar pages)を 2 件まで破線でつなぎます。
+  * 上の「This page | Whole space」で、このページの周りとページ全体の地図を切り替えます。
+  * 線の矢印と言葉は、ノードにマウスを乗せたときと、選んだときだけ出ます(サイドバーの Hide labels を外すと、いつも出ます)。
+  * 最初から落ち着いた配置で出ます。ページを開いていくと、真ん中のページからの距離ごとに輪になって並びます。
+  * 範囲を広げるときは Hops を 2 や 3、All にします。${widgets.commandButton("Graph: Explore")} と ${widgets.commandButton("Graph: Global Page Map")} は、それぞれの表示で開く以前からのコマンドです。
 
 # 質問(Ask)
 ${widgets.commandButton("Ask: Notes")}(`Ctrl-q a`)は、質問を入力すると、ノートの関連する節を根拠に AI が答えます。出典は `[1]` のリンクで、押すとその節へ移ります。答えのあとに、引用した出典と、送ったが引用されなかった節、入力サイズの目安が付きます。設定は `memoAsk`(詳細は [[Library/Std/Editor/Memo Ask]])です。
@@ -277,17 +281,55 @@ ${widgets.commandButton("Ask: Notes")}(`Ctrl-q a`)は、質問を入力すると
 * 質問の頭に `#タグ` `in:フォルダ/`(`folder:` でも可)`kind:pdf` `area:` `status:` `since:2026-01-01` を書くと、範囲を絞れます。
 
 # スマホで使う
-スマホは、書き留める・読む・チェックする・探す・ページを移す、ための道具です。ツリー(左上のボタンで開くドロワー)の上に、指 1 本で押せるボタンが 3 つ並びます。
+スマホは、書き留める・読む・チェックする・探す・ページを移す、ための道具です。ツリー(左上のボタンで開くドロワー)の上に、指 1 本で押せるボタンが並びます。
 
 | ボタン | できること |
 | --- | --- |
 | Search | 検索を開きます |
 | + New | 新規作成の一覧(Page here · Row in … · Quick note · Journal: Today)を開きます |
 | Journal | 今日のジャーナルを開きます |
+| Today | 今日やること([[^Library/Std/Pages/Today]])を開きます |
+| Graph | いまのページのグラフを開きます |
 
 * 行の操作は、各行の「⋯」(44px)から出ます。ドラッグの代わりに「Move to…」を使います。
 * Table は、狭い画面ではカードの並びになります(名前、そのあとに「Status active · Due 2026-10-14」)。セルは 1 回タップで編集できます。
-* データベースの定義、CONFIG の編集、ビューの保存、ブロックのドラッグ、グラフの探索は、パソコン向けです。
+* データベースの定義、CONFIG の編集、ビューの保存、ブロックのドラッグは、パソコン向けです。
+
+## アプリとして入れる
+ブラウザでこのアプリを開き、ホーム画面に追加します(Android の Chrome は「ホーム画面に追加」または「アプリをインストール」、iPhone の Safari は「共有 → ホーム画面に追加」)。全画面で開き、オフラインでも開けます。
+
+ホーム画面のアイコンを長押しすると、ショートカットが出ます。
+
+| ショートカット | 開くもの |
+| --- | --- |
+| Quick note | 書き留める画面(下から出ます)。書いて「Save as Quick Note」(受信箱へ)か「Add to today's journal」(今日のジャーナルの末尾に `* 09:12 …` で 1 行)を選びます |
+| Today | 今日やること |
+| Journal | 今日のジャーナル |
+| Graph | いまのページのグラフ |
+
+* Android では、ほかのアプリの「共有」からこのアプリを選ぶと、同じ書き留める画面に入ります(リンク・文章・ファイル)。iPhone は共有メニューから送れないので、Quick note のショートカットを使います。
+* 何も書かずに閉じた書き留めは、残りません。
+
+## 今日やること(Today)
+[[^Library/Std/Pages/Today]] は、期限切れ・今日が期限・今週のタスクと、`todo` のページで次にやるもの(`status: next`)、期限が来たもの、受信箱の件数を 1 枚に並べます。チェックで完了、日付をタップで変更できます。どれもタスクの行やページの frontmatter に書かれます。
+
+## 通知
+毎朝(既定 8:00)、今日が期限のものと期限切れの件数を、先頭 3 件の題名と一緒に知らせます。押すと Today が開きます。何も無い日は来ません。
+
+* ${widgets.commandButton("Notifications: Turn On")} で、その端末で受け取るようにします(端末ごとに 1 回)。${widgets.commandButton("Notifications: Send Test")} で、すぐに 1 通送って確かめられます。止めるときは ${widgets.commandButton("Notifications: Turn Off")}。
+* iPhone・iPad は、ホーム画面に追加したアプリの中でだけ受け取れます(iOS 16.4 以降)。ホーム画面から開いて、そこで Turn On を実行します。
+* 送るのは、アプリの隣で動く検索サービスです。時刻・タイムゾーン・題名を出すかどうかは、サービスの設定で変えます(README の Phone and other devices)。中身は端末向けに暗号化され、運ぶ側(Google・Apple など)には読めません。
+
+# 新しい版
+
+開いたままのタブも、30 分ごとと、タブに戻ったとき(1 分以上あいていれば)に新しい版を確かめます。新しい版が見つかると「A new version is ready」と出るので、「Reload」で切り替えてください。新しい版は、Reload を押すまで動いているタブに割り込みません。再読み込みした直後に見つかった版は、保存待ちの編集がなければそのまま読み込み直すので、再読み込みは 1 回で済みます。
+
+* ページを開くときは、まずサーバーに取りに行きます。オフラインのときや、4 秒待っても返事がないときは、端末に入っている版で開きます。
+* 1 つ前の版は端末に残しておくので、古い版のまま開いていたタブも、再読み込みするまで動き続けます。
+
+## 表示がおかしいとき
+
+${widgets.commandButton("Client: Reset Cache")} は、端末に入っているアプリ本体(キャッシュと Service Worker)を捨てて、サーバーから読み込み直します。ノートは端末に残り、まだ送っていない編集は読み込み直したあとに送られます。サーバーにつながらないときは何もしません(読み込み直せなくなるため)。ノートの控えまで消したいときは「Client: Wipe」を使います(こちらは送っていない編集も消えます)。
 
 # 設定
 
@@ -321,6 +363,7 @@ local FORK_COMMANDS = {
   "Page: Remove Cover",
   "Search: Notes",
   "Search: Related Notes",
+  "Graph: Open",
   "Graph: Explore",
   "Graph: Global Page Map",
   "Ask: Notes",
@@ -340,6 +383,10 @@ local FORK_COMMANDS = {
   "Export: Word",
   "Export: Markdown with Images",
   "Help: Fork Guide",
+  "Client: Reset Cache",
+  "Notifications: Turn On",
+  "Notifications: Send Test",
+  "Notifications: Turn Off",
 }
 
 -- A binding is a string, or a list of them.
