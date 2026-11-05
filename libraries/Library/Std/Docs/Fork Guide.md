@@ -265,7 +265,11 @@ group: status
 * 検索語の頭に `in:Projects/`(`folder:` でも可)や `kind:pdf` を書くと、範囲を絞れます。入力すると、ヒントが出ます。
 * PDF・Word・Excel・PowerPoint・OpenDocument・HTML の中身も検索できます(結果に `PDF p.3` のような位置が付きます)。
 * ${widgets.commandButton("Search: Related Notes")}(`Ctrl-q r`): ページ下部に、関連ノート(Related notes)を出します。1 行目に件数が出て、各ページは名前(パスの最後の部分)と、薄いフォルダ、Similar(意味が近い)・Linked(リンクされている)・Similar · Linked の印で並びます。
-* ${widgets.commandButton("Graph: Explore")}(`Ctrl-Shift-g`): 明示リンクに加えて、意味の近いページ(Similar pages)同士を破線でつなぎます。${widgets.commandButton("Graph: Global Page Map")} は、ページ全体の地図です。
+* ${widgets.commandButton("Graph: Open")}(`Ctrl-Shift-g`、ヘッダのグラフのボタン、スマホではドロワーの「Graph」): いま開いているページを真ん中に置き、そこから 1 つ先のページを周りに並べます。明示リンクに加えて、意味の近いページ(Similar pages)を 2 件まで破線でつなぎます。
+  * 上の「This page | Whole space」で、このページの周りとページ全体の地図を切り替えます。
+  * 線の矢印と言葉は、ノードにマウスを乗せたときと、選んだときだけ出ます(サイドバーの Hide labels を外すと、いつも出ます)。
+  * 最初から落ち着いた配置で出ます。ページを開いていくと、真ん中のページからの距離ごとに輪になって並びます。
+  * 範囲を広げるときは Hops を 2 や 3、All にします。${widgets.commandButton("Graph: Explore")} と ${widgets.commandButton("Graph: Global Page Map")} は、それぞれの表示で開く以前からのコマンドです。
 
 # 質問(Ask)
 ${widgets.commandButton("Ask: Notes")}(`Ctrl-q a`)は、質問を入力すると、ノートの関連する節を根拠に AI が答えます。出典は `[1]` のリンクで、押すとその節へ移ります。答えのあとに、引用した出典と、送ったが引用されなかった節、入力サイズの目安が付きます。設定は `memoAsk`(詳細は [[Library/Std/Editor/Memo Ask]])です。
@@ -332,6 +336,7 @@ local FORK_COMMANDS = {
   "Page: Remove Cover",
   "Search: Notes",
   "Search: Related Notes",
+  "Graph: Open",
   "Graph: Explore",
   "Graph: Global Page Map",
   "Ask: Notes",

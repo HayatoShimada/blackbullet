@@ -7,11 +7,11 @@ import {
 } from "./graph_builder.ts";
 import { buildGraphHtml } from "./graph_html.ts";
 import {
-  defaultFilters,
   defaultForceSettings,
   type ExpansionResult,
   type Filters,
   type ForceSettings,
+  migrateFilters,
   migrateSemanticSettings,
   type RootViewModel,
   type SemanticSettings,
@@ -25,8 +25,7 @@ async function loadFilters(): Promise<Filters> {
   const raw = (await datastore.get(FILTERS_KEY)) as
     | Partial<Filters>
     | undefined;
-  if (!raw) return defaultFilters;
-  return { ...defaultFilters, ...raw } as Filters;
+  return migrateFilters(raw);
 }
 
 async function loadForces(): Promise<ForceSettings> {
@@ -63,6 +62,12 @@ export async function showGraph() {
   const view: RootViewModel = { root, universe, filters, forces, semantic };
   const { html, script } = await buildGraphHtml(view);
   await editor.showPanel("modal", 100, html, script);
+}
+
+/** (BlackBullet) "Graph: Open": the graph around the current page; the panel
+ * switches to the whole space and back. */
+export async function openGraph() {
+  await showGraph();
 }
 
 /**
@@ -102,7 +107,8 @@ export async function showGlobalGraph() {
       hideOrphans: false,
     },
     forces: await loadForces(),
-    semantic: await loadSemantic(),
+    // (BlackBullet) The whole space has no centre to count hops from.
+    semantic: { ...(await loadSemantic()), hops: 0 },
     initialAllExpanded: true,
     persistFilters: false,
   };
