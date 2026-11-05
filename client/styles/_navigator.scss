@@ -812,6 +812,7 @@
 
   .sb-nav-entry-points {
     display: grid;
+    // (BlackBullet) Search · New · Journal, then Today · Graph.
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
 

@@ -14,6 +14,9 @@ import { defaultSegmentIndex } from "./segments.ts";
 import { EXPAND_ROW } from "../views/types.ts";
 import { createTreeCommands } from "./tree_commands.ts";
 
+/** (BlackBullet) The page of what is due, from the Std library. */
+export const TODAY_PAGE = "Library/Std/Pages/Today";
+
 export type CommandDeps = {
   slot: string;
   view?: ActiveView;
@@ -354,10 +357,20 @@ export function createCommands({
   }
 
   /** The phone drawer's one-tap doors: the drawer gets out of the way first. */
-  async function runEntryPoint(which: "search" | "journal") {
+  async function runEntryPoint(
+    which: "search" | "journal" | "today" | "graph",
+  ) {
     await dismiss();
     if (which === "journal") {
       await editor.invokeCommand("Journal: Today");
+      return;
+    }
+    if (which === "today") {
+      await editor.navigate(TODAY_PAGE);
+      return;
+    }
+    if (which === "graph") {
+      await editor.invokeCommand("Graph: Open");
       return;
     }
     // Search was "Memo: Search" before it was named for what it does.

@@ -67,6 +67,33 @@ export function JournalIcon(): JSX.Element {
   );
 }
 
+/** A ticked box: the Today page. */
+export function TodayIcon(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      {...CHROME_ICON_PROPS}
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <path d="M5.5 8.25l1.75 1.75 3.5-3.75" />
+    </svg>
+  );
+}
+
+/** Three linked dots: the graph. */
+export function GraphIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 16 16" {...CHROME_ICON_PROPS} stroke-linecap="round">
+      <circle cx="4" cy="4.5" r="1.75" />
+      <circle cx="12" cy="6" r="1.75" />
+      <circle cx="6.5" cy="12" r="1.75" />
+      <path d="M5.7 4.8l4.6.9M4.7 6.1l1.2 4.2M10.7 7.2l-2.9 3.6" />
+    </svg>
+  );
+}
+
 /** The `⋯` as a template node, for the places that draw icons from nodes. */
 let moreNode: Element | undefined;
 export function moreIconNode(): Element | undefined {

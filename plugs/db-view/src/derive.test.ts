@@ -10,6 +10,7 @@ import {
   normalizeDate,
   pageCrumb,
   pageName,
+  relativeDay,
   rowsByDate,
   selectOptions,
   shiftMonth,
@@ -512,5 +513,24 @@ describe("a page's name for a person", () => {
   test("a top-level page has no breadcrumb", () => {
     expect(pageName("Tasks")).toBe("Tasks");
     expect(pageCrumb("Tasks")).toBe("");
+  });
+});
+
+describe("relative days", () => {
+  test("today±N is a day counted from today, across months", () => {
+    expect(relativeDay("today", "2026-11-05")).toBe("2026-11-05");
+    expect(relativeDay("today+7", "2026-11-28")).toBe("2026-12-05");
+    expect(relativeDay("today-5", "2026-03-02")).toBe("2026-02-25");
+    expect(relativeDay("todayish", "2026-11-05")).toBe("todayish");
+    expect(relativeDay(3, "2026-11-05")).toBe(3);
+  });
+
+  test("a week ahead, as a where condition", () => {
+    const row = (due: string) =>
+      ({ id: due, kind: "task", values: { due } }) as unknown as DbRow;
+    const soon = { due: { after: "today", lte: "today+7" } };
+    expect(matchesWhere(row("2026-11-12"), soon, "2026-11-05")).toBe(true);
+    expect(matchesWhere(row("2026-11-13"), soon, "2026-11-05")).toBe(false);
+    expect(matchesWhere(row("2026-11-05"), soon, "2026-11-05")).toBe(false);
   });
 });

@@ -155,9 +155,19 @@ function isOperators(c: unknown): c is Operators {
   return typeof c === "object" && c !== null && !Array.isArray(c);
 }
 
+/** `today`, `today+7`, `today-1` as an ISO day; anything else unchanged. */
+export function relativeDay(v: Scalar, today: string): Scalar {
+  if (v === "today") return today;
+  const m = typeof v === "string" ? /^today([+-]\d+)$/.exec(v) : null;
+  if (!m) return v;
+  const d = new Date(`${today}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + Number(m[1]));
+  return d.toISOString().slice(0, 10);
+}
+
 function holds(actual: unknown, cond: Scalar | Operators, today: string) {
   if (!isOperators(cond)) return equalsLoose(actual, cond);
-  const arg = (v: Scalar) => (v === "today" ? today : v);
+  const arg = (v: Scalar) => relativeDay(v, today);
   const empty = isEmpty(actual);
   // A comparison needs a value to compare; a missing one fails it.
   const cmp = (v: Scalar | undefined, ok: (c: number) => boolean) =>
