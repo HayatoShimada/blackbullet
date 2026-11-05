@@ -507,7 +507,10 @@ self.addEventListener("fetch", (event: any) => {
     event.request.mode === "navigate" &&
     url.origin === location.origin &&
     url.pathname === `${basePathName}/` &&
-    captureId
+    captureId &&
+    // (BlackBullet) A new capture is an ordinary page load (network first,
+    // the precached shell offline), handled by the router below.
+    captureId !== "new"
   ) {
     event.respondWith(
       (async () => {

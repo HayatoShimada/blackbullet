@@ -9,6 +9,7 @@ import { initLogger } from "./lib/logger.ts";
 import { extractSpaceLuaFromPageText, loadConfig } from "./boot_config.ts";
 import { Client } from "./client.ts";
 import { reloadOnStaleChunks, watchForUpdates } from "./app_update.ts";
+import { bootCommand } from "./boot_open.ts";
 import type { Config } from "./config.ts";
 import {
   flushCachesAndUnregisterServiceWorker,
@@ -168,6 +169,8 @@ safeRun(async () => {
   const isHeadless = new URLSearchParams(location.search).has("headless");
   globalThis.sbRuntime.captureId =
     new URLSearchParams(location.search).get("capture") ?? undefined;
+  // (BlackBullet) A shortcut of the installed app (Journal, Graph).
+  globalThis.sbRuntime.openOnBoot = bootCommand(location.search);
   const reviewGitConflicts =
     new URLSearchParams(location.search).get("gitConflicts") === "1";
   // Expose headless flag on the runtime bridge so client.init() can detect

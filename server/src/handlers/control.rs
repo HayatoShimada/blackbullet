@@ -67,6 +67,17 @@ struct ManifestIcon {
     #[serde(rename = "type")]
     icon_type: String,
     sizes: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<&'static str>,
+}
+
+/// (BlackBullet) A home-screen shortcut (long press on the app's icon).
+#[derive(serde::Serialize)]
+struct ManifestShortcut {
+    name: &'static str,
+    short_name: &'static str,
+    url: String,
+    icons: Vec<ManifestIcon>,
 }
 
 #[derive(serde::Serialize)]
@@ -95,6 +106,7 @@ struct ManifestShareTarget {
 /// spec (snake_case), so they are serialized verbatim.
 #[derive(serde::Serialize)]
 struct Manifest {
+    id: String,
     short_name: String,
     name: String,
     icons: Vec<ManifestIcon>,
@@ -104,7 +116,9 @@ struct Manifest {
     display_override: Vec<String>,
     scope: String,
     theme_color: String,
+    background_color: String,
     description: String,
+    shortcuts: Vec<ManifestShortcut>,
     #[serde(skip_serializing_if = "Option::is_none")]
     share_target: Option<ManifestShareTarget>,
 }
@@ -120,21 +134,57 @@ pub async fn handle_manifest(
         && !state.boot_config.read_only
         && !state.boot_config.enable_client_encryption
         && !state.boot_config.disable_service_worker;
+    let icon = |file: &str, sizes: &str, purpose: Option<&'static str>| ManifestIcon {
+        src: format!("{prefix}/.client/{file}"),
+        icon_type: "image/png".to_string(),
+        sizes: sizes.to_string(),
+        purpose,
+    };
+    let shortcut = |name, short_name, url: String| ManifestShortcut {
+        name,
+        short_name,
+        url,
+        icons: vec![icon("logo-maskable-192.png", "192x192", None)],
+    };
+    // (BlackBullet) Quick note writes, so it is offered only where a capture
+    // can be saved (the same rule as the share target).
+    let mut shortcuts = Vec::new();
+    if eligible {
+        shortcuts.push(shortcut(
+            "Quick note",
+            "Note",
+            format!("{prefix}/?capture=new"),
+        ));
+    }
+    shortcuts.push(shortcut(
+        "Today",
+        "Today",
+        format!("{prefix}/Library/Std/Pages/Today"),
+    ));
+    shortcuts.push(shortcut(
+        "Journal",
+        "Journal",
+        format!("{prefix}/?open=journal"),
+    ));
+    shortcuts.push(shortcut("Graph", "Graph", format!("{prefix}/?open=graph")));
     let manifest = Manifest {
+        id: format!("{prefix}/"),
         short_name: state.boot_config.space_name.clone(),
         name: state.boot_config.space_name.clone(),
-        icons: vec![ManifestIcon {
-            src: format!("{prefix}/.client/logo-dock.png"),
-            icon_type: "image/png".to_string(),
-            sizes: "512x512".to_string(),
-        }],
+        icons: vec![
+            icon("logo-dock.png", "512x512", None),
+            icon("logo-maskable-192.png", "192x192", Some("maskable")),
+            icon("logo-maskable-512.png", "512x512", Some("maskable")),
+        ],
         capture_links: "new-client".to_string(),
         start_url: format!("{prefix}/#boot"),
         display: "standalone".to_string(),
         display_override: vec!["window-controls-overlay".to_string()],
         scope: format!("{prefix}/"),
         theme_color: state.theme_color.clone(),
+        background_color: state.theme_color.clone(),
         description: state.space_description.clone(),
+        shortcuts,
         share_target: eligible.then(|| ManifestShareTarget {
             action: format!("{prefix}/.client/share-target"),
             method: "POST",
@@ -314,6 +364,40 @@ mod tests {
         assert_eq!(v["icons"][0]["type"], "image/png");
         assert_eq!(v["theme_color"], "#e1e1e1");
         assert!(v.get("share_target").is_none());
+        // (BlackBullet) maskable icons, an id, and the home-screen shortcuts;
+        // no Quick note where a capture cannot be saved.
+        assert_eq!(v["id"], "/");
+        assert_eq!(v["icons"][1]["purpose"], "maskable");
+        let names: Vec<_> = v["shortcuts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, ["Today", "Journal", "Graph"]);
+        assert_eq!(v["shortcuts"][0]["url"], "/Library/Std/Pages/Today");
+    }
+
+    #[tokio::test]
+    async fn writable_space_manifest_offers_a_quick_note_shortcut() {
+        let mut state = test_state();
+        state.boot_config.disable_service_worker = false;
+        let app = crate::build_router(Arc::new(state));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/.client/manifest.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(manifest["shortcuts"][0]["name"], "Quick note");
+        assert_eq!(manifest["shortcuts"][0]["url"], "/?capture=new");
     }
 
     #[tokio::test]

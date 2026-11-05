@@ -138,6 +138,8 @@ function pickerSegment(mode: "page" | "meta" | "document" | "all") {
 export type SBRuntime = {
   headless?: boolean;
   captureId?: string;
+  /** (BlackBullet) A command to run once the app is up (`?open=`). */
+  openOnBoot?: string;
   ready?: boolean;
   evalLua?: (expr: string) => Promise<unknown>;
   evalLuaScript?: (script: string) => Promise<unknown>;
@@ -401,6 +403,12 @@ export class Client {
     await timedSpan("init-navigator", () => this.initNavigator());
     await this.eventHook.dispatchEvent("system:ready");
     this.systemReady = true;
+    const openOnBoot = globalThis.sbRuntime?.openOnBoot;
+    if (openOnBoot) {
+      void this.runCommandByName(openOnBoot).catch((e) =>
+        console.warn("Could not open", openOnBoot, e),
+      );
+    }
     performance.mark("sb:system-ready");
     this.maybeDispatchWidgetsReady();
 

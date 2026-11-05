@@ -134,6 +134,15 @@ async function copyAssets(dist: string) {
   await cp("client/images/logo-dock.png", `${dist}/logo-dock.png`);
   // Avoid loading the 405 KB original for a ~26 CSS px wordmark.
   await cp("client/images/logo-dock-96x96.png", `${dist}/logo-dock-96x96.png`);
+  // (BlackBullet) Full-bleed icons for Android's masked launcher shapes.
+  await cp(
+    "client/images/logo-maskable-192.png",
+    `${dist}/logo-maskable-192.png`,
+  );
+  await cp(
+    "client/images/logo-maskable-512.png",
+    `${dist}/logo-maskable-512.png`,
+  );
 
   // Keep components.css's name: panelStyles() and plug documentation rely on it.
   for (const [entry, output] of [

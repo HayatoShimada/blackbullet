@@ -65,3 +65,39 @@
   right: 1rem;
   z-index: 1099;
 }
+
+// (BlackBullet) On a phone the capture is a sheet from the bottom: the
+// keyboard pushes it up, the thumb reaches the actions, and 16px fields keep
+// iOS from zooming in.
+@media (max-width: 600px) {
+  .sb-capture-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .sb-capture {
+    border-radius: var(--sb-radius-3) var(--sb-radius-3) 0 0;
+    border-bottom: 0;
+    max-height: calc(100% - var(--sb-top-height, 0px));
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    width: 100%;
+  }
+
+  .sb-capture input,
+  .sb-capture textarea {
+    font-size: 16px;
+  }
+
+  .sb-capture-actions {
+    flex-direction: column;
+
+    button {
+      min-height: 44px;
+      width: 100%;
+    }
+  }
+
+  .sb-capture-pending {
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
